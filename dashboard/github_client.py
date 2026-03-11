@@ -311,11 +311,14 @@ class GitHubClient:
             data = response.json()
             if 'errors' in data:
                 print(f"GraphQL errors: {data['errors']}")
-                return []
 
             # Parse results
             result = []
             repo_data = data.get('data', {}).get('repository', {})
+
+            if not repo_data:
+                print(f"ERROR: No repository data in GraphQL response")
+                return []
 
             for i, pr_num in enumerate(pr_numbers[:100]):
                 pr_data = repo_data.get(f'pr{i}')
@@ -357,7 +360,6 @@ class GitHubClient:
 
         except Exception as e:
             print(f"ERROR: Batch GraphQL fetch failed: {e}")
-            # Fallback to REST API if GraphQL fails
             return []
 
     def _parse_ci_status_from_graphql(self, pr_data: dict) -> CIStatus:
@@ -371,34 +373,59 @@ class GitHubClient:
             if not rollup:
                 return CIStatus(state='unknown')
 
-            state = rollup.get('state', 'UNKNOWN').lower()
-            # Map GraphQL states to our states
-            state_map = {
-                'success': 'success',
-                'pending': 'pending',
-                'failure': 'failure',
-                'error': 'failure',
-                'expected': 'pending',
-                'unknown': 'unknown',
-            }
-            state = state_map.get(state, 'unknown')
+            contexts_data = rollup.get('contexts', {})
+            total_count = contexts_data.get('totalCount', 0)
+            contexts = contexts_data.get('nodes', [])
 
-            contexts = rollup.get('contexts', {}).get('nodes', [])
-            total_count = len(contexts)
-            passed_count = 0
+            if total_count == 0:
+                return CIStatus(state='unknown')
+
+            # Count check runs by conclusion/state (matching REST API logic)
+            success_count = 0
+            failure_count = 0
+            skipped_count = 0
+            pending_count = 0
 
             for context in contexts:
                 # Check if it's a CheckRun or StatusContext
                 if 'conclusion' in context:  # CheckRun
-                    if context.get('conclusion') == 'success':
-                        passed_count += 1
+                    conclusion = context.get('conclusion')
+                    status = context.get('status')
+
+                    if conclusion == 'SUCCESS':
+                        success_count += 1
+                    elif conclusion in ('FAILURE', 'CANCELLED', 'TIMED_OUT'):
+                        failure_count += 1
+                    elif conclusion in ('SKIPPED', 'NEUTRAL', 'STALE'):
+                        skipped_count += 1
+                    elif conclusion is None and status in ('QUEUED', 'IN_PROGRESS'):
+                        # If no conclusion yet, check status
+                        pending_count += 1
+
                 elif 'state' in context:  # StatusContext
-                    if context.get('state') == 'success':
-                        passed_count += 1
+                    state_value = context.get('state')
+                    if state_value == 'SUCCESS':
+                        success_count += 1
+                    elif state_value in ('FAILURE', 'ERROR'):
+                        failure_count += 1
+                    elif state_value == 'PENDING':
+                        pending_count += 1
+
+            # Determine overall state (matching REST API logic)
+            if failure_count > 0:
+                state = 'failure'
+            elif pending_count > 0:
+                state = 'pending'
+            elif success_count > 0:
+                state = 'success'
+            elif skipped_count == total_count:
+                state = 'success'
+            else:
+                state = 'unknown'
 
             return CIStatus(
                 state=state,
-                passed_count=passed_count,
+                passed_count=success_count,
                 total_count=total_count
             )
         except Exception as e:
