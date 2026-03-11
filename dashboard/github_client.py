@@ -1,0 +1,318 @@
+"""GitHub API client for fetching PR information."""
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Optional, TYPE_CHECKING
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+if TYPE_CHECKING:
+    from github import Github, GithubException
+
+
+@dataclass
+class CIStatus:
+    """Represents the CI status of a pull request."""
+    state: str  # 'success', 'pending', 'failure', 'error', or 'unknown'
+    passed_count: int = 0
+    total_count: int = 0
+    context: Optional[str] = None
+    description: Optional[str] = None
+    target_url: Optional[str] = None
+
+
+@dataclass
+class PullRequestInfo:
+    """Represents a pull request with relevant information."""
+    number: int
+    title: str
+    url: str
+    repo_owner: str
+    repo_name: str
+    author: str
+    author_avatar: str
+    created_at: datetime
+    updated_at: datetime
+    labels: list[dict]
+    ci_status: CIStatus
+    draft: bool
+    additions: int
+    deletions: int
+
+    @property
+    def repo_full_name(self) -> str:
+        return f"{self.repo_owner}/{self.repo_name}"
+
+
+class GitHubClient:
+    """Client for interacting with the GitHub API."""
+
+    def __init__(self, user):
+        self.user = user
+        self._client = None
+
+    @property
+    def client(self):
+        """Lazily initialize the GitHub client with the user's OAuth token."""
+        if self._client is None:
+            token = self._get_token()
+            if token:
+                from github import Github
+                # Add timeout of 10 seconds to prevent hanging
+                self._client = Github(token, timeout=10)
+        return self._client
+
+    def _get_token(self) -> Optional[str]:
+        """Get the GitHub OAuth token for the user."""
+        from allauth.socialaccount.models import SocialToken
+        try:
+            social_token = SocialToken.objects.filter(
+                account__user=self.user,
+                account__provider='github'
+            ).first()
+            if social_token:
+                return social_token.token
+        except SocialToken.DoesNotExist:
+            pass
+        return None
+
+    def _get_ci_status(self, pr) -> CIStatus:
+        """Get the combined CI status for a pull request with job counts."""
+        try:
+            commit = pr.get_commits().reversed[0]
+            combined_status = commit.get_combined_status()
+            check_runs = commit.get_check_runs()
+
+            total_count = 0
+            passed_count = 0
+            state = 'unknown'
+
+            # Count check runs (GitHub Actions)
+            if check_runs.totalCount > 0:
+                total_count = check_runs.totalCount
+                success_count = 0
+                failure_count = 0
+                skipped_count = 0
+                pending_count = 0
+
+                for cr in check_runs:
+                    if cr.conclusion == 'success':
+                        success_count += 1
+                        passed_count += 1
+                    elif cr.conclusion in ('failure', 'cancelled', 'timed_out'):
+                        failure_count += 1
+                    elif cr.conclusion in ('skipped', 'neutral'):
+                        skipped_count += 1
+                    elif cr.status in ('queued', 'in_progress'):
+                        pending_count += 1
+
+                # Determine overall state
+                # If any failures, state is failure
+                if failure_count > 0:
+                    state = 'failure'
+                # If any pending/in-progress, state is pending
+                elif pending_count > 0:
+                    state = 'pending'
+                # If we have successes and no failures (skipped is OK), it's success
+                elif success_count > 0:
+                    state = 'success'
+                # All skipped/neutral
+                elif skipped_count == total_count:
+                    state = 'success'  # All skipped is still a passing state
+                else:
+                    state = 'unknown'
+
+            # Also count commit statuses (legacy CI systems)
+            elif combined_status.total_count > 0:
+                total_count = combined_status.total_count
+                state = combined_status.state
+
+                for status in combined_status.statuses:
+                    if status.state == 'success':
+                        passed_count += 1
+
+            return CIStatus(
+                state=state,
+                passed_count=passed_count,
+                total_count=total_count
+            )
+        except Exception as e:
+            return CIStatus(state='unknown', passed_count=0, total_count=0)
+
+    def validate_repo(self, owner: str, name: str) -> tuple[bool, str]:
+        """Validate that a repository exists and is accessible."""
+        if not self.client:
+            return False, "Not authenticated with GitHub"
+
+        try:
+            from github import GithubException
+            repo = self.client.get_repo(f"{owner}/{name}")
+            return True, f"Found: {repo.full_name}"
+        except Exception as e:
+            # Handle GithubException without importing at module level
+            if hasattr(e, 'status'):
+                if e.status == 404:
+                    return False, "Repository not found"
+                elif e.status == 403:
+                    return False, "Access denied to repository"
+                if hasattr(e, 'data'):
+                    return False, f"Error: {e.data.get('message', 'Unknown error')}"
+            return False, f"Error: {str(e)}"
+
+    def _fetch_pr_details(self, pr_number: int, owner: str, name: str) -> Optional[PullRequestInfo]:
+        """Fetch full PR details including CI status for a single PR."""
+        try:
+            repo = self.client.get_repo(f"{owner}/{name}")
+            pr = repo.get_pull(pr_number)
+            return self._pr_to_info(pr, owner, name)
+        except Exception as e:
+            print(f"ERROR: Failed to fetch PR #{pr_number}: {e}")
+            return None
+
+    def get_user_prs_for_repo(self, owner: str, name: str) -> list[PullRequestInfo]:
+        """Get open PRs authored by the user for a specific repository."""
+        if not self.client:
+            return []
+
+        try:
+            github_user = self.client.get_user()
+            user_login = github_user.login
+
+            # Use GitHub Search API to filter PRs by author - much more efficient!
+            query = f"repo:{owner}/{name} is:pr is:open author:{user_login}"
+            issues = self.client.search_issues(query, sort='updated', order='desc')
+
+            # Collect PR numbers
+            pr_numbers = [issue.number for issue in issues]
+
+            if not pr_numbers:
+                return []
+
+            # Fetch all PR details in parallel (batched)
+            result = []
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                # Submit all PR fetch tasks
+                future_to_pr = {
+                    executor.submit(self._fetch_pr_details, pr_num, owner, name): pr_num
+                    for pr_num in pr_numbers
+                }
+
+                # Collect results as they complete
+                for future in as_completed(future_to_pr):
+                    pr_info = future.result()
+                    if pr_info:
+                        result.append(pr_info)
+
+            # Sort by updated_at descending
+            result.sort(key=lambda pr: pr.updated_at, reverse=True)
+            return result
+        except Exception as e:
+            print(f"ERROR: Failed to get PRs for {owner}/{name}: {e}")
+            return []
+
+    def get_all_user_prs(self, repos: list[tuple[str, str]]) -> list[PullRequestInfo]:
+        """Get all open PRs authored by the user across multiple repositories."""
+        all_prs = []
+        for owner, name in repos:
+            prs = self.get_user_prs_for_repo(owner, name)
+            all_prs.extend(prs)
+
+        # Sort by updated_at descending
+        all_prs.sort(key=lambda pr: pr.updated_at, reverse=True)
+        return all_prs
+
+    def _issue_to_pr_info_fast(self, issue, repo_owner: str, repo_name: str) -> PullRequestInfo:
+        """Convert a PyGithub Issue (from search) to PullRequestInfo - FAST path with no extra API calls."""
+        labels = [
+            {
+                'name': label.name,
+                'color': label.color,
+            }
+            for label in issue.labels
+        ]
+
+        # Extract CI status from issue state if available
+        # GitHub's search API includes some status info in the issue object
+        ci_state = 'unknown'
+
+        # Check if issue has pull_request attribute with status info
+        if hasattr(issue, 'pull_request') and issue.pull_request:
+            pr_data = issue.pull_request
+            # Some status might be available in raw_data
+            if hasattr(issue, '_rawData'):
+                raw = issue._rawData
+                if 'state_reason' in raw:
+                    # Try to infer from state_reason
+                    pass
+
+        return PullRequestInfo(
+            number=issue.number,
+            title=issue.title,
+            url=issue.html_url,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            author=issue.user.login,
+            author_avatar=issue.user.avatar_url,
+            created_at=issue.created_at,
+            updated_at=issue.updated_at,
+            labels=labels,
+            ci_status=CIStatus(state=ci_state, passed_count=0, total_count=0),
+            draft='draft' in issue.title.lower(),  # Infer from title
+            additions=0,  # Not available without extra API call
+            deletions=0,  # Not available without extra API call
+        )
+
+    def _issue_to_pr_info(self, issue, repo_owner: str, repo_name: str) -> PullRequestInfo:
+        """Convert a PyGithub Issue (from search) to PullRequestInfo without extra API calls."""
+        labels = [
+            {
+                'name': label.name,
+                'color': label.color,
+            }
+            for label in issue.labels
+        ]
+
+        # Get PR-specific data only if needed
+        # Issue objects from search have most data we need
+        # We'll skip CI status and draft flag to avoid extra API calls
+        return PullRequestInfo(
+            number=issue.number,
+            title=issue.title,
+            url=issue.html_url,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            author=issue.user.login,
+            author_avatar=issue.user.avatar_url,
+            created_at=issue.created_at,
+            updated_at=issue.updated_at,
+            labels=labels,
+            ci_status=CIStatus(state='unknown'),  # Skip CI check for performance
+            draft=False,  # Can't get this from Issue without extra API call
+            additions=0,  # Can't get this from Issue without extra API call
+            deletions=0,  # Can't get this from Issue without extra API call
+        )
+
+    def _pr_to_info(self, pr, repo_owner: str, repo_name: str) -> PullRequestInfo:
+        """Convert a PyGithub PullRequest to PullRequestInfo."""
+        labels = [
+            {
+                'name': label.name,
+                'color': label.color,
+            }
+            for label in pr.labels
+        ]
+
+        return PullRequestInfo(
+            number=pr.number,
+            title=pr.title,
+            url=pr.html_url,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            author=pr.user.login,
+            author_avatar=pr.user.avatar_url,
+            created_at=pr.created_at,
+            updated_at=pr.updated_at,
+            labels=labels,
+            ci_status=self._get_ci_status(pr),
+            draft=pr.draft,
+            additions=pr.additions,
+            deletions=pr.deletions,
+        )

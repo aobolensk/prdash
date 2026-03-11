@@ -1,0 +1,25 @@
+<ul class="repo-list">
+    {% for repo in repos %}
+        <li class="repo-item">
+            <a href="{% url 'dashboard:repo_pr_list' repo.owner repo.name %}"
+               class="repo-link {% if current_repo and current_repo.id == repo.id %}active{% endif %}"
+               hx-get="{% url 'dashboard:repo_pr_list' repo.owner repo.name %}"
+               hx-target="#pr-container"
+               hx-swap="innerHTML"
+               hx-push-url="true">
+                {{ repo.full_name }}
+            </a>
+            <form hx-post="{% url 'dashboard:remove_repo' repo.id %}"
+                  hx-target="#repo-list"
+                  hx-swap="innerHTML"
+                  class="repo-remove-form">
+                {% csrf_token %}
+                <button type="submit" class="btn-icon" aria-label="Remove repository">
+                    &#10005;
+                </button>
+            </form>
+        </li>
+    {% empty %}
+        <li class="repo-empty">No repositories tracked yet.</li>
+    {% endfor %}
+</ul>

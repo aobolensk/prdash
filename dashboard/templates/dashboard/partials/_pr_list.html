@@ -1,0 +1,17 @@
+{% load dashboard_tags %}
+
+{% if prs %}
+    <div class="pr-list">
+        {% for pr in prs %}
+            {% include 'dashboard/partials/_pr_card.html' with pr=pr %}
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="empty-state">
+        {% if repos %}
+            <p>No open pull requests found.</p>
+        {% else %}
+            <p>Add a repository to start tracking your PRs.</p>
+        {% endif %}
+    </div>
+{% endif %}

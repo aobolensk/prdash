@@ -1,0 +1,67 @@
+{% extends 'dashboard/base.html' %}
+{% load dashboard_tags %}
+
+{% block title %}My Pull Requests{% endblock %}
+
+{% block content %}
+<div class="dashboard-layout">
+    <aside class="sidebar">
+        <div class="sidebar-section">
+            <h2 class="sidebar-title">Repositories</h2>
+            <form hx-post="{% url 'dashboard:add_repo' %}"
+                  hx-target="#repo-list"
+                  hx-swap="innerHTML"
+                  class="add-repo-form">
+                {% csrf_token %}
+                <input type="text"
+                       name="repo"
+                       placeholder="owner/repo"
+                       class="input"
+                       required>
+                <button type="submit" class="btn btn-primary">Add</button>
+            </form>
+
+            <div id="repo-list"
+                 hx-trigger="repoAdded from:body, repoRemoved from:body"
+                 hx-get="{% url 'dashboard:pr_list' %}"
+                 hx-select="#repo-list"
+                 hx-swap="outerHTML">
+                {% include 'dashboard/partials/_repo_list.html' %}
+            </div>
+        </div>
+
+        <div class="sidebar-section">
+            <a href="{% url 'dashboard:pr_list' %}"
+               class="sidebar-link {% if not current_repo %}active{% endif %}"
+               hx-get="{% url 'dashboard:pr_list' %}"
+               hx-target="#pr-container"
+               hx-swap="innerHTML"
+               hx-push-url="true">
+                All PRs
+            </a>
+        </div>
+    </aside>
+
+    <section class="main-content">
+        <div class="content-header">
+            <h1>
+                {% if current_repo %}
+                    {{ current_repo.full_name }}
+                {% else %}
+                    All Pull Requests
+                {% endif %}
+            </h1>
+            <button class="btn btn-secondary"
+                    hx-get="{% if current_repo %}{% url 'dashboard:repo_pr_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:pr_list' %}{% endif %}"
+                    hx-target="#pr-container"
+                    hx-swap="innerHTML">
+                Refresh
+            </button>
+        </div>
+
+        <div id="pr-container">
+            {% include 'dashboard/partials/_pr_list.html' %}
+        </div>
+    </section>
+</div>
+{% endblock %}

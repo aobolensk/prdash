@@ -1,0 +1,50 @@
+{% load dashboard_tags %}
+
+<article class="pr-card">
+    <div class="pr-card-header">
+        <div class="pr-ci-status pr-ci-{{ pr.ci_status.state }}" title="CI Status: {{ pr.ci_status.state }}">
+            {% if pr.ci_status.state == 'success' %}
+                &#10003;
+            {% elif pr.ci_status.state == 'failure' or pr.ci_status.state == 'error' %}
+                &#10007;
+            {% elif pr.ci_status.state == 'pending' %}
+                &#8987;
+            {% else %}
+                &#8211;
+            {% endif %}
+        </div>
+        <div class="pr-info">
+            <div class="pr-title-row">
+                <div class="pr-title-section">
+                    <a href="{{ pr.url }}" target="_blank" rel="noopener" class="pr-title">
+                        {{ pr.title }}
+                    </a>
+                    {% if pr.labels %}
+                        <div class="pr-labels-inline">
+                            {% for label in pr.labels %}
+                                <span class="pr-label" style="background-color: #{{ label.color }}; color: {% if label.color|is_light_color %}#000{% else %}#fff{% endif %};">
+                                    {{ label.name }}
+                                </span>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+                <div class="pr-stats">
+                    <span class="pr-additions">+{{ pr.additions }}</span>
+                    <span class="pr-deletions">-{{ pr.deletions }}</span>
+                </div>
+            </div>
+            <div class="pr-meta">
+                <span class="pr-repo">{{ pr.repo_full_name }}</span>
+                <span class="pr-number">#{{ pr.number }}</span>
+                <span class="pr-time">{{ pr.updated_at|time_ago }}</span>
+                {% if pr.ci_status.total_count > 0 %}
+                    <span class="pr-ci-count">CI: {{ pr.ci_status.passed_count }}/{{ pr.ci_status.total_count }}</span>
+                {% endif %}
+                {% if pr.draft %}
+                    <span class="pr-draft">Draft</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</article>

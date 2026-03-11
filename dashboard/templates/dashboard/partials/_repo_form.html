@@ -1,0 +1,12 @@
+<form hx-post="{% url 'dashboard:add_repo' %}"
+      hx-target="#repo-list"
+      hx-swap="innerHTML"
+      class="add-repo-form">
+    {% csrf_token %}
+    <input type="text"
+           name="repo"
+           placeholder="owner/repo"
+           class="input"
+           required>
+    <button type="submit" class="btn btn-primary">Add</button>
+</form>
