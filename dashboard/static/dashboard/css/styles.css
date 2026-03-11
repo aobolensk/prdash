@@ -503,6 +503,28 @@ a:hover {
     font-weight: 500;
 }
 
+.pr-comments {
+    color: var(--color-text-muted);
+    font-size: 12px;
+}
+
+.pr-review {
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.pr-review-approved {
+    background-color: var(--color-success);
+    color: #ffffff;
+}
+
+.pr-review-changes_requested {
+    background-color: var(--color-danger);
+    color: #ffffff;
+}
+
 /* PR labels */
 .pr-labels-inline {
     display: flex;

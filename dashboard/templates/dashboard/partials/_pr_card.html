@@ -37,10 +37,20 @@
             <div class="pr-meta">
                 <span class="pr-repo">{{ pr.repo_full_name }}</span>
                 <span class="pr-number">#{{ pr.number }}</span>
-                <span class="pr-time">{{ pr.updated_at|time_ago }}</span>
+                <span class="pr-time">updated {{ pr.updated_at|time_ago }}</span>
                 {% if pr.ci_status.total_count > 0 %}
                     <span class="pr-ci-count">CI: {{ pr.ci_status.passed_count }}/{{ pr.ci_status.total_count }}</span>
                 {% endif %}
+                {% if pr.review_status.comment_count > 0 %}
+                    <span class="pr-comments">&#128172; {{ pr.review_status.comment_count }}</span>
+                {% endif %}
+                <span class="pr-review pr-review-{{ pr.review_status.state }}">
+                    {% if pr.review_status.state == 'approved' %}
+                        &#10003; Approved{% if pr.review_status.approval_count > 1 %} ({{ pr.review_status.approval_count }}){% endif %}
+                    {% elif pr.review_status.state == 'changes_requested' %}
+                        &#10007; Changes requested
+                    {% endif %}
+                </span>
                 {% if pr.draft %}
                     <span class="pr-draft">Draft</span>
                 {% endif %}

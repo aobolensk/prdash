@@ -20,6 +20,14 @@ class CIStatus:
 
 
 @dataclass
+class ReviewStatus:
+    """Represents the review status of a pull request."""
+    state: str  # 'approved', 'changes_requested', 'not_reviewed'
+    approval_count: int = 0
+    comment_count: int = 0
+
+
+@dataclass
 class PullRequestInfo:
     """Represents a pull request with relevant information."""
     number: int
@@ -33,6 +41,7 @@ class PullRequestInfo:
     updated_at: datetime
     labels: list[dict]
     ci_status: CIStatus
+    review_status: ReviewStatus
     draft: bool
     additions: int
     deletions: int
@@ -136,6 +145,39 @@ class GitHubClient:
             )
         except Exception as e:
             return CIStatus(state='unknown', passed_count=0, total_count=0)
+
+    def _get_review_status(self, pr) -> ReviewStatus:
+        """Get the review status for a pull request."""
+        try:
+            reviews = pr.get_reviews()
+            comment_count = pr.comments + pr.review_comments
+
+            # Track latest review state per user (only count the most recent review from each user)
+            latest_review_by_user = {}
+            for review in reviews:
+                if review.state in ('APPROVED', 'CHANGES_REQUESTED', 'COMMENTED'):
+                    user = review.user.login
+                    # Always update to track the most recent review
+                    if user not in latest_review_by_user or review.submitted_at > latest_review_by_user[user][1]:
+                        latest_review_by_user[user] = (review.state, review.submitted_at)
+
+            approval_count = sum(1 for state, _ in latest_review_by_user.values() if state == 'APPROVED')
+            changes_requested = any(state == 'CHANGES_REQUESTED' for state, _ in latest_review_by_user.values())
+
+            if changes_requested:
+                state = 'changes_requested'
+            elif approval_count > 0:
+                state = 'approved'
+            else:
+                state = 'not_reviewed'
+
+            return ReviewStatus(
+                state=state,
+                approval_count=approval_count,
+                comment_count=comment_count
+            )
+        except Exception as e:
+            return ReviewStatus(state='not_reviewed', approval_count=0, comment_count=0)
 
     def validate_repo(self, owner: str, name: str) -> tuple[bool, str]:
         """Validate that a repository exists and is accessible."""
@@ -255,6 +297,7 @@ class GitHubClient:
             updated_at=issue.updated_at,
             labels=labels,
             ci_status=CIStatus(state=ci_state, passed_count=0, total_count=0),
+            review_status=ReviewStatus(state='not_reviewed', approval_count=0, comment_count=0),
             draft='draft' in issue.title.lower(),  # Infer from title
             additions=0,  # Not available without extra API call
             deletions=0,  # Not available without extra API call
@@ -285,6 +328,7 @@ class GitHubClient:
             updated_at=issue.updated_at,
             labels=labels,
             ci_status=CIStatus(state='unknown'),  # Skip CI check for performance
+            review_status=ReviewStatus(state='not_reviewed', approval_count=0, comment_count=0),
             draft=False,  # Can't get this from Issue without extra API call
             additions=0,  # Can't get this from Issue without extra API call
             deletions=0,  # Can't get this from Issue without extra API call
@@ -312,6 +356,7 @@ class GitHubClient:
             updated_at=pr.updated_at,
             labels=labels,
             ci_status=self._get_ci_status(pr),
+            review_status=self._get_review_status(pr),
             draft=pr.draft,
             additions=pr.additions,
             deletions=pr.deletions,
