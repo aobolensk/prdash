@@ -209,6 +209,239 @@ class GitHubClient:
             print(f"ERROR: Failed to fetch PR #{pr_number}: {e}")
             return None
 
+    def _fetch_prs_batch_graphql(self, owner: str, name: str, pr_numbers: list[int]) -> list[PullRequestInfo]:
+        """Fetch multiple PRs using GraphQL to minimize API calls."""
+        if not pr_numbers:
+            return []
+
+        try:
+            # Build GraphQL query to fetch all PR data at once
+            # This reduces API calls from N (one per PR) to 1 for up to 100 PRs
+            pr_queries = []
+            for i, pr_num in enumerate(pr_numbers[:100]):  # GraphQL has query complexity limits
+                pr_queries.append(f'''
+                    pr{i}: pullRequest(number: {pr_num}) {{
+                        number
+                        title
+                        url
+                        author {{
+                            login
+                            avatarUrl
+                        }}
+                        createdAt
+                        updatedAt
+                        isDraft
+                        additions
+                        deletions
+                        labels(first: 20) {{
+                            nodes {{
+                                name
+                                color
+                            }}
+                        }}
+                        commits(last: 1) {{
+                            nodes {{
+                                commit {{
+                                    statusCheckRollup {{
+                                        state
+                                        contexts(first: 100) {{
+                                            totalCount
+                                            nodes {{
+                                                ... on CheckRun {{
+                                                    name
+                                                    status
+                                                    conclusion
+                                                }}
+                                                ... on StatusContext {{
+                                                    state
+                                                    context
+                                                }}
+                                            }}
+                                        }}
+                                    }}
+                                }}
+                            }}
+                        }}
+                        reviews(first: 100) {{
+                            nodes {{
+                                author {{
+                                    login
+                                }}
+                                state
+                                submittedAt
+                            }}
+                        }}
+                        comments {{
+                            totalCount
+                        }}
+                        reviewThreads {{
+                            totalCount
+                        }}
+                    }}
+                ''')
+
+            query = f'''
+                query {{
+                    repository(owner: "{owner}", name: "{name}") {{
+                        {' '.join(pr_queries)}
+                    }}
+                }}
+            '''
+
+            # Execute GraphQL query
+            token = self._get_token()
+            if not token:
+                return []
+
+            import requests
+            response = requests.post(
+                'https://api.github.com/graphql',
+                json={'query': query},
+                headers={
+                    'Authorization': f'Bearer {token}',
+                    'Content-Type': 'application/json',
+                },
+                timeout=30
+            )
+
+            if response.status_code != 200:
+                print(f"GraphQL query failed: {response.status_code} - {response.text}")
+                return []
+
+            data = response.json()
+            if 'errors' in data:
+                print(f"GraphQL errors: {data['errors']}")
+                return []
+
+            # Parse results
+            result = []
+            repo_data = data.get('data', {}).get('repository', {})
+
+            for i, pr_num in enumerate(pr_numbers[:100]):
+                pr_data = repo_data.get(f'pr{i}')
+                if not pr_data:
+                    continue
+
+                # Parse labels
+                labels = [
+                    {'name': label['name'], 'color': label['color']}
+                    for label in pr_data.get('labels', {}).get('nodes', [])
+                ]
+
+                # Parse CI status
+                ci_status = self._parse_ci_status_from_graphql(pr_data)
+
+                # Parse review status
+                review_status = self._parse_review_status_from_graphql(pr_data)
+
+                pr_info = PullRequestInfo(
+                    number=pr_data['number'],
+                    title=pr_data['title'],
+                    url=pr_data['url'],
+                    repo_owner=owner,
+                    repo_name=name,
+                    author=pr_data['author']['login'],
+                    author_avatar=pr_data['author']['avatarUrl'],
+                    created_at=datetime.fromisoformat(pr_data['createdAt'].replace('Z', '+00:00')),
+                    updated_at=datetime.fromisoformat(pr_data['updatedAt'].replace('Z', '+00:00')),
+                    labels=labels,
+                    ci_status=ci_status,
+                    review_status=review_status,
+                    draft=pr_data.get('isDraft', False),
+                    additions=pr_data.get('additions', 0),
+                    deletions=pr_data.get('deletions', 0),
+                )
+                result.append(pr_info)
+
+            return result
+
+        except Exception as e:
+            print(f"ERROR: Batch GraphQL fetch failed: {e}")
+            # Fallback to REST API if GraphQL fails
+            return []
+
+    def _parse_ci_status_from_graphql(self, pr_data: dict) -> CIStatus:
+        """Parse CI status from GraphQL response."""
+        try:
+            commits = pr_data.get('commits', {}).get('nodes', [])
+            if not commits:
+                return CIStatus(state='unknown')
+
+            rollup = commits[0].get('commit', {}).get('statusCheckRollup')
+            if not rollup:
+                return CIStatus(state='unknown')
+
+            state = rollup.get('state', 'UNKNOWN').lower()
+            # Map GraphQL states to our states
+            state_map = {
+                'success': 'success',
+                'pending': 'pending',
+                'failure': 'failure',
+                'error': 'failure',
+                'expected': 'pending',
+                'unknown': 'unknown',
+            }
+            state = state_map.get(state, 'unknown')
+
+            contexts = rollup.get('contexts', {}).get('nodes', [])
+            total_count = len(contexts)
+            passed_count = 0
+
+            for context in contexts:
+                # Check if it's a CheckRun or StatusContext
+                if 'conclusion' in context:  # CheckRun
+                    if context.get('conclusion') == 'success':
+                        passed_count += 1
+                elif 'state' in context:  # StatusContext
+                    if context.get('state') == 'success':
+                        passed_count += 1
+
+            return CIStatus(
+                state=state,
+                passed_count=passed_count,
+                total_count=total_count
+            )
+        except Exception as e:
+            return CIStatus(state='unknown')
+
+    def _parse_review_status_from_graphql(self, pr_data: dict) -> ReviewStatus:
+        """Parse review status from GraphQL response."""
+        try:
+            reviews = pr_data.get('reviews', {}).get('nodes', [])
+            comment_count = pr_data.get('comments', {}).get('totalCount', 0)
+            comment_count += pr_data.get('reviewThreads', {}).get('totalCount', 0)
+
+            # Track latest review state per user
+            latest_review_by_user = {}
+            for review in reviews:
+                if not review.get('author'):
+                    continue
+                user = review['author']['login']
+                state = review.get('state', '')
+                submitted_at = review.get('submittedAt')
+
+                if state in ('APPROVED', 'CHANGES_REQUESTED', 'COMMENTED'):
+                    if user not in latest_review_by_user or submitted_at > latest_review_by_user[user][1]:
+                        latest_review_by_user[user] = (state, submitted_at)
+
+            approval_count = sum(1 for state, _ in latest_review_by_user.values() if state == 'APPROVED')
+            changes_requested = any(state == 'CHANGES_REQUESTED' for state, _ in latest_review_by_user.values())
+
+            if changes_requested:
+                state = 'changes_requested'
+            elif approval_count > 0:
+                state = 'approved'
+            else:
+                state = 'not_reviewed'
+
+            return ReviewStatus(
+                state=state,
+                approval_count=approval_count,
+                comment_count=comment_count
+            )
+        except Exception as e:
+            return ReviewStatus(state='not_reviewed', approval_count=0, comment_count=0)
+
     def get_user_prs_for_repo(self, owner: str, name: str) -> list[PullRequestInfo]:
         """Get open PRs authored by the user for a specific repository."""
         if not self.client:
@@ -228,20 +461,7 @@ class GitHubClient:
             if not pr_numbers:
                 return []
 
-            # Fetch all PR details in parallel (batched)
-            result = []
-            with ThreadPoolExecutor(max_workers=5) as executor:
-                # Submit all PR fetch tasks
-                future_to_pr = {
-                    executor.submit(self._fetch_pr_details, pr_num, owner, name): pr_num
-                    for pr_num in pr_numbers
-                }
-
-                # Collect results as they complete
-                for future in as_completed(future_to_pr):
-                    pr_info = future.result()
-                    if pr_info:
-                        result.append(pr_info)
+            result = self._fetch_prs_batch_graphql(owner, name, pr_numbers)
 
             # Sort by updated_at descending
             result.sort(key=lambda pr: pr.updated_at, reverse=True)
@@ -252,10 +472,28 @@ class GitHubClient:
 
     def get_all_user_prs(self, repos: list[tuple[str, str]]) -> list[PullRequestInfo]:
         """Get all open PRs authored by the user across multiple repositories."""
+        if not repos:
+            return []
+
         all_prs = []
-        for owner, name in repos:
-            prs = self.get_user_prs_for_repo(owner, name)
-            all_prs.extend(prs)
+
+        # Fetch PRs from all repos in parallel
+        with ThreadPoolExecutor(max_workers=min(10, len(repos))) as executor:
+            # Submit all repo fetch tasks
+            future_to_repo = {
+                executor.submit(self.get_user_prs_for_repo, owner, name): (owner, name)
+                for owner, name in repos
+            }
+
+            # Collect results as they complete
+            for future in as_completed(future_to_repo):
+                repo = future_to_repo[future]
+                try:
+                    prs = future.result()
+                    all_prs.extend(prs)
+                except Exception as e:
+                    owner, name = repo
+                    print(f"ERROR: Failed to fetch PRs for {owner}/{name}: {e}")
 
         # Sort by updated_at descending
         all_prs.sort(key=lambda pr: pr.updated_at, reverse=True)
