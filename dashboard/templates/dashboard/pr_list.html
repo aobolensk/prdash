@@ -51,12 +51,16 @@
                     All Pull Requests
                 {% endif %}
             </h1>
-            <button class="btn btn-secondary"
-                    hx-get="{% if current_repo %}{% url 'dashboard:repo_pr_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:pr_list' %}{% endif %}"
-                    hx-target="#pr-container"
-                    hx-swap="innerHTML">
-                Refresh
-            </button>
+            <div class="refresh-wrapper">
+                <span class="refresh-spinner htmx-indicator" id="refresh-spinner"></span>
+                <button class="btn btn-secondary"
+                        hx-get="{% if current_repo %}{% url 'dashboard:repo_pr_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:pr_list' %}{% endif %}"
+                        hx-target="#pr-container"
+                        hx-swap="innerHTML"
+                        hx-indicator="#refresh-spinner">
+                    Refresh
+                </button>
+            </div>
         </div>
 
         <div id="pr-container">
