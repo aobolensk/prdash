@@ -57,6 +57,18 @@
                     evt.detail.target.innerHTML = evt.detail.xhr.responseText;
                 }
             });
+
+            document.addEventListener('keydown', function(evt) {
+                if (evt.target.tagName === 'INPUT' || evt.target.tagName === 'TEXTAREA') {
+                    return;
+                }
+                if (evt.key === 'r' || evt.key === 'R') {
+                    const refreshBtn = document.querySelector('.refresh-wrapper button');
+                    if (refreshBtn) {
+                        refreshBtn.click();
+                    }
+                }
+            });
         });
     </script>
 </body>
