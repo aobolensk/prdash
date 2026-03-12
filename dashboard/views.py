@@ -21,13 +21,17 @@ def pr_list(request):
     repo_tuples = [(repo.owner, repo.name) for repo in repos]
 
     client = GitHubClient(request.user)
-    prs = client.get_all_user_prs(repo_tuples)
+    author = request.GET.get('author', '').strip() or None
+    current_username = client.get_username()
+    prs = client.get_all_user_prs(repo_tuples, author=author)
 
     context = {
         'prs': prs,
         'repos': repos,
         'current_repo': None,
         'active_tab': 'open',
+        'author': author,
+        'current_username': current_username,
     }
 
     if request.headers.get('HX-Request') == 'true':
@@ -43,13 +47,17 @@ def merged_pr_list(request):
     repo_tuples = [(repo.owner, repo.name) for repo in repos]
 
     client = GitHubClient(request.user)
-    prs = client.get_all_merged_prs(repo_tuples)
+    author = request.GET.get('author', '').strip() or None
+    current_username = client.get_username()
+    prs = client.get_all_merged_prs(repo_tuples, author=author)
 
     context = {
         'prs': prs,
         'repos': repos,
         'current_repo': None,
         'active_tab': 'merged',
+        'author': author,
+        'current_username': current_username,
     }
 
     if request.headers.get('HX-Request') == 'true':
@@ -70,13 +78,17 @@ def repo_pr_list(request, owner, repo):
     )
 
     client = GitHubClient(request.user)
-    prs = client.get_user_prs_for_repo(owner, repo)
+    author = request.GET.get('author', '').strip() or None
+    current_username = client.get_username()
+    prs = client.get_user_prs_for_repo(owner, repo, author=author)
 
     context = {
         'prs': prs,
         'repos': repos,
         'current_repo': current_repo,
         'active_tab': 'open',
+        'author': author,
+        'current_username': current_username,
     }
 
     if request.headers.get('HX-Request') == 'true':
@@ -97,13 +109,17 @@ def repo_merged_pr_list(request, owner, repo):
     )
 
     client = GitHubClient(request.user)
-    prs = client.get_merged_prs_for_repo(owner, repo)
+    author = request.GET.get('author', '').strip() or None
+    current_username = client.get_username()
+    prs = client.get_merged_prs_for_repo(owner, repo, author=author)
 
     context = {
         'prs': prs,
         'repos': repos,
         'current_repo': current_repo,
         'active_tab': 'merged',
+        'author': author,
+        'current_username': current_username,
     }
 
     if request.headers.get('HX-Request') == 'true':

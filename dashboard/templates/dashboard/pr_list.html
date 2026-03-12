@@ -54,7 +54,7 @@
             <div class="refresh-wrapper">
                 <span class="refresh-spinner htmx-indicator" id="refresh-spinner"></span>
                 <button class="btn btn-secondary"
-                        hx-get="{% if current_repo %}{% if active_tab == 'merged' %}{% url 'dashboard:repo_merged_pr_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:repo_pr_list' current_repo.owner current_repo.name %}{% endif %}{% else %}{% if active_tab == 'merged' %}{% url 'dashboard:merged_pr_list' %}{% else %}{% url 'dashboard:pr_list' %}{% endif %}{% endif %}"
+                        hx-get="{% if current_repo %}{% if active_tab == 'merged' %}{% url 'dashboard:repo_merged_pr_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:repo_pr_list' current_repo.owner current_repo.name %}{% endif %}{% else %}{% if active_tab == 'merged' %}{% url 'dashboard:merged_pr_list' %}{% else %}{% url 'dashboard:pr_list' %}{% endif %}{% endif %}{% if author %}?author={{ author }}{% endif %}"
                         hx-target="#pr-content"
                         hx-swap="innerHTML"
                         hx-indicator="#refresh-spinner">

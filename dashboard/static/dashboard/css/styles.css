@@ -382,13 +382,47 @@ a:hover {
     margin: 0;
 }
 
+/* PR toolbar */
+.pr-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 16px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--color-border);
+    padding-bottom: 0;
+    flex-wrap: wrap;
+}
+
+/* Author filter form */
+.author-filter-form {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 8px;
+}
+
+.author-filter-form label {
+    font-size: 13px;
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+}
+
+.input-small {
+    padding: 4px 8px;
+    font-size: 13px;
+    width: 140px;
+}
+
+.btn-small {
+    padding: 4px 12px;
+    font-size: 13px;
+}
+
 /* Tab navigation */
 .tab-navigation {
     display: flex;
     gap: 4px;
-    margin-bottom: 20px;
-    border-bottom: 1px solid var(--color-border);
-    padding-bottom: 0;
 }
 
 .tab {

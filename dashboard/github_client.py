@@ -476,17 +476,28 @@ class GitHubClient:
         except Exception as e:
             return ReviewStatus(state='not_reviewed', approval_count=0, comment_count=0)
 
-    def get_user_prs_for_repo(self, owner: str, name: str) -> list[PullRequestInfo]:
-        """Get open PRs authored by the user for a specific repository."""
+    def get_username(self) -> Optional[str]:
+        """Get the authenticated user's GitHub username."""
+        if not self.client:
+            return None
+        try:
+            return self.client.get_user().login
+        except Exception:
+            return None
+
+    def get_user_prs_for_repo(self, owner: str, name: str, author: Optional[str] = None) -> list[PullRequestInfo]:
+        """Get open PRs authored by the specified user (or current user) for a specific repository."""
         if not self.client:
             return []
 
         try:
-            github_user = self.client.get_user()
-            user_login = github_user.login
+            # Use provided author or default to authenticated user
+            if author is None:
+                github_user = self.client.get_user()
+                author = github_user.login
 
             # Use GitHub Search API to filter PRs by author - much more efficient!
-            query = f"repo:{owner}/{name} is:pr is:open author:{user_login}"
+            query = f"repo:{owner}/{name} is:pr is:open author:{author}"
             issues = self.client.search_issues(query, sort='updated', order='desc')
 
             # Collect PR numbers
@@ -504,8 +515,8 @@ class GitHubClient:
             print(f"ERROR: Failed to get PRs for {owner}/{name}: {e}")
             return []
 
-    def get_all_user_prs(self, repos: list[tuple[str, str]]) -> list[PullRequestInfo]:
-        """Get all open PRs authored by the user across multiple repositories."""
+    def get_all_user_prs(self, repos: list[tuple[str, str]], author: Optional[str] = None) -> list[PullRequestInfo]:
+        """Get all open PRs authored by the specified user (or current user) across multiple repositories."""
         if not repos:
             return []
 
@@ -515,7 +526,7 @@ class GitHubClient:
         with ThreadPoolExecutor(max_workers=min(10, len(repos))) as executor:
             # Submit all repo fetch tasks
             future_to_repo = {
-                executor.submit(self.get_user_prs_for_repo, owner, name): (owner, name)
+                executor.submit(self.get_user_prs_for_repo, owner, name, author): (owner, name)
                 for owner, name in repos
             }
 
@@ -533,17 +544,19 @@ class GitHubClient:
         all_prs.sort(key=lambda pr: pr.updated_at, reverse=True)
         return all_prs
 
-    def get_merged_prs_for_repo(self, owner: str, name: str) -> list[PullRequestInfo]:
-        """Get recently merged PRs authored by the user for a specific repository."""
+    def get_merged_prs_for_repo(self, owner: str, name: str, author: Optional[str] = None) -> list[PullRequestInfo]:
+        """Get recently merged PRs authored by the specified user (or current user) for a specific repository."""
         if not self.client:
             return []
 
         try:
-            github_user = self.client.get_user()
-            user_login = github_user.login
+            # Use provided author or default to authenticated user
+            if author is None:
+                github_user = self.client.get_user()
+                author = github_user.login
 
             # Use GitHub Search API to find merged PRs by author
-            query = f"repo:{owner}/{name} is:pr is:merged author:{user_login}"
+            query = f"repo:{owner}/{name} is:pr is:merged author:{author}"
             issues = self.client.search_issues(query, sort='updated', order='desc')
 
             # Collect PR numbers (limit to 50 most recent)
@@ -561,8 +574,8 @@ class GitHubClient:
             print(f"ERROR: Failed to get merged PRs for {owner}/{name}: {e}")
             return []
 
-    def get_all_merged_prs(self, repos: list[tuple[str, str]]) -> list[PullRequestInfo]:
-        """Get all recently merged PRs authored by the user across multiple repositories."""
+    def get_all_merged_prs(self, repos: list[tuple[str, str]], author: Optional[str] = None) -> list[PullRequestInfo]:
+        """Get all recently merged PRs authored by the specified user (or current user) across multiple repositories."""
         if not repos:
             return []
 
@@ -571,7 +584,7 @@ class GitHubClient:
         # Fetch PRs from all repos in parallel
         with ThreadPoolExecutor(max_workers=min(10, len(repos))) as executor:
             future_to_repo = {
-                executor.submit(self.get_merged_prs_for_repo, owner, name): (owner, name)
+                executor.submit(self.get_merged_prs_for_repo, owner, name, author): (owner, name)
                 for owner, name in repos
             }
 
