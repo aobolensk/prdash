@@ -37,7 +37,11 @@
             <div class="pr-meta">
                 <span class="pr-repo">{{ pr.repo_full_name }}</span>
                 <span class="pr-number">#{{ pr.number }}</span>
-                <span class="pr-time">updated {{ pr.updated_at|time_ago }}</span>
+                {% if pr.merged_at %}
+                    <span class="pr-time pr-merged">merged {{ pr.merged_at|time_ago }}</span>
+                {% else %}
+                    <span class="pr-time">updated {{ pr.updated_at|time_ago }}</span>
+                {% endif %}
                 {% if pr.ci_status.total_count > 0 %}
                     <span class="pr-ci-count">CI: {{ pr.ci_status.passed_count }}/{{ pr.ci_status.total_count }}</span>
                 {% endif %}

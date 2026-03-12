@@ -27,10 +27,33 @@ def pr_list(request):
         'prs': prs,
         'repos': repos,
         'current_repo': None,
+        'active_tab': 'open',
     }
 
     if request.headers.get('HX-Request') == 'true':
-        return render(request, 'dashboard/partials/_pr_list.html', context)
+        return render(request, 'dashboard/partials/_pr_content.html', context)
+
+    return render(request, 'dashboard/pr_list.html', context)
+
+
+@login_required
+def merged_pr_list(request):
+    """Show all merged PRs across all tracked repositories."""
+    repos = TrackedRepository.objects.filter(user=request.user)
+    repo_tuples = [(repo.owner, repo.name) for repo in repos]
+
+    client = GitHubClient(request.user)
+    prs = client.get_all_merged_prs(repo_tuples)
+
+    context = {
+        'prs': prs,
+        'repos': repos,
+        'current_repo': None,
+        'active_tab': 'merged',
+    }
+
+    if request.headers.get('HX-Request') == 'true':
+        return render(request, 'dashboard/partials/_pr_content.html', context)
 
     return render(request, 'dashboard/pr_list.html', context)
 
@@ -53,10 +76,38 @@ def repo_pr_list(request, owner, repo):
         'prs': prs,
         'repos': repos,
         'current_repo': current_repo,
+        'active_tab': 'open',
     }
 
     if request.headers.get('HX-Request') == 'true':
-        return render(request, 'dashboard/partials/_pr_list.html', context)
+        return render(request, 'dashboard/partials/_pr_content.html', context)
+
+    return render(request, 'dashboard/pr_list.html', context)
+
+
+@login_required
+def repo_merged_pr_list(request, owner, repo):
+    """Show merged PRs for a specific repository."""
+    repos = TrackedRepository.objects.filter(user=request.user)
+    current_repo = get_object_or_404(
+        TrackedRepository,
+        user=request.user,
+        owner=owner,
+        name=repo
+    )
+
+    client = GitHubClient(request.user)
+    prs = client.get_merged_prs_for_repo(owner, repo)
+
+    context = {
+        'prs': prs,
+        'repos': repos,
+        'current_repo': current_repo,
+        'active_tab': 'merged',
+    }
+
+    if request.headers.get('HX-Request') == 'true':
+        return render(request, 'dashboard/partials/_pr_content.html', context)
 
     return render(request, 'dashboard/pr_list.html', context)
 

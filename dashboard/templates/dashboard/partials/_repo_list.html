@@ -4,7 +4,7 @@
             <a href="{% url 'dashboard:repo_pr_list' repo.owner repo.name %}"
                class="repo-link {% if current_repo and current_repo.id == repo.id %}active{% endif %}"
                hx-get="{% url 'dashboard:repo_pr_list' repo.owner repo.name %}"
-               hx-target="#pr-container"
+               hx-target="#pr-content"
                hx-swap="innerHTML"
                hx-push-url="true">
                 {{ repo.full_name }}

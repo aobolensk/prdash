@@ -45,6 +45,7 @@ class PullRequestInfo:
     draft: bool
     additions: int
     deletions: int
+    merged_at: Optional[datetime] = None
 
     @property
     def repo_full_name(self) -> str:
@@ -230,6 +231,7 @@ class GitHubClient:
                         }}
                         createdAt
                         updatedAt
+                        mergedAt
                         isDraft
                         additions
                         deletions
@@ -337,6 +339,10 @@ class GitHubClient:
                 # Parse review status
                 review_status = self._parse_review_status_from_graphql(pr_data)
 
+                merged_at = None
+                if pr_data.get('mergedAt'):
+                    merged_at = datetime.fromisoformat(pr_data['mergedAt'].replace('Z', '+00:00'))
+
                 pr_info = PullRequestInfo(
                     number=pr_data['number'],
                     title=pr_data['title'],
@@ -353,6 +359,7 @@ class GitHubClient:
                     draft=pr_data.get('isDraft', False),
                     additions=pr_data.get('additions', 0),
                     deletions=pr_data.get('deletions', 0),
+                    merged_at=merged_at,
                 )
                 result.append(pr_info)
 
@@ -524,6 +531,61 @@ class GitHubClient:
 
         # Sort by updated_at descending
         all_prs.sort(key=lambda pr: pr.updated_at, reverse=True)
+        return all_prs
+
+    def get_merged_prs_for_repo(self, owner: str, name: str) -> list[PullRequestInfo]:
+        """Get recently merged PRs authored by the user for a specific repository."""
+        if not self.client:
+            return []
+
+        try:
+            github_user = self.client.get_user()
+            user_login = github_user.login
+
+            # Use GitHub Search API to find merged PRs by author
+            query = f"repo:{owner}/{name} is:pr is:merged author:{user_login}"
+            issues = self.client.search_issues(query, sort='updated', order='desc')
+
+            # Collect PR numbers (limit to 50 most recent)
+            pr_numbers = [issue.number for issue in issues][:50]
+
+            if not pr_numbers:
+                return []
+
+            result = self._fetch_prs_batch_graphql(owner, name, pr_numbers)
+
+            # Sort by merged_at descending
+            result.sort(key=lambda pr: pr.merged_at or pr.updated_at, reverse=True)
+            return result
+        except Exception as e:
+            print(f"ERROR: Failed to get merged PRs for {owner}/{name}: {e}")
+            return []
+
+    def get_all_merged_prs(self, repos: list[tuple[str, str]]) -> list[PullRequestInfo]:
+        """Get all recently merged PRs authored by the user across multiple repositories."""
+        if not repos:
+            return []
+
+        all_prs = []
+
+        # Fetch PRs from all repos in parallel
+        with ThreadPoolExecutor(max_workers=min(10, len(repos))) as executor:
+            future_to_repo = {
+                executor.submit(self.get_merged_prs_for_repo, owner, name): (owner, name)
+                for owner, name in repos
+            }
+
+            for future in as_completed(future_to_repo):
+                repo = future_to_repo[future]
+                try:
+                    prs = future.result()
+                    all_prs.extend(prs)
+                except Exception as e:
+                    owner, name = repo
+                    print(f"ERROR: Failed to fetch merged PRs for {owner}/{name}: {e}")
+
+        # Sort by merged_at descending
+        all_prs.sort(key=lambda pr: pr.merged_at or pr.updated_at, reverse=True)
         return all_prs
 
     def _issue_to_pr_info_fast(self, issue, repo_owner: str, repo_name: str) -> PullRequestInfo:

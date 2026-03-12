@@ -9,7 +9,11 @@
 {% else %}
     <div class="empty-state">
         {% if repos %}
-            <p>No open pull requests found.</p>
+            {% if active_tab == 'merged' %}
+                <p>No merged pull requests found.</p>
+            {% else %}
+                <p>No open pull requests found.</p>
+            {% endif %}
         {% else %}
             <p>Add a repository to start tracking your PRs.</p>
         {% endif %}
