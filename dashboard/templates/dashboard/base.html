@@ -58,11 +58,33 @@
                 }
             });
 
+            let isRefreshInProgress = false;
+
+            document.body.addEventListener('htmx:beforeRequest', function(evt) {
+                const target = evt.detail.target;
+                if (target && target.id === 'pr-content') {
+                    isRefreshInProgress = true;
+                }
+            });
+
+            document.body.addEventListener('htmx:afterRequest', function(evt) {
+                const target = evt.detail.target;
+                if (target && target.id === 'pr-content') {
+                    isRefreshInProgress = false;
+                }
+            });
+
             document.addEventListener('keydown', function(evt) {
                 if (evt.target.tagName === 'INPUT' || evt.target.tagName === 'TEXTAREA') {
                     return;
                 }
+                if (evt.ctrlKey || evt.metaKey) {
+                    return;
+                }
                 if (evt.key === 'r' || evt.key === 'R') {
+                    if (isRefreshInProgress) {
+                        return;
+                    }
                     const refreshBtn = document.querySelector('.refresh-wrapper button');
                     if (refreshBtn) {
                         refreshBtn.click();
