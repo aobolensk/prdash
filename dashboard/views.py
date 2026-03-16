@@ -3,9 +3,37 @@ from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
 from django.views.decorators.http import require_POST
 import json
+import re
 
 from .models import TrackedRepository
 from .github_client import GitHubClient
+
+
+def _parse_repo_input(repo_input):
+    """
+    Parse repository input in various formats and return (owner, name) tuple.
+    Supports:
+    - owner/repo
+    - https://github.com/owner/repo
+    - https://github.com/owner/repo.git
+    - git@github.com:owner/repo.git
+    """
+    repo_input = repo_input.strip()
+
+    # GitHub URL patterns
+    url_pattern = r'github\.com[:/]([^/]+)/([^/\.]+?)(?:\.git)?/?$'
+    match = re.search(url_pattern, repo_input)
+    if match:
+        return match.group(1).strip(), match.group(2).strip()
+
+    # Simple owner/repo format
+    if '/' in repo_input:
+        parts = repo_input.split('/', 1)
+        owner = parts[0].strip()
+        name = parts[1].strip().rstrip('.git')
+        return owner, name
+
+    return None, None
 
 
 def home(request):
@@ -147,14 +175,8 @@ def add_repo(request):
     """Add a new repository to track."""
     repo_input = request.POST.get('repo', '').strip()
 
-    if '/' not in repo_input:
-        repos = TrackedRepository.objects.filter(user=request.user)
-        response = render(request, 'dashboard/partials/_repo_list.html', {'repos': repos})
-        response['HX-Trigger'] = json.dumps({'showErrors': ['Invalid format. Use owner/repo']})
-        return response
-
-    parts = repo_input.split('/', 1)
-    owner, name = parts[0].strip(), parts[1].strip()
+    # Extract owner/repo from various formats
+    owner, name = _parse_repo_input(repo_input)
 
     if not owner or not name:
         repos = TrackedRepository.objects.filter(user=request.user)
