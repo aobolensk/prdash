@@ -575,6 +575,15 @@ a:hover {
     font-weight: 500;
 }
 
+.pr-conflicts {
+    background-color: var(--color-danger);
+    color: #ffffff;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
 .pr-ci-count {
     color: var(--color-text-muted);
     font-size: 12px;

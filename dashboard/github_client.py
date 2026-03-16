@@ -45,6 +45,7 @@ class PullRequestInfo:
     draft: bool
     additions: int
     deletions: int
+    mergeable: Optional[str] = None
     merged_at: Optional[datetime] = None
 
     @property
@@ -247,6 +248,7 @@ class GitHubClient:
                         isDraft
                         additions
                         deletions
+                        mergeable
                         labels(first: 20) {{
                             nodes {{
                                 name
@@ -376,6 +378,7 @@ class GitHubClient:
                     draft=pr_data.get('isDraft', False),
                     additions=pr_data.get('additions', 0),
                     deletions=pr_data.get('deletions', 0),
+                    mergeable=pr_data.get('mergeable'),
                     merged_at=merged_at,
                 )
                 result.append(pr_info)
@@ -701,6 +704,12 @@ class GitHubClient:
             for label in pr.labels
         ]
 
+        mergeable = None
+        if pr.mergeable is True:
+            mergeable = 'MERGEABLE'
+        elif pr.mergeable is False:
+            mergeable = 'CONFLICTING'
+
         return PullRequestInfo(
             number=pr.number,
             title=pr.title,
@@ -717,4 +726,5 @@ class GitHubClient:
             draft=pr.draft,
             additions=pr.additions,
             deletions=pr.deletions,
+            mergeable=mergeable,
         )

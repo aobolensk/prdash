@@ -58,6 +58,9 @@
                 {% if pr.draft %}
                     <span class="pr-draft">Draft</span>
                 {% endif %}
+                {% if pr.mergeable == 'CONFLICTING' %}
+                    <span class="pr-conflicts">&#9888; Conflicts</span>
+                {% endif %}
             </div>
         </div>
     </div>
