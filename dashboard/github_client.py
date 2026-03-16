@@ -58,6 +58,7 @@ class GitHubClient:
     def __init__(self, user):
         self.user = user
         self._client = None
+        self.errors = []
 
     @property
     def client(self):
@@ -192,13 +193,24 @@ class GitHubClient:
         except Exception as e:
             # Handle GithubException without importing at module level
             if hasattr(e, 'status'):
+                # Extract detailed message if available
+                detailed_msg = ""
+                if hasattr(e, 'data') and isinstance(e.data, dict):
+                    detailed_msg = e.data.get('message', '')
+
                 if e.status == 404:
-                    return False, "Repository not found"
+                    error_msg = f"Repository {owner}/{name} not found"
                 elif e.status == 403:
-                    return False, "Access denied to repository"
-                if hasattr(e, 'data'):
-                    return False, f"Error: {e.data.get('message', 'Unknown error')}"
-            return False, f"Error: {str(e)}"
+                    if 'SAML' in detailed_msg:
+                        error_msg = f"Access denied to {owner}/{name}: SAML SSO enforcement. Re-authorize OAuth app."
+                    elif detailed_msg:
+                        error_msg = f"Access denied to {owner}/{name}: {detailed_msg}"
+                    else:
+                        error_msg = f"Access denied to {owner}/{name} (you may not have permission)"
+                else:
+                    error_msg = f"Error accessing {owner}/{name}: {detailed_msg}" if detailed_msg else f"Error accessing {owner}/{name}"
+                return False, error_msg
+            return False, f"Error accessing {owner}/{name}: {str(e)}"
 
     def _fetch_pr_details(self, pr_number: int, owner: str, name: str) -> Optional[PullRequestInfo]:
         """Fetch full PR details including CI status for a single PR."""
@@ -313,6 +325,11 @@ class GitHubClient:
             data = response.json()
             if 'errors' in data:
                 print(f"GraphQL errors: {data['errors']}")
+                # Collect GraphQL errors
+                for error in data['errors']:
+                    if error.get('type') == 'NOT_FOUND':
+                        error_msg = f"Repository {owner}/{name} not found or not accessible"
+                        self.errors.append(error_msg)
 
             # Parse results
             result = []

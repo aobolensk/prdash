@@ -2,6 +2,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
 from django.views.decorators.http import require_POST
+import json
 
 from .models import TrackedRepository
 from .github_client import GitHubClient
@@ -35,7 +36,10 @@ def pr_list(request):
     }
 
     if request.headers.get('HX-Request') == 'true':
-        return render(request, 'dashboard/partials/_pr_content.html', context)
+        response = render(request, 'dashboard/partials/_pr_content.html', context)
+        if client.errors:
+            response['HX-Trigger'] = json.dumps({'showErrors': client.errors})
+        return response
 
     return render(request, 'dashboard/pr_list.html', context)
 
@@ -61,7 +65,10 @@ def merged_pr_list(request):
     }
 
     if request.headers.get('HX-Request') == 'true':
-        return render(request, 'dashboard/partials/_pr_content.html', context)
+        response = render(request, 'dashboard/partials/_pr_content.html', context)
+        if client.errors:
+            response['HX-Trigger'] = json.dumps({'showErrors': client.errors})
+        return response
 
     return render(request, 'dashboard/pr_list.html', context)
 
@@ -92,7 +99,10 @@ def repo_pr_list(request, owner, repo):
     }
 
     if request.headers.get('HX-Request') == 'true':
-        return render(request, 'dashboard/partials/_pr_content.html', context)
+        response = render(request, 'dashboard/partials/_pr_content.html', context)
+        if client.errors:
+            response['HX-Trigger'] = json.dumps({'showErrors': client.errors})
+        return response
 
     return render(request, 'dashboard/pr_list.html', context)
 
@@ -123,7 +133,10 @@ def repo_merged_pr_list(request, owner, repo):
     }
 
     if request.headers.get('HX-Request') == 'true':
-        return render(request, 'dashboard/partials/_pr_content.html', context)
+        response = render(request, 'dashboard/partials/_pr_content.html', context)
+        if client.errors:
+            response['HX-Trigger'] = json.dumps({'showErrors': client.errors})
+        return response
 
     return render(request, 'dashboard/pr_list.html', context)
 
@@ -135,29 +148,29 @@ def add_repo(request):
     repo_input = request.POST.get('repo', '').strip()
 
     if '/' not in repo_input:
-        return HttpResponse(
-            '<div class="error">Invalid format. Use owner/repo</div>',
-            status=400
-        )
+        repos = TrackedRepository.objects.filter(user=request.user)
+        response = render(request, 'dashboard/partials/_repo_list.html', {'repos': repos})
+        response['HX-Trigger'] = json.dumps({'showErrors': ['Invalid format. Use owner/repo']})
+        return response
 
     parts = repo_input.split('/', 1)
     owner, name = parts[0].strip(), parts[1].strip()
 
     if not owner or not name:
-        return HttpResponse(
-            '<div class="error">Invalid format. Use owner/repo</div>',
-            status=400
-        )
+        repos = TrackedRepository.objects.filter(user=request.user)
+        response = render(request, 'dashboard/partials/_repo_list.html', {'repos': repos})
+        response['HX-Trigger'] = json.dumps({'showErrors': ['Invalid format. Use owner/repo']})
+        return response
 
     # Validate the repository exists
     client = GitHubClient(request.user)
     valid, message = client.validate_repo(owner, name)
 
     if not valid:
-        return HttpResponse(
-            f'<div class="error">{message}</div>',
-            status=400
-        )
+        repos = TrackedRepository.objects.filter(user=request.user)
+        response = render(request, 'dashboard/partials/_repo_list.html', {'repos': repos})
+        response['HX-Trigger'] = json.dumps({'showErrors': [message]})
+        return response
 
     # Create or get the repository
     repo, created = TrackedRepository.objects.get_or_create(
@@ -167,10 +180,10 @@ def add_repo(request):
     )
 
     if not created:
-        return HttpResponse(
-            '<div class="error">Repository already tracked</div>',
-            status=400
-        )
+        repos = TrackedRepository.objects.filter(user=request.user)
+        response = render(request, 'dashboard/partials/_repo_list.html', {'repos': repos})
+        response['HX-Trigger'] = json.dumps({'showErrors': ['Repository already tracked']})
+        return response
 
     repos = TrackedRepository.objects.filter(user=request.user)
     response = render(request, 'dashboard/partials/_repo_list.html', {'repos': repos})

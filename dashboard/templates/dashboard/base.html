@@ -32,7 +32,30 @@
         {% block content %}{% endblock %}
     </main>
 
+    <div id="toast-container" class="toast-container"></div>
+
     <script>
+        function showToast(message, type = 'error') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.textContent = message;
+
+            container.appendChild(toast);
+
+            setTimeout(() => toast.classList.add('show'), 10);
+
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 300);
+            }, 5000);
+
+            toast.addEventListener('click', () => {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 300);
+            });
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             // Theme toggle functionality
             const html = document.documentElement;
@@ -55,6 +78,13 @@
             document.body.addEventListener('htmx:afterSwap', function(evt) {
                 if (evt.detail.target.innerHTML.length === 0 && evt.detail.xhr) {
                     evt.detail.target.innerHTML = evt.detail.xhr.responseText;
+                }
+            });
+
+            document.body.addEventListener('showErrors', function(evt) {
+                const errors = evt.detail.value || evt.detail;
+                if (Array.isArray(errors)) {
+                    errors.forEach(error => showToast(error, 'error'));
                 }
             });
 
