@@ -537,8 +537,7 @@ class GitHubClient:
 
             result = self._fetch_prs_batch_graphql(owner, name, pr_numbers)
 
-            # Sort by updated_at descending
-            result.sort(key=lambda pr: pr.updated_at, reverse=True)
+            result.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
             return result
         except Exception as e:
             print(f"ERROR: Failed to get PRs for {owner}/{name}: {e}")
@@ -569,8 +568,7 @@ class GitHubClient:
                     owner, name = repo
                     print(f"ERROR: Failed to fetch PRs for {owner}/{name}: {e}")
 
-        # Sort by updated_at descending
-        all_prs.sort(key=lambda pr: pr.updated_at, reverse=True)
+        all_prs.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
         return all_prs
 
     def get_merged_prs_for_repo(self, owner: str, name: str, author: Optional[str] = None) -> list[PullRequestInfo]:
@@ -596,8 +594,7 @@ class GitHubClient:
 
             result = self._fetch_prs_batch_graphql(owner, name, pr_numbers)
 
-            # Sort by merged_at descending
-            result.sort(key=lambda pr: pr.merged_at or pr.updated_at, reverse=True)
+            result.sort(key=lambda pr: (pr.merged_at or pr.updated_at, pr.number), reverse=True)
             return result
         except Exception as e:
             print(f"ERROR: Failed to get merged PRs for {owner}/{name}: {e}")
@@ -626,8 +623,7 @@ class GitHubClient:
                     owner, name = repo
                     print(f"ERROR: Failed to fetch merged PRs for {owner}/{name}: {e}")
 
-        # Sort by merged_at descending
-        all_prs.sort(key=lambda pr: pr.merged_at or pr.updated_at, reverse=True)
+        all_prs.sort(key=lambda pr: (pr.merged_at or pr.updated_at, pr.number), reverse=True)
         return all_prs
 
     def _issue_to_pr_info_fast(self, issue, repo_owner: str, repo_name: str) -> PullRequestInfo:
