@@ -4,6 +4,8 @@ from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from django.core.cache import cache
+
 if TYPE_CHECKING:
     from github import Github, GithubException
 
@@ -362,6 +364,13 @@ class GitHubClient:
                 if pr_data.get('mergedAt'):
                     merged_at = datetime.fromisoformat(pr_data['mergedAt'].replace('Z', '+00:00'))
 
+                mergeable = pr_data.get('mergeable')
+                cache_key = f"pr_mergeable:{owner}/{name}:{pr_data['number']}"
+                if mergeable and mergeable != 'UNKNOWN':
+                    cache.set(cache_key, mergeable, 3600)
+                elif mergeable is None or mergeable == 'UNKNOWN':
+                    mergeable = cache.get(cache_key)
+
                 pr_info = PullRequestInfo(
                     number=pr_data['number'],
                     title=pr_data['title'],
@@ -378,7 +387,7 @@ class GitHubClient:
                     draft=pr_data.get('isDraft', False),
                     additions=pr_data.get('additions', 0),
                     deletions=pr_data.get('deletions', 0),
-                    mergeable=pr_data.get('mergeable'),
+                    mergeable=mergeable,
                     merged_at=merged_at,
                 )
                 result.append(pr_info)
@@ -705,10 +714,15 @@ class GitHubClient:
         ]
 
         mergeable = None
+        cache_key = f"pr_mergeable:{repo_owner}/{repo_name}:{pr.number}"
         if pr.mergeable is True:
             mergeable = 'MERGEABLE'
+            cache.set(cache_key, mergeable, 3600)
         elif pr.mergeable is False:
             mergeable = 'CONFLICTING'
+            cache.set(cache_key, mergeable, 3600)
+        else:
+            mergeable = cache.get(cache_key)
 
         return PullRequestInfo(
             number=pr.number,
