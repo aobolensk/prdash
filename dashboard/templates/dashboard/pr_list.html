@@ -7,6 +7,17 @@
 <div class="dashboard-layout">
     <aside class="sidebar">
         <div class="sidebar-section">
+            <a href="{% url 'dashboard:pr_list' %}"
+               class="sidebar-link {% if not current_repo %}active{% endif %}"
+               hx-get="{% url 'dashboard:pr_list' %}"
+               hx-target="#pr-content"
+               hx-swap="innerHTML"
+               hx-push-url="true">
+                All PRs
+            </a>
+        </div>
+
+        <div class="sidebar-section">
             <h2 class="sidebar-title">Repositories</h2>
             <form hx-post="{% url 'dashboard:add_repo' %}"
                   hx-target="#repo-list"
@@ -28,17 +39,6 @@
                  hx-swap="outerHTML">
                 {% include 'dashboard/partials/_repo_list.html' %}
             </div>
-        </div>
-
-        <div class="sidebar-section">
-            <a href="{% url 'dashboard:pr_list' %}"
-               class="sidebar-link {% if not current_repo %}active{% endif %}"
-               hx-get="{% url 'dashboard:pr_list' %}"
-               hx-target="#pr-content"
-               hx-swap="innerHTML"
-               hx-push-url="true">
-                All PRs
-            </a>
         </div>
     </aside>
 
