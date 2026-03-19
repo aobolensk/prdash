@@ -47,6 +47,9 @@ class PullRequestInfo:
     draft: bool
     additions: int
     deletions: int
+    branch_name: str = ""
+    head_repo_owner: str = ""
+    head_repo_name: str = ""
     mergeable: Optional[str] = None
     merged_at: Optional[datetime] = None
 
@@ -251,6 +254,13 @@ class GitHubClient:
                         additions
                         deletions
                         mergeable
+                        headRefName
+                        headRepository {{
+                            owner {{
+                                login
+                            }}
+                            name
+                        }}
                         labels(first: 20) {{
                             nodes {{
                                 name
@@ -371,6 +381,14 @@ class GitHubClient:
                 elif mergeable is None or mergeable == 'UNKNOWN':
                     mergeable = cache.get(cache_key)
 
+                # Extract head repository info (could be a fork)
+                head_repo = pr_data.get('headRepository')
+                head_repo_owner = owner
+                head_repo_name = name
+                if head_repo and head_repo.get('owner'):
+                    head_repo_owner = head_repo['owner']['login']
+                    head_repo_name = head_repo['name']
+
                 pr_info = PullRequestInfo(
                     number=pr_data['number'],
                     title=pr_data['title'],
@@ -387,6 +405,9 @@ class GitHubClient:
                     draft=pr_data.get('isDraft', False),
                     additions=pr_data.get('additions', 0),
                     deletions=pr_data.get('deletions', 0),
+                    branch_name=pr_data.get('headRefName', ''),
+                    head_repo_owner=head_repo_owner,
+                    head_repo_name=head_repo_name,
                     mergeable=mergeable,
                     merged_at=merged_at,
                 )
@@ -720,6 +741,10 @@ class GitHubClient:
         else:
             mergeable = cache.get(cache_key)
 
+        # Get head repository (could be a fork)
+        head_repo_owner = pr.head.repo.owner.login if pr.head.repo else repo_owner
+        head_repo_name = pr.head.repo.name if pr.head.repo else repo_name
+
         return PullRequestInfo(
             number=pr.number,
             title=pr.title,
@@ -736,5 +761,8 @@ class GitHubClient:
             draft=pr.draft,
             additions=pr.additions,
             deletions=pr.deletions,
+            branch_name=pr.head.ref,
+            head_repo_owner=head_repo_owner,
+            head_repo_name=head_repo_name,
             mergeable=mergeable,
         )

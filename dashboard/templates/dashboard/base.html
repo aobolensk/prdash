@@ -56,6 +56,14 @@
             });
         }
 
+        function copyBranchName(branchName) {
+            navigator.clipboard.writeText(branchName).then(() => {
+                showToast('Branch name copied!', 'success');
+            }).catch((err) => {
+                showToast('Failed to copy branch name', 'error');
+            });
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             // Theme toggle functionality
             const html = document.documentElement;

@@ -61,6 +61,25 @@
                 {% if pr.mergeable == 'CONFLICTING' %}
                     <span class="pr-conflicts">&#9888; Conflicts</span>
                 {% endif %}
+                {% if pr.branch_name %}
+                    <span class="pr-branch">
+                        <svg class="pr-branch-icon" width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"></path>
+                        </svg>
+                        <a href="https://github.com/{{ pr.head_repo_owner }}/{{ pr.head_repo_name }}/tree/{{ pr.branch_name }}"
+                           target="_blank"
+                           rel="noopener"
+                           class="pr-branch-name">{{ pr.branch_name }}</a>
+                        <button class="btn-copy-branch"
+                                onclick="copyBranchName('{{ pr.branch_name }}')"
+                                title="Copy branch name">
+                            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                                <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"></path>
+                                <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"></path>
+                            </svg>
+                        </button>
+                    </span>
+                {% endif %}
             </div>
         </div>
     </div>

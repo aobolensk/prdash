@@ -545,6 +545,7 @@ a:hover {
     font-size: 12px;
     color: var(--color-text-secondary);
     align-items: center;
+    justify-content: space-between;
 }
 
 .pr-repo {
@@ -643,6 +644,52 @@ a:hover {
 
 .pr-deletions {
     color: var(--color-danger);
+}
+
+.pr-branch {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+    margin-left: auto;
+}
+
+.pr-branch-icon {
+    color: var(--color-text-muted);
+    flex-shrink: 0;
+}
+
+.pr-branch-name {
+    font-size: 11px;
+    color: var(--color-text-muted);
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    text-decoration: none;
+}
+
+.pr-branch-name:hover {
+    color: var(--color-link);
+    text-decoration: underline;
+}
+
+.btn-copy-branch {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    color: var(--color-border);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.1s ease;
+    line-height: 0;
+}
+
+.btn-copy-branch:hover {
+    color: var(--color-text-secondary);
+}
+
+.btn-copy-branch:active {
+    color: var(--color-text);
 }
 
 /* Empty state */
