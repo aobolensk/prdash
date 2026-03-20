@@ -161,13 +161,21 @@ class GitHubClient:
             comment_count = pr.comments + pr.review_comments
 
             # Track latest review state per user (only count the most recent review from each user)
+            # Note: COMMENTED reviews don't override APPROVED/CHANGES_REQUESTED
             latest_review_by_user = {}
             for review in reviews:
                 if review.state in ('APPROVED', 'CHANGES_REQUESTED', 'COMMENTED'):
                     user = review.user.login
-                    # Always update to track the most recent review
-                    if user not in latest_review_by_user or review.submitted_at > latest_review_by_user[user][1]:
+                    # Only update if:
+                    # 1. User hasn't reviewed yet, OR
+                    # 2. New review is later AND (new is APPROVED/CHANGES_REQUESTED, or old was just COMMENTED)
+                    if user not in latest_review_by_user:
                         latest_review_by_user[user] = (review.state, review.submitted_at)
+                    elif review.submitted_at > latest_review_by_user[user][1]:
+                        old_state = latest_review_by_user[user][0]
+                        # Only override if new state is "stronger" or old state was just COMMENTED
+                        if review.state in ('APPROVED', 'CHANGES_REQUESTED') or old_state == 'COMMENTED':
+                            latest_review_by_user[user] = (review.state, review.submitted_at)
 
             approval_count = sum(1 for state, _ in latest_review_by_user.values() if state == 'APPROVED')
             changes_requested = any(state == 'CHANGES_REQUESTED' for state, _ in latest_review_by_user.values())
@@ -496,6 +504,7 @@ class GitHubClient:
             comment_count += pr_data.get('reviewThreads', {}).get('totalCount', 0)
 
             # Track latest review state per user
+            # Note: COMMENTED reviews don't override APPROVED/CHANGES_REQUESTED
             latest_review_by_user = {}
             for review in reviews:
                 if not review.get('author'):
@@ -505,8 +514,16 @@ class GitHubClient:
                 submitted_at = review.get('submittedAt')
 
                 if state in ('APPROVED', 'CHANGES_REQUESTED', 'COMMENTED'):
-                    if user not in latest_review_by_user or submitted_at > latest_review_by_user[user][1]:
+                    # Only update if:
+                    # 1. User hasn't reviewed yet, OR
+                    # 2. New review is later AND (new is APPROVED/CHANGES_REQUESTED, or old was just COMMENTED)
+                    if user not in latest_review_by_user:
                         latest_review_by_user[user] = (state, submitted_at)
+                    elif submitted_at > latest_review_by_user[user][1]:
+                        old_state = latest_review_by_user[user][0]
+                        # Only override if new state is "stronger" or old state was just COMMENTED
+                        if state in ('APPROVED', 'CHANGES_REQUESTED') or old_state == 'COMMENTED':
+                            latest_review_by_user[user] = (state, submitted_at)
 
             approval_count = sum(1 for state, _ in latest_review_by_user.values() if state == 'APPROVED')
             changes_requested = any(state == 'CHANGES_REQUESTED' for state, _ in latest_review_by_user.values())
