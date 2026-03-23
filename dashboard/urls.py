@@ -12,6 +12,9 @@ urlpatterns = [
     path('prs/assigned/', views.assigned_list, name='assigned_list'),
     path('prs/<str:owner>/<str:repo>/', views.repo_pr_list, name='repo_pr_list'),
     path('prs/<str:owner>/<str:repo>/merged/', views.repo_merged_pr_list, name='repo_merged_pr_list'),
+    path('prs/<str:owner>/<str:repo>/review-requests/', views.repo_review_requests_list, name='repo_review_requests_list'),
+    path('prs/<str:owner>/<str:repo>/review-requests/approved/', views.repo_review_approved_list, name='repo_review_approved_list'),
+    path('prs/<str:owner>/<str:repo>/assigned/', views.repo_assigned_list, name='repo_assigned_list'),
     path('repos/add/', views.add_repo, name='add_repo'),
     path('repos/<int:repo_id>/remove/', views.remove_repo, name='remove_repo'),
 ]

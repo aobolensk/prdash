@@ -98,13 +98,157 @@
 
             document.body.addEventListener('tabChanged', function(evt) {
                 const activeTab = evt.detail.value || evt.detail;
+                const dashboard = document.getElementById('dashboard-layout');
+                if (dashboard) {
+                    dashboard.dataset.currentTab = activeTab;
+                }
+                // Map sub-tabs to their parent sidebar tabs
+                let sidebarTab = activeTab;
+                if (activeTab === 'merged') {
+                    sidebarTab = 'my_prs';
+                } else if (activeTab === 'review_approved') {
+                    sidebarTab = 'review_requests';
+                }
                 const sidebarLinks = document.querySelectorAll('.sidebar-link[data-tab]');
                 sidebarLinks.forEach(link => {
                     link.classList.remove('active');
-                    if (link.dataset.tab === activeTab) {
+                    if (link.dataset.tab === sidebarTab) {
                         link.classList.add('active');
                     }
                 });
+            });
+
+            document.body.addEventListener('repoChanged', function(evt) {
+                const currentRepo = evt.detail.value || evt.detail;
+                const dashboard = document.getElementById('dashboard-layout');
+                if (dashboard) {
+                    dashboard.dataset.currentRepo = currentRepo;
+                }
+                // Update repo link active state
+                const repoLinks = document.querySelectorAll('.repo-link[data-repo]');
+                repoLinks.forEach(link => {
+                    link.classList.remove('active');
+                    if (link.dataset.repo === currentRepo) {
+                        link.classList.add('active');
+                    }
+                });
+            });
+
+            document.body.addEventListener('reviewTabChanged', function(evt) {
+                const reviewTab = evt.detail.value || evt.detail;
+                const dashboard = document.getElementById('dashboard-layout');
+                if (dashboard) {
+                    dashboard.dataset.reviewTab = reviewTab;
+                }
+            });
+
+            // Intercept HTMX requests to dynamically set the correct URL based on current tab/repo
+            document.body.addEventListener('htmx:configRequest', function(evt) {
+                const elt = evt.detail.elt;
+                const dashboard = document.getElementById('dashboard-layout');
+                if (!dashboard) return;
+
+                // Handle repo link clicks - use current tab's URL
+                if (elt.classList.contains('repo-link') && elt.dataset.repo) {
+                    let currentTab = dashboard.dataset.currentTab || 'my_prs';
+                    // For review_requests, check if we're on approved sub-tab
+                    if (currentTab === 'review_requests') {
+                        const reviewTab = dashboard.dataset.reviewTab || 'pending';
+                        if (reviewTab === 'approved') {
+                            currentTab = 'review_approved';
+                        }
+                    }
+                    const url = elt.getAttribute('data-url-' + currentTab);
+                    if (url) {
+                        evt.detail.path = url;
+                    }
+                }
+
+                // Handle tab link clicks - use current repo's URL if one is selected
+                // BUT if clicking the already active tab, clear the repo filter
+                if (elt.classList.contains('sidebar-link') && elt.dataset.tab) {
+                    const currentRepo = dashboard.dataset.currentRepo;
+                    const currentTab = dashboard.dataset.currentTab || 'my_prs';
+                    const clickedTab = elt.dataset.tab;
+
+                    // Map current tab to sidebar tab for comparison
+                    let currentSidebarTab = currentTab;
+                    if (currentTab === 'merged') currentSidebarTab = 'my_prs';
+                    else if (currentTab === 'review_approved') currentSidebarTab = 'review_requests';
+
+                    // If clicking the same tab we're on, clear repo filter (use "all" URL)
+                    if (currentRepo && clickedTab === currentSidebarTab) {
+                        const url = elt.dataset.urlAll;
+                        if (url) {
+                            evt.detail.path = url;
+                        }
+                    } else if (currentRepo) {
+                        // Different tab, keep repo filter
+                        const repoLink = document.querySelector('.repo-link[data-repo="' + currentRepo + '"]');
+                        if (repoLink) {
+                            const url = repoLink.getAttribute('data-url-' + clickedTab);
+                            if (url) {
+                                evt.detail.path = url;
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Also update hx-push-url to match the new path
+            document.body.addEventListener('htmx:beforeRequest', function(evt) {
+                const elt = evt.detail.elt;
+                const dashboard = document.getElementById('dashboard-layout');
+                if (!dashboard) return;
+
+                if (elt.classList.contains('repo-link') && elt.dataset.repo) {
+                    let currentTab = dashboard.dataset.currentTab || 'my_prs';
+                    // For review_requests, check if we're on approved sub-tab
+                    if (currentTab === 'review_requests') {
+                        const reviewTab = dashboard.dataset.reviewTab || 'pending';
+                        if (reviewTab === 'approved') {
+                            currentTab = 'review_approved';
+                        }
+                    }
+                    const url = elt.getAttribute('data-url-' + currentTab);
+                    if (url) {
+                        elt.href = url;
+                    }
+                }
+
+                if (elt.classList.contains('sidebar-link') && elt.dataset.tab) {
+                    const currentRepo = dashboard.dataset.currentRepo;
+                    const currentTab = dashboard.dataset.currentTab || 'my_prs';
+                    const clickedTab = elt.dataset.tab;
+
+                    // Map current tab to sidebar tab for comparison
+                    let currentSidebarTab = currentTab;
+                    if (currentTab === 'merged') currentSidebarTab = 'my_prs';
+                    else if (currentTab === 'review_approved') currentSidebarTab = 'review_requests';
+
+                    // If clicking the same tab we're on, clear repo filter (use "all" URL)
+                    if (currentRepo && clickedTab === currentSidebarTab) {
+                        const url = elt.dataset.urlAll;
+                        if (url) {
+                            elt.href = url;
+                        }
+                    } else if (currentRepo) {
+                        // Different tab, keep repo filter
+                        const repoLink = document.querySelector('.repo-link[data-repo="' + currentRepo + '"]');
+                        if (repoLink) {
+                            const url = repoLink.getAttribute('data-url-' + clickedTab);
+                            if (url) {
+                                elt.href = url;
+                            }
+                        }
+                    } else {
+                        // No repo selected, use the "all" URL
+                        const url = elt.dataset.urlAll;
+                        if (url) {
+                            elt.href = url;
+                        }
+                    }
+                }
             });
 
             let isRefreshInProgress = false;

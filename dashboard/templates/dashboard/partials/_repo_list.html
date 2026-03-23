@@ -3,6 +3,12 @@
         <li class="repo-item">
             <a href="{% url 'dashboard:repo_pr_list' repo.owner repo.name %}"
                class="repo-link {% if current_repo and current_repo.id == repo.id %}active{% endif %}"
+               data-repo="{{ repo.owner }}/{{ repo.name }}"
+               data-url-my_prs="{% url 'dashboard:repo_pr_list' repo.owner repo.name %}"
+               data-url-merged="{% url 'dashboard:repo_merged_pr_list' repo.owner repo.name %}"
+               data-url-review_requests="{% url 'dashboard:repo_review_requests_list' repo.owner repo.name %}"
+               data-url-review_approved="{% url 'dashboard:repo_review_approved_list' repo.owner repo.name %}"
+               data-url-assigned="{% url 'dashboard:repo_assigned_list' repo.owner repo.name %}"
                hx-get="{% url 'dashboard:repo_pr_list' repo.owner repo.name %}"
                hx-target="#pr-content"
                hx-swap="innerHTML"

@@ -4,31 +4,38 @@
 {% block title %}My Pull Requests{% endblock %}
 
 {% block content %}
-<div class="dashboard-layout">
+<div class="dashboard-layout"
+     id="dashboard-layout"
+     data-current-tab="{% if active_tab == 'review_requests' %}review_requests{% elif active_tab == 'assigned' %}assigned{% elif active_tab == 'merged' %}merged{% else %}my_prs{% endif %}"
+     data-current-repo="{% if current_repo %}{{ current_repo.owner }}/{{ current_repo.name }}{% endif %}"
+     data-review-tab="{% if review_tab %}{{ review_tab }}{% else %}pending{% endif %}">
     <aside class="sidebar">
         <div class="sidebar-section">
-            <a href="{% url 'dashboard:pr_list' %}"
-               class="sidebar-link {% if not current_repo and active_tab != 'review_requests' and active_tab != 'assigned' %}active{% endif %}"
+            <a href="{% if current_repo %}{% url 'dashboard:repo_pr_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:pr_list' %}{% endif %}"
+               class="sidebar-link {% if active_tab != 'review_requests' and active_tab != 'assigned' %}active{% endif %}"
                data-tab="my_prs"
-               hx-get="{% url 'dashboard:pr_list' %}"
+               data-url-all="{% url 'dashboard:pr_list' %}"
+               hx-get="{% if current_repo %}{% url 'dashboard:repo_pr_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:pr_list' %}{% endif %}"
                hx-target="#pr-content"
                hx-swap="innerHTML"
                hx-push-url="true">
                 My PRs
             </a>
-            <a href="{% url 'dashboard:review_requests_list' %}"
-               class="sidebar-link {% if not current_repo and active_tab == 'review_requests' %}active{% endif %}"
+            <a href="{% if current_repo %}{% url 'dashboard:repo_review_requests_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:review_requests_list' %}{% endif %}"
+               class="sidebar-link {% if active_tab == 'review_requests' %}active{% endif %}"
                data-tab="review_requests"
-               hx-get="{% url 'dashboard:review_requests_list' %}"
+               data-url-all="{% url 'dashboard:review_requests_list' %}"
+               hx-get="{% if current_repo %}{% url 'dashboard:repo_review_requests_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:review_requests_list' %}{% endif %}"
                hx-target="#pr-content"
                hx-swap="innerHTML"
                hx-push-url="true">
                 Review Requests
             </a>
-            <a href="{% url 'dashboard:assigned_list' %}"
-               class="sidebar-link {% if not current_repo and active_tab == 'assigned' %}active{% endif %}"
+            <a href="{% if current_repo %}{% url 'dashboard:repo_assigned_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:assigned_list' %}{% endif %}"
+               class="sidebar-link {% if active_tab == 'assigned' %}active{% endif %}"
                data-tab="assigned"
-               hx-get="{% url 'dashboard:assigned_list' %}"
+               data-url-all="{% url 'dashboard:assigned_list' %}"
+               hx-get="{% if current_repo %}{% url 'dashboard:repo_assigned_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:assigned_list' %}{% endif %}"
                hx-target="#pr-content"
                hx-swap="innerHTML"
                hx-push-url="true">
