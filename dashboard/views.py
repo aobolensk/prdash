@@ -170,6 +170,97 @@ def repo_merged_pr_list(request, owner, repo):
 
 
 @login_required
+def review_requests_list(request):
+    """Show all PRs where the current user's review is requested (pending review)."""
+    repos = TrackedRepository.objects.filter(user=request.user)
+    repo_tuples = [(repo.owner, repo.name) for repo in repos]
+
+    client = GitHubClient(request.user)
+    author = request.GET.get('author', '').strip() or None
+    current_username = client.get_username()
+    prs = client.get_all_review_requests(repo_tuples, approved_by_me=False, author=author)
+
+    context = {
+        'prs': prs,
+        'repos': repos,
+        'current_repo': None,
+        'active_tab': 'review_requests',
+        'review_tab': 'pending',
+        'author': author,
+        'current_username': current_username,
+    }
+
+    if request.headers.get('HX-Request') == 'true':
+        response = render(request, 'dashboard/partials/_pr_content.html', context)
+        if client.errors:
+            response['HX-Trigger'] = json.dumps({'showErrors': client.errors})
+        return response
+
+    return render(request, 'dashboard/pr_list.html', context)
+
+
+@login_required
+def review_approved_list(request):
+    """Show all PRs that the current user has approved."""
+    repos = TrackedRepository.objects.filter(user=request.user)
+    repo_tuples = [(repo.owner, repo.name) for repo in repos]
+
+    client = GitHubClient(request.user)
+    author = request.GET.get('author', '').strip() or None
+    current_username = client.get_username()
+    prs = client.get_all_review_requests(repo_tuples, approved_by_me=True, author=author)
+
+    context = {
+        'prs': prs,
+        'repos': repos,
+        'current_repo': None,
+        'active_tab': 'review_requests',
+        'review_tab': 'approved',
+        'author': author,
+        'current_username': current_username,
+    }
+
+    if request.headers.get('HX-Request') == 'true':
+        response = render(request, 'dashboard/partials/_pr_content.html', context)
+        if client.errors:
+            response['HX-Trigger'] = json.dumps({'showErrors': client.errors})
+        return response
+
+    return render(request, 'dashboard/pr_list.html', context)
+
+
+@login_required
+def assigned_list(request):
+    """Show all PRs where the current user is assigned."""
+    repos = TrackedRepository.objects.filter(user=request.user)
+    repo_tuples = [(repo.owner, repo.name) for repo in repos]
+
+    client = GitHubClient(request.user)
+    author = request.GET.get('author', '').strip() or None
+    current_username = client.get_username()
+    prs = client.get_all_assigned_prs(repo_tuples, author=author)
+
+    context = {
+        'prs': prs,
+        'repos': repos,
+        'current_repo': None,
+        'active_tab': 'assigned',
+        'author': author,
+        'current_username': current_username,
+    }
+
+    if request.headers.get('HX-Request') == 'true':
+        response = render(request, 'dashboard/partials/_pr_content.html', context)
+        if client.errors:
+            response['HX-Trigger'] = json.dumps({'showErrors': client.errors})
+        return response
+
+    return render(request, 'dashboard/pr_list.html', context)
+
+
+
+
+@login_required
 @require_POST
 def add_repo(request):
     """Add a new repository to track."""
