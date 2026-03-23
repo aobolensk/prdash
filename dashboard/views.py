@@ -65,8 +65,10 @@ def pr_list(request):
 
     if request.headers.get('HX-Request') == 'true':
         response = render(request, 'dashboard/partials/_pr_content.html', context)
+        triggers = {'tabChanged': 'my_prs'}
         if client.errors:
-            response['HX-Trigger'] = json.dumps({'showErrors': client.errors})
+            triggers['showErrors'] = client.errors
+        response['HX-Trigger'] = json.dumps(triggers)
         return response
 
     return render(request, 'dashboard/pr_list.html', context)
@@ -94,8 +96,10 @@ def merged_pr_list(request):
 
     if request.headers.get('HX-Request') == 'true':
         response = render(request, 'dashboard/partials/_pr_content.html', context)
+        triggers = {'tabChanged': 'my_prs'}
         if client.errors:
-            response['HX-Trigger'] = json.dumps({'showErrors': client.errors})
+            triggers['showErrors'] = client.errors
+        response['HX-Trigger'] = json.dumps(triggers)
         return response
 
     return render(request, 'dashboard/pr_list.html', context)
@@ -128,8 +132,10 @@ def repo_pr_list(request, owner, repo):
 
     if request.headers.get('HX-Request') == 'true':
         response = render(request, 'dashboard/partials/_pr_content.html', context)
+        triggers = {'tabChanged': 'my_prs'}
         if client.errors:
-            response['HX-Trigger'] = json.dumps({'showErrors': client.errors})
+            triggers['showErrors'] = client.errors
+        response['HX-Trigger'] = json.dumps(triggers)
         return response
 
     return render(request, 'dashboard/pr_list.html', context)
@@ -162,8 +168,10 @@ def repo_merged_pr_list(request, owner, repo):
 
     if request.headers.get('HX-Request') == 'true':
         response = render(request, 'dashboard/partials/_pr_content.html', context)
+        triggers = {'tabChanged': 'my_prs'}
         if client.errors:
-            response['HX-Trigger'] = json.dumps({'showErrors': client.errors})
+            triggers['showErrors'] = client.errors
+        response['HX-Trigger'] = json.dumps(triggers)
         return response
 
     return render(request, 'dashboard/pr_list.html', context)
@@ -192,8 +200,10 @@ def review_requests_list(request):
 
     if request.headers.get('HX-Request') == 'true':
         response = render(request, 'dashboard/partials/_pr_content.html', context)
+        triggers = {'tabChanged': 'review_requests'}
         if client.errors:
-            response['HX-Trigger'] = json.dumps({'showErrors': client.errors})
+            triggers['showErrors'] = client.errors
+        response['HX-Trigger'] = json.dumps(triggers)
         return response
 
     return render(request, 'dashboard/pr_list.html', context)
@@ -222,8 +232,10 @@ def review_approved_list(request):
 
     if request.headers.get('HX-Request') == 'true':
         response = render(request, 'dashboard/partials/_pr_content.html', context)
+        triggers = {'tabChanged': 'review_requests'}
         if client.errors:
-            response['HX-Trigger'] = json.dumps({'showErrors': client.errors})
+            triggers['showErrors'] = client.errors
+        response['HX-Trigger'] = json.dumps(triggers)
         return response
 
     return render(request, 'dashboard/pr_list.html', context)
@@ -251,8 +263,10 @@ def assigned_list(request):
 
     if request.headers.get('HX-Request') == 'true':
         response = render(request, 'dashboard/partials/_pr_content.html', context)
+        triggers = {'tabChanged': 'assigned'}
         if client.errors:
-            response['HX-Trigger'] = json.dumps({'showErrors': client.errors})
+            triggers['showErrors'] = client.errors
+        response['HX-Trigger'] = json.dumps(triggers)
         return response
 
     return render(request, 'dashboard/pr_list.html', context)

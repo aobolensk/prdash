@@ -9,6 +9,7 @@
         <div class="sidebar-section">
             <a href="{% url 'dashboard:pr_list' %}"
                class="sidebar-link {% if not current_repo and active_tab != 'review_requests' and active_tab != 'assigned' %}active{% endif %}"
+               data-tab="my_prs"
                hx-get="{% url 'dashboard:pr_list' %}"
                hx-target="#pr-content"
                hx-swap="innerHTML"
@@ -17,6 +18,7 @@
             </a>
             <a href="{% url 'dashboard:review_requests_list' %}"
                class="sidebar-link {% if not current_repo and active_tab == 'review_requests' %}active{% endif %}"
+               data-tab="review_requests"
                hx-get="{% url 'dashboard:review_requests_list' %}"
                hx-target="#pr-content"
                hx-swap="innerHTML"
@@ -25,6 +27,7 @@
             </a>
             <a href="{% url 'dashboard:assigned_list' %}"
                class="sidebar-link {% if not current_repo and active_tab == 'assigned' %}active{% endif %}"
+               data-tab="assigned"
                hx-get="{% url 'dashboard:assigned_list' %}"
                hx-target="#pr-content"
                hx-swap="innerHTML"

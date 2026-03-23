@@ -96,6 +96,17 @@
                 }
             });
 
+            document.body.addEventListener('tabChanged', function(evt) {
+                const activeTab = evt.detail.value || evt.detail;
+                const sidebarLinks = document.querySelectorAll('.sidebar-link[data-tab]');
+                sidebarLinks.forEach(link => {
+                    link.classList.remove('active');
+                    if (link.dataset.tab === activeTab) {
+                        link.classList.add('active');
+                    }
+                });
+            });
+
             let isRefreshInProgress = false;
 
             document.body.addEventListener('htmx:beforeRequest', function(evt) {
