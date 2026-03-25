@@ -242,6 +242,41 @@ def review_approved_list(request):
 
 
 @login_required
+def review_reviewed_list(request):
+    """Show all PRs that the current user has reviewed (but not approved)."""
+    repos = TrackedRepository.objects.filter(user=request.user)
+    repo_tuples = [(repo.owner, repo.name) for repo in repos]
+
+    client = GitHubClient(request.user)
+    author = request.GET.get('author', '').strip() or None
+    current_username = client.get_username()
+    prs = client.get_all_review_requests(repo_tuples, reviewed_by_me=True, author=author)
+    # Exclude the current user's own PRs
+    if current_username:
+        prs = [pr for pr in prs if pr.author != current_username]
+
+    context = {
+        'prs': prs,
+        'repos': repos,
+        'current_repo': None,
+        'active_tab': 'review_requests',
+        'review_tab': 'reviewed',
+        'author': author,
+        'current_username': current_username,
+    }
+
+    if request.headers.get('HX-Request') == 'true':
+        response = render(request, 'dashboard/partials/_pr_content.html', context)
+        triggers = {'tabChanged': 'review_reviewed', 'repoChanged': '', 'reviewTabChanged': 'reviewed'}
+        if client.errors:
+            triggers['showErrors'] = client.errors
+        response['HX-Trigger'] = json.dumps(triggers)
+        return response
+
+    return render(request, 'dashboard/pr_list.html', context)
+
+
+@login_required
 def assigned_list(request):
     """Show all PRs where the current user is assigned."""
     repos = TrackedRepository.objects.filter(user=request.user)
@@ -342,6 +377,48 @@ def repo_review_approved_list(request, owner, repo):
     if request.headers.get('HX-Request') == 'true':
         response = render(request, 'dashboard/partials/_pr_content.html', context)
         triggers = {'tabChanged': 'review_approved', 'repoChanged': f'{owner}/{repo}', 'reviewTabChanged': 'approved'}
+        if client.errors:
+            triggers['showErrors'] = client.errors
+        response['HX-Trigger'] = json.dumps(triggers)
+        return response
+
+    return render(request, 'dashboard/pr_list.html', context)
+
+
+@login_required
+def repo_review_reviewed_list(request, owner, repo):
+    """Show PRs that the current user has reviewed (but not approved) for a specific repository."""
+    repos = TrackedRepository.objects.filter(user=request.user)
+    current_repo = get_object_or_404(
+        TrackedRepository,
+        user=request.user,
+        owner=owner,
+        name=repo
+    )
+
+    client = GitHubClient(request.user)
+    author = request.GET.get('author', '').strip() or None
+    current_username = client.get_username()
+    prs = client.get_review_requests_for_repo(owner, repo, reviewed_by_me=True, author=author)
+    # Filter to only PRs reviewed (but not approved) by the user
+    if current_username:
+        prs = client._filter_prs_reviewed_not_approved_by_user(prs, current_username)
+        # Exclude the current user's own PRs
+        prs = [pr for pr in prs if pr.author != current_username]
+
+    context = {
+        'prs': prs,
+        'repos': repos,
+        'current_repo': current_repo,
+        'active_tab': 'review_requests',
+        'review_tab': 'reviewed',
+        'author': author,
+        'current_username': current_username,
+    }
+
+    if request.headers.get('HX-Request') == 'true':
+        response = render(request, 'dashboard/partials/_pr_content.html', context)
+        triggers = {'tabChanged': 'review_reviewed', 'repoChanged': f'{owner}/{repo}', 'reviewTabChanged': 'reviewed'}
         if client.errors:
             triggers['showErrors'] = client.errors
         response['HX-Trigger'] = json.dumps(triggers)

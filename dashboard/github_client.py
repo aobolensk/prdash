@@ -664,11 +664,12 @@ class GitHubClient:
         all_prs.sort(key=lambda pr: (pr.merged_at or pr.updated_at, pr.number), reverse=True)
         return all_prs
 
-    def get_review_requests_for_repo(self, owner: str, name: str, approved_by_me: bool = False, author: Optional[str] = None) -> list[PullRequestInfo]:
+    def get_review_requests_for_repo(self, owner: str, name: str, approved_by_me: bool = False, reviewed_by_me: bool = False, author: Optional[str] = None) -> list[PullRequestInfo]:
         """Get open PRs where the current user's review is requested for a specific repository.
 
         Args:
             approved_by_me: If True, only return PRs that I have approved. If False, return PRs pending my review.
+            reviewed_by_me: If True, return PRs that I have reviewed (any review state).
             author: If provided, filter PRs to only include those authored by this user.
         """
         if not self.client:
@@ -678,8 +679,8 @@ class GitHubClient:
             github_user = self.client.get_user()
             username = github_user.login
 
-            if approved_by_me:
-                # Search for PRs where I was a reviewer and approved
+            if approved_by_me or reviewed_by_me:
+                # Search for PRs where I was a reviewer
                 query = f"repo:{owner}/{name} is:pr is:open reviewed-by:{username}"
             else:
                 # Search for PRs where review is requested from me
@@ -705,11 +706,12 @@ class GitHubClient:
             print(f"ERROR: Failed to get review requests for {owner}/{name}: {e}")
             return []
 
-    def get_all_review_requests(self, repos: list[tuple[str, str]], approved_by_me: bool = False, author: Optional[str] = None) -> list[PullRequestInfo]:
+    def get_all_review_requests(self, repos: list[tuple[str, str]], approved_by_me: bool = False, reviewed_by_me: bool = False, author: Optional[str] = None) -> list[PullRequestInfo]:
         """Get all open PRs where the current user's review is requested across multiple repositories.
 
         Args:
             approved_by_me: If True, only return PRs that I have approved. If False, return PRs pending my review.
+            reviewed_by_me: If True, return PRs that I have reviewed (any review state).
             author: If provided, filter PRs to only include those authored by this user.
         """
         if not repos:
@@ -721,7 +723,7 @@ class GitHubClient:
         # Fetch PRs from all repos in parallel
         with ThreadPoolExecutor(max_workers=min(10, len(repos))) as executor:
             future_to_repo = {
-                executor.submit(self.get_review_requests_for_repo, owner, name, approved_by_me, author): (owner, name)
+                executor.submit(self.get_review_requests_for_repo, owner, name, approved_by_me, reviewed_by_me, author): (owner, name)
                 for owner, name in repos
             }
 
@@ -737,6 +739,9 @@ class GitHubClient:
         # If approved_by_me, we need to filter PRs where we actually approved
         if approved_by_me and username:
             all_prs = self._filter_prs_approved_by_user(all_prs, username)
+        # If reviewed_by_me, filter to PRs where user has reviewed but NOT approved
+        elif reviewed_by_me and username:
+            all_prs = self._filter_prs_reviewed_not_approved_by_user(all_prs, username)
 
         all_prs.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
         return all_prs
@@ -911,6 +916,113 @@ class GitHubClient:
                 print(f"ERROR: Failed to filter approved PRs for {owner}/{name}: {e}")
 
         return approved_prs
+
+    def _filter_prs_reviewed_not_approved_by_user(self, prs: list[PullRequestInfo], username: str) -> list[PullRequestInfo]:
+        """Filter PRs to only include those reviewed (but not approved) by the given user using GraphQL."""
+        if not prs:
+            return []
+
+        # Group PRs by repo
+        prs_by_repo = {}
+        for pr in prs:
+            key = (pr.repo_owner, pr.repo_name)
+            if key not in prs_by_repo:
+                prs_by_repo[key] = []
+            prs_by_repo[key].append(pr)
+
+        reviewed_prs = []
+        token = self._get_token()
+        if not token:
+            return []
+
+        import requests
+
+        for (owner, name), repo_prs in prs_by_repo.items():
+            pr_numbers = [pr.number for pr in repo_prs]
+
+            # Build GraphQL query to check reviews
+            pr_queries = []
+            for i, pr_num in enumerate(pr_numbers[:100]):
+                pr_queries.append(f'''
+                    pr{i}: pullRequest(number: {pr_num}) {{
+                        number
+                        reviews(first: 100) {{
+                            nodes {{
+                                author {{
+                                    login
+                                }}
+                                state
+                                submittedAt
+                            }}
+                        }}
+                    }}
+                ''')
+
+            query = f'''
+                query {{
+                    repository(owner: "{owner}", name: "{name}") {{
+                        {' '.join(pr_queries)}
+                    }}
+                }}
+            '''
+
+            try:
+                response = requests.post(
+                    'https://api.github.com/graphql',
+                    json={'query': query},
+                    headers={
+                        'Authorization': f'Bearer {token}',
+                        'Content-Type': 'application/json',
+                    },
+                    timeout=30
+                )
+
+                if response.status_code != 200:
+                    continue
+
+                data = response.json()
+                repo_data = data.get('data', {}).get('repository', {})
+
+                if not repo_data:
+                    continue
+
+                # Check each PR for user's review (not approved)
+                pr_map = {pr.number: pr for pr in repo_prs}
+                for i, pr_num in enumerate(pr_numbers[:100]):
+                    pr_data = repo_data.get(f'pr{i}')
+                    if not pr_data:
+                        continue
+
+                    reviews = pr_data.get('reviews', {}).get('nodes', [])
+
+                    # Track latest review state per user
+                    latest_review_by_user = {}
+                    for review in reviews:
+                        if not review.get('author'):
+                            continue
+                        user = review['author']['login']
+                        state = review.get('state', '')
+                        submitted_at = review.get('submittedAt')
+
+                        if state in ('APPROVED', 'CHANGES_REQUESTED', 'COMMENTED'):
+                            if user not in latest_review_by_user:
+                                latest_review_by_user[user] = (state, submitted_at)
+                            elif submitted_at > latest_review_by_user[user][1]:
+                                old_state = latest_review_by_user[user][0]
+                                if state in ('APPROVED', 'CHANGES_REQUESTED') or old_state == 'COMMENTED':
+                                    latest_review_by_user[user] = (state, submitted_at)
+
+                    # Check if user has reviewed but NOT approved (i.e., COMMENTED or CHANGES_REQUESTED)
+                    if username in latest_review_by_user:
+                        user_state = latest_review_by_user[username][0]
+                        if user_state in ('COMMENTED', 'CHANGES_REQUESTED'):
+                            if pr_num in pr_map:
+                                reviewed_prs.append(pr_map[pr_num])
+
+            except Exception as e:
+                print(f"ERROR: Failed to filter reviewed PRs for {owner}/{name}: {e}")
+
+        return reviewed_prs
 
     def _issue_to_pr_info_fast(self, issue, repo_owner: str, repo_name: str) -> PullRequestInfo:
         """Convert a PyGithub Issue (from search) to PullRequestInfo - FAST path with no extra API calls."""
