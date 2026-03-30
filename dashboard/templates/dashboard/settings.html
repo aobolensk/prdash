@@ -1,0 +1,25 @@
+{% extends 'dashboard/base.html' %}
+
+{% block title %}Settings - PR Dashboard{% endblock %}
+
+{% block content %}
+<div class="settings-layout">
+    <div class="settings-container">
+        <div class="settings-header">
+            <h1>Settings</h1>
+            <a href="{% url 'dashboard:pr_list' %}" class="btn btn-secondary">Back to Dashboard</a>
+        </div>
+
+        <div class="settings-section">
+            <h2>Personal Access Token <span class="settings-optional">(optional)</span></h2>
+            <p class="settings-description">
+                Only needed for enterprise repos requiring SSO. <a href="https://github.com/settings/tokens" target="_blank" rel="noopener">Create a PAT</a> with <code>repo</code> scope and enable SSO for your org.
+            </p>
+
+            <div id="pat-form-container">
+                {% include 'dashboard/partials/_pat_form.html' %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

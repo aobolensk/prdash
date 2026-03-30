@@ -78,7 +78,21 @@ class GitHubClient:
         return self._client
 
     def _get_token(self) -> Optional[str]:
-        """Get the GitHub OAuth token for the user."""
+        """Get the GitHub token for the user.
+
+        Prefers Personal Access Token (PAT) if available, falls back to OAuth token.
+        PAT is useful for accessing enterprise repos that require SSO authorization.
+        """
+        # First, try to get a Personal Access Token (preferred for enterprise repos)
+        from .models import PersonalAccessToken
+        try:
+            pat = PersonalAccessToken.objects.get(user=self.user)
+            if pat.token:
+                return pat.token
+        except PersonalAccessToken.DoesNotExist:
+            pass
+
+        # Fall back to OAuth token
         from allauth.socialaccount.models import SocialToken
         try:
             social_token = SocialToken.objects.filter(

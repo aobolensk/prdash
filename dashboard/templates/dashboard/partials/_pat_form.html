@@ -1,0 +1,46 @@
+<div class="pat-form-wrapper">
+    {% if success %}
+    <div class="alert alert-success">Token saved successfully!</div>
+    {% endif %}
+    {% if deleted %}
+    <div class="alert alert-success">Token deleted.</div>
+    {% endif %}
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+
+    {% if pat %}
+    <div class="pat-current">
+        <span class="pat-label">Current token:</span>
+        <code class="pat-masked">{{ pat.get_masked_token }}</code>
+        <span class="pat-date">Added {{ pat.created_at|date:"M d, Y" }}</span>
+    </div>
+
+    <form hx-post="{% url 'dashboard:delete_pat' %}"
+          hx-target="#pat-form-container"
+          hx-swap="innerHTML"
+          class="pat-delete-form">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-danger">Remove Token</button>
+    </form>
+
+    <hr class="pat-divider">
+    <p class="pat-update-label">Update token:</p>
+    {% endif %}
+
+    <form hx-post="{% url 'dashboard:save_pat' %}"
+          hx-target="#pat-form-container"
+          hx-swap="innerHTML"
+          class="pat-save-form">
+        {% csrf_token %}
+        <div class="form-group">
+            <input type="password"
+                   name="token"
+                   placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                   class="input pat-input"
+                   autocomplete="off"
+                   required>
+        </div>
+        <button type="submit" class="btn btn-primary">{% if pat %}Update{% else %}Save{% endif %} Token</button>
+    </form>
+</div>

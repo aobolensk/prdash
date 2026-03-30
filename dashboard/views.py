@@ -5,7 +5,7 @@ from django.views.decorators.http import require_POST
 import json
 import re
 
-from .models import TrackedRepository
+from .models import TrackedRepository, PersonalAccessToken
 from .github_client import GitHubClient
 
 
@@ -518,3 +518,54 @@ def remove_repo(request, repo_id):
     response = render(request, 'dashboard/partials/_repo_list.html', {'repos': repos})
     response['HX-Trigger'] = 'repoRemoved'
     return response
+
+
+@login_required
+def settings(request):
+    """User settings page."""
+    pat = PersonalAccessToken.objects.filter(user=request.user).first()
+    context = {
+        'pat': pat,
+    }
+    return render(request, 'dashboard/settings.html', context)
+
+
+@login_required
+@require_POST
+def save_pat(request):
+    """Save or update Personal Access Token."""
+    token = request.POST.get('token', '').strip()
+
+    if not token:
+        # Delete existing PAT if empty token submitted
+        PersonalAccessToken.objects.filter(user=request.user).delete()
+        pat = None
+    else:
+        # Validate the token by making a test API call
+        from github import Github
+        try:
+            g = Github(token, timeout=10)
+            user = g.get_user()
+            _ = user.login  # Force API call to validate token
+        except Exception as e:
+            pat = PersonalAccessToken.objects.filter(user=request.user).first()
+            context = {'pat': pat, 'error': f'Invalid token: {str(e)}'}
+            return render(request, 'dashboard/partials/_pat_form.html', context)
+
+        # Save or update the PAT
+        pat, created = PersonalAccessToken.objects.update_or_create(
+            user=request.user,
+            defaults={'token': token}
+        )
+
+    context = {'pat': pat, 'success': True}
+    return render(request, 'dashboard/partials/_pat_form.html', context)
+
+
+@login_required
+@require_POST
+def delete_pat(request):
+    """Delete Personal Access Token."""
+    PersonalAccessToken.objects.filter(user=request.user).delete()
+    context = {'pat': None, 'deleted': True}
+    return render(request, 'dashboard/partials/_pat_form.html', context)
