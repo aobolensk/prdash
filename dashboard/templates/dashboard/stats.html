@@ -9,11 +9,41 @@
             <h1>PR Statistics</h1>
             <div class="stats-controls">
                 <div class="time-filter">
-                    <a href="?days=7" class="btn btn-small {% if days == 7 %}btn-primary{% else %}btn-secondary{% endif %}">7d</a>
-                    <a href="?days=14" class="btn btn-small {% if days == 14 %}btn-primary{% else %}btn-secondary{% endif %}">14d</a>
-                    <a href="?days=30" class="btn btn-small {% if days == 30 %}btn-primary{% else %}btn-secondary{% endif %}">30d</a>
-                    <a href="?days=90" class="btn btn-small {% if days == 90 %}btn-primary{% else %}btn-secondary{% endif %}">90d</a>
-                    <a href="?days=180" class="btn btn-small {% if days == 180 %}btn-primary{% else %}btn-secondary{% endif %}">180d</a>
+                    <a href="?days=7"
+                       hx-get="{% url 'dashboard:stats_content' %}?days=7"
+                       hx-target="#stats-content"
+                       hx-swap="innerHTML"
+                       hx-push-url="?days=7"
+                       class="btn btn-small {% if days == 7 %}btn-primary{% else %}btn-secondary{% endif %}"
+                       data-days="7">7d</a>
+                    <a href="?days=14"
+                       hx-get="{% url 'dashboard:stats_content' %}?days=14"
+                       hx-target="#stats-content"
+                       hx-swap="innerHTML"
+                       hx-push-url="?days=14"
+                       class="btn btn-small {% if days == 14 %}btn-primary{% else %}btn-secondary{% endif %}"
+                       data-days="14">14d</a>
+                    <a href="?days=30"
+                       hx-get="{% url 'dashboard:stats_content' %}?days=30"
+                       hx-target="#stats-content"
+                       hx-swap="innerHTML"
+                       hx-push-url="?days=30"
+                       class="btn btn-small {% if days == 30 %}btn-primary{% else %}btn-secondary{% endif %}"
+                       data-days="30">30d</a>
+                    <a href="?days=90"
+                       hx-get="{% url 'dashboard:stats_content' %}?days=90"
+                       hx-target="#stats-content"
+                       hx-swap="innerHTML"
+                       hx-push-url="?days=90"
+                       class="btn btn-small {% if days == 90 %}btn-primary{% else %}btn-secondary{% endif %}"
+                       data-days="90">90d</a>
+                    <a href="?days=180"
+                       hx-get="{% url 'dashboard:stats_content' %}?days=180"
+                       hx-target="#stats-content"
+                       hx-swap="innerHTML"
+                       hx-push-url="?days=180"
+                       class="btn btn-small {% if days == 180 %}btn-primary{% else %}btn-secondary{% endif %}"
+                       data-days="180">180d</a>
                 </div>
                 <a href="{% url 'dashboard:pr_list' %}" class="btn btn-secondary">Back to Dashboard</a>
             </div>
@@ -26,40 +56,69 @@
         </div>
         {% else %}
 
-        <!-- Quick Stats -->
-        {% include 'dashboard/partials/_stats_quick.html' %}
+        <!-- Stats content loaded via HTMX -->
+        <div id="stats-content"
+             hx-get="{% url 'dashboard:stats_content' %}?days={{ days }}"
+             hx-trigger="load"
+             hx-swap="innerHTML">
+            <!-- Loading skeleton -->
+            <div class="stats-loading">
+                <!-- Quick Stats Skeleton -->
+                <div class="quick-stats-grid">
+                    <div class="stat-card skeleton-card">
+                        <div class="skeleton skeleton-value"></div>
+                        <div class="skeleton skeleton-label"></div>
+                    </div>
+                    <div class="stat-card skeleton-card">
+                        <div class="skeleton skeleton-value"></div>
+                        <div class="skeleton skeleton-label"></div>
+                    </div>
+                    <div class="stat-card skeleton-card">
+                        <div class="skeleton skeleton-value"></div>
+                        <div class="skeleton skeleton-label"></div>
+                    </div>
+                    <div class="stat-card skeleton-card">
+                        <div class="skeleton skeleton-value"></div>
+                        <div class="skeleton skeleton-label"></div>
+                    </div>
+                </div>
 
-        <!-- Charts Row -->
-        <div class="stats-row">
-            <!-- Velocity Chart -->
-            <div class="stats-section stats-section-wide">
-                {% include 'dashboard/partials/_stats_velocity.html' %}
-            </div>
-        </div>
+                <!-- Charts Row Skeleton -->
+                <div class="stats-row">
+                    <div class="stats-section stats-section-wide skeleton-section">
+                        <div class="skeleton skeleton-title"></div>
+                        <div class="skeleton skeleton-chart"></div>
+                    </div>
+                </div>
 
-        <!-- Two Column Row -->
-        <div class="stats-row stats-row-2col">
-            <!-- Review Activity -->
-            <div class="stats-section">
-                {% include 'dashboard/partials/_stats_reviews.html' %}
-            </div>
+                <!-- Two Column Row Skeleton -->
+                <div class="stats-row stats-row-2col">
+                    <div class="stats-section skeleton-section">
+                        <div class="skeleton skeleton-title"></div>
+                        <div class="skeleton skeleton-content"></div>
+                    </div>
+                    <div class="stats-section skeleton-section">
+                        <div class="skeleton skeleton-title"></div>
+                        <div class="skeleton skeleton-content"></div>
+                    </div>
+                </div>
 
-            <!-- Repository Breakdown -->
-            <div class="stats-section">
-                {% include 'dashboard/partials/_stats_repos.html' %}
-            </div>
-        </div>
+                <!-- Two Column Row Skeleton -->
+                <div class="stats-row stats-row-2col">
+                    <div class="stats-section skeleton-section">
+                        <div class="skeleton skeleton-title"></div>
+                        <div class="skeleton skeleton-content"></div>
+                    </div>
+                    <div class="stats-section skeleton-section">
+                        <div class="skeleton skeleton-title"></div>
+                        <div class="skeleton skeleton-content"></div>
+                    </div>
+                </div>
 
-        <!-- Two Column Row -->
-        <div class="stats-row stats-row-2col">
-            <!-- PR Health -->
-            <div class="stats-section">
-                {% include 'dashboard/partials/_stats_health.html' %}
-            </div>
-
-            <!-- Collaboration -->
-            <div class="stats-section">
-                {% include 'dashboard/partials/_stats_collaboration.html' %}
+                <div class="stats-loading-text">
+                    <div class="loading-spinner"></div>
+                    <span>Loading statistics...</span>
+                </div>
             </div>
         </div>
 
@@ -70,7 +129,55 @@
 {% if repos %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
-document.addEventListener('DOMContentLoaded', function() {
+// Initialize charts after HTMX loads the stats content
+document.body.addEventListener('htmx:afterSwap', function(event) {
+    if (event.detail.target.id === 'stats-content') {
+        initializeCharts();
+    }
+});
+
+// Update active state on time filter buttons and show loading
+document.body.addEventListener('htmx:beforeRequest', function(event) {
+    if (event.detail.target && event.detail.target.id === 'stats-content') {
+        // Update button active states
+        const clickedBtn = event.detail.elt;
+        if (clickedBtn && clickedBtn.closest('.time-filter')) {
+            document.querySelectorAll('.time-filter .btn').forEach(btn => {
+                btn.classList.remove('btn-primary');
+                btn.classList.add('btn-secondary');
+            });
+            clickedBtn.classList.remove('btn-secondary');
+            clickedBtn.classList.add('btn-primary');
+        }
+
+        // Show loading skeleton
+        const statsContent = document.getElementById('stats-content');
+        if (statsContent) {
+            statsContent.innerHTML = `
+                <div class="stats-loading">
+                    <div class="quick-stats-grid">
+                        <div class="stat-card skeleton-card"><div class="skeleton skeleton-value"></div><div class="skeleton skeleton-label"></div></div>
+                        <div class="stat-card skeleton-card"><div class="skeleton skeleton-value"></div><div class="skeleton skeleton-label"></div></div>
+                        <div class="stat-card skeleton-card"><div class="skeleton skeleton-value"></div><div class="skeleton skeleton-label"></div></div>
+                        <div class="stat-card skeleton-card"><div class="skeleton skeleton-value"></div><div class="skeleton skeleton-label"></div></div>
+                    </div>
+                    <div class="stats-row"><div class="stats-section stats-section-wide skeleton-section"><div class="skeleton skeleton-title"></div><div class="skeleton skeleton-chart"></div></div></div>
+                    <div class="stats-row stats-row-2col">
+                        <div class="stats-section skeleton-section"><div class="skeleton skeleton-title"></div><div class="skeleton skeleton-content"></div></div>
+                        <div class="stats-section skeleton-section"><div class="skeleton skeleton-title"></div><div class="skeleton skeleton-content"></div></div>
+                    </div>
+                    <div class="stats-row stats-row-2col">
+                        <div class="stats-section skeleton-section"><div class="skeleton skeleton-title"></div><div class="skeleton skeleton-content"></div></div>
+                        <div class="stats-section skeleton-section"><div class="skeleton skeleton-title"></div><div class="skeleton skeleton-content"></div></div>
+                    </div>
+                    <div class="stats-loading-text"><div class="loading-spinner"></div><span>Loading statistics...</span></div>
+                </div>
+            `;
+        }
+    }
+});
+
+function initializeCharts() {
     // Get theme-aware colors
     function getChartColors() {
         const style = getComputedStyle(document.documentElement);
@@ -270,7 +377,7 @@ document.addEventListener('DOMContentLoaded', function() {
         attributes: true,
         attributeFilter: ['data-theme']
     });
-});
+}
 </script>
 {% endif %}
 {% endblock %}

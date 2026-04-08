@@ -23,6 +23,7 @@ urlpatterns = [
     path('repos/add/', views.add_repo, name='add_repo'),
     path('repos/<int:repo_id>/remove/', views.remove_repo, name='remove_repo'),
     path('stats/', views.stats, name='stats'),
+    path('stats/content/', views.stats_content, name='stats_content'),
     path('settings/', views.settings, name='settings'),
     path('settings/pat/save/', views.save_pat, name='save_pat'),
     path('settings/pat/delete/', views.delete_pat, name='delete_pat'),

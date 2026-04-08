@@ -524,6 +524,23 @@ def remove_repo(request, repo_id):
 def stats(request):
     """Stats and analytics page."""
     repos = TrackedRepository.objects.filter(user=request.user)
+
+    days = int(request.GET.get('days', 30))
+    if days not in (7, 14, 30, 90, 180):
+        days = 30
+
+    context = {
+        'days': days,
+        'repos': repos,
+    }
+
+    return render(request, 'dashboard/stats.html', context)
+
+
+@login_required
+def stats_content(request):
+    """HTMX endpoint that returns the actual stats content."""
+    repos = TrackedRepository.objects.filter(user=request.user)
     repo_tuples = [(repo.owner, repo.name) for repo in repos]
 
     days = int(request.GET.get('days', 30))
@@ -547,7 +564,7 @@ def stats(request):
         'repos': repos,
     }
 
-    return render(request, 'dashboard/stats.html', context)
+    return render(request, 'dashboard/partials/_stats_content.html', context)
 
 
 @login_required

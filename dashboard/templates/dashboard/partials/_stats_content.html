@@ -1,0 +1,36 @@
+<!-- Quick Stats -->
+{% include 'dashboard/partials/_stats_quick.html' %}
+
+<!-- Charts Row -->
+<div class="stats-row">
+    <!-- Velocity Chart -->
+    <div class="stats-section stats-section-wide">
+        {% include 'dashboard/partials/_stats_velocity.html' %}
+    </div>
+</div>
+
+<!-- Two Column Row -->
+<div class="stats-row stats-row-2col">
+    <!-- Review Activity -->
+    <div class="stats-section">
+        {% include 'dashboard/partials/_stats_reviews.html' %}
+    </div>
+
+    <!-- Repository Breakdown -->
+    <div class="stats-section">
+        {% include 'dashboard/partials/_stats_repos.html' %}
+    </div>
+</div>
+
+<!-- Two Column Row -->
+<div class="stats-row stats-row-2col">
+    <!-- PR Health -->
+    <div class="stats-section">
+        {% include 'dashboard/partials/_stats_health.html' %}
+    </div>
+
+    <!-- Collaboration -->
+    <div class="stats-section">
+        {% include 'dashboard/partials/_stats_collaboration.html' %}
+    </div>
+</div>
