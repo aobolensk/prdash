@@ -1,8 +1,6 @@
 """Stats computation service for PR analytics."""
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Optional
-from collections import defaultdict
 
 from django.core.cache import cache
 from django.utils import timezone

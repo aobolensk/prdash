@@ -1,13 +1,10 @@
 """GitHub API client for fetching PR information."""
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from django.core.cache import cache
-
-if TYPE_CHECKING:
-    from github import Github, GithubException
 
 
 @dataclass
@@ -165,7 +162,7 @@ class GitHubClient:
                 passed_count=passed_count,
                 total_count=total_count
             )
-        except Exception as e:
+        except Exception:
             return CIStatus(state='unknown', passed_count=0, total_count=0)
 
     def _get_review_status(self, pr) -> ReviewStatus:
@@ -206,7 +203,7 @@ class GitHubClient:
                 approval_count=approval_count,
                 comment_count=comment_count
             )
-        except Exception as e:
+        except Exception:
             return ReviewStatus(state='not_reviewed', approval_count=0, comment_count=0)
 
     def validate_repo(self, owner: str, name: str) -> tuple[bool, str]:
@@ -215,7 +212,6 @@ class GitHubClient:
             return False, "Not authenticated with GitHub"
 
         try:
-            from github import GithubException
             repo = self.client.get_repo(f"{owner}/{name}")
             return True, f"Found: {repo.full_name}"
         except Exception as e:
@@ -236,7 +232,10 @@ class GitHubClient:
                     else:
                         error_msg = f"Access denied to {owner}/{name} (you may not have permission)"
                 else:
-                    error_msg = f"Error accessing {owner}/{name}: {detailed_msg}" if detailed_msg else f"Error accessing {owner}/{name}"
+                    if detailed_msg:
+                        error_msg = f"Error accessing {owner}/{name}: {detailed_msg}"
+                    else:
+                        error_msg = f"Error accessing {owner}/{name}"
                 return False, error_msg
             return False, f"Error accessing {owner}/{name}: {str(e)}"
 
@@ -372,7 +371,7 @@ class GitHubClient:
             repo_data = data.get('data', {}).get('repository', {})
 
             if not repo_data:
-                print(f"ERROR: No repository data in GraphQL response")
+                print("ERROR: No repository data in GraphQL response")
                 return []
 
             for i, pr_num in enumerate(pr_numbers[:100]):
@@ -507,7 +506,7 @@ class GitHubClient:
                 passed_count=success_count,
                 total_count=total_count
             )
-        except Exception as e:
+        except Exception:
             return CIStatus(state='unknown')
 
     def _parse_review_status_from_graphql(self, pr_data: dict) -> ReviewStatus:
@@ -554,7 +553,7 @@ class GitHubClient:
                 approval_count=approval_count,
                 comment_count=comment_count
             )
-        except Exception as e:
+        except Exception:
             return ReviewStatus(state='not_reviewed', approval_count=0, comment_count=0)
 
     def get_username(self) -> Optional[str]:
@@ -678,7 +677,10 @@ class GitHubClient:
         all_prs.sort(key=lambda pr: (pr.merged_at or pr.updated_at, pr.number), reverse=True)
         return all_prs
 
-    def get_review_requests_for_repo(self, owner: str, name: str, approved_by_me: bool = False, reviewed_by_me: bool = False, author: Optional[str] = None) -> list[PullRequestInfo]:
+    def get_review_requests_for_repo(
+        self, owner: str, name: str, approved_by_me: bool = False,
+        reviewed_by_me: bool = False, author: Optional[str] = None
+    ) -> list[PullRequestInfo]:
         """Get open PRs where the current user's review is requested for a specific repository.
 
         Args:
@@ -720,7 +722,10 @@ class GitHubClient:
             print(f"ERROR: Failed to get review requests for {owner}/{name}: {e}")
             return []
 
-    def get_all_review_requests(self, repos: list[tuple[str, str]], approved_by_me: bool = False, reviewed_by_me: bool = False, author: Optional[str] = None) -> list[PullRequestInfo]:
+    def get_all_review_requests(
+        self, repos: list[tuple[str, str]], approved_by_me: bool = False,
+        reviewed_by_me: bool = False, author: Optional[str] = None
+    ) -> list[PullRequestInfo]:
         """Get all open PRs where the current user's review is requested across multiple repositories.
 
         Args:
@@ -737,7 +742,10 @@ class GitHubClient:
         # Fetch PRs from all repos in parallel
         with ThreadPoolExecutor(max_workers=min(10, len(repos))) as executor:
             future_to_repo = {
-                executor.submit(self.get_review_requests_for_repo, owner, name, approved_by_me, reviewed_by_me, author): (owner, name)
+                executor.submit(
+                    self.get_review_requests_for_repo, owner, name,
+                    approved_by_me, reviewed_by_me, author
+                ): (owner, name)
                 for owner, name in repos
             }
 
@@ -931,7 +939,9 @@ class GitHubClient:
 
         return approved_prs
 
-    def _filter_prs_reviewed_not_approved_by_user(self, prs: list[PullRequestInfo], username: str) -> list[PullRequestInfo]:
+    def _filter_prs_reviewed_not_approved_by_user(
+        self, prs: list[PullRequestInfo], username: str
+    ) -> list[PullRequestInfo]:
         """Filter PRs to only include those reviewed (but not approved) by the given user using GraphQL."""
         if not prs:
             return []
@@ -1054,7 +1064,6 @@ class GitHubClient:
 
         # Check if issue has pull_request attribute with status info
         if hasattr(issue, 'pull_request') and issue.pull_request:
-            pr_data = issue.pull_request
             # Some status might be available in raw_data
             if hasattr(issue, '_rawData'):
                 raw = issue._rawData
@@ -1158,7 +1167,10 @@ class GitHubClient:
             # Query: PRs where user is author (to get reviews received)
             query_received = f'''
                 query {{
-                    search(query: "repo:{owner}/{name} is:pr author:{username} updated:>{cutoff_iso[:10]}", type: ISSUE, first: 50) {{
+                    search(
+                        query: "repo:{owner}/{name} is:pr author:{username} updated:>{cutoff_iso[:10]}",
+                        type: ISSUE, first: 50
+                    ) {{
                         nodes {{
                             ... on PullRequest {{
                                 number
@@ -1182,7 +1194,10 @@ class GitHubClient:
             # Query: PRs where user reviewed (to get reviews given)
             query_given = f'''
                 query {{
-                    search(query: "repo:{owner}/{name} is:pr reviewed-by:{username} updated:>{cutoff_iso[:10]}", type: ISSUE, first: 50) {{
+                    search(
+                        query: "repo:{owner}/{name} is:pr reviewed-by:{username} updated:>{cutoff_iso[:10]}",
+                        type: ISSUE, first: 50
+                    ) {{
                         nodes {{
                             ... on PullRequest {{
                                 number
