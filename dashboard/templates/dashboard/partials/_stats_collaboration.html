@@ -1,0 +1,51 @@
+<h2 class="stats-section-title">Collaboration</h2>
+
+<div class="collab-sections">
+    {% if collaboration_stats.who_reviews_you %}
+    <div class="leaderboard">
+        <h3 class="leaderboard-title">Top Reviewers of Your PRs</h3>
+        <table class="leaderboard-table">
+            <tbody>
+                {% for person in collaboration_stats.who_reviews_you|slice:":5" %}
+                <tr>
+                    <td class="leaderboard-rank">{{ forloop.counter }}</td>
+                    <td class="leaderboard-user">
+                        {% if person.avatar_url %}
+                        <img src="{{ person.avatar_url }}" alt="" class="leaderboard-avatar">
+                        {% endif %}
+                        <span>{{ person.username }}</span>
+                    </td>
+                    <td class="leaderboard-count">{{ person.count }} reviews</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    {% if collaboration_stats.who_you_review %}
+    <div class="leaderboard">
+        <h3 class="leaderboard-title">Whose PRs You Review Most</h3>
+        <table class="leaderboard-table">
+            <tbody>
+                {% for person in collaboration_stats.who_you_review|slice:":5" %}
+                <tr>
+                    <td class="leaderboard-rank">{{ forloop.counter }}</td>
+                    <td class="leaderboard-user">
+                        {% if person.avatar_url %}
+                        <img src="{{ person.avatar_url }}" alt="" class="leaderboard-avatar">
+                        {% endif %}
+                        <span>{{ person.username }}</span>
+                    </td>
+                    <td class="leaderboard-count">{{ person.count }} reviews</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    {% if not collaboration_stats.who_reviews_you and not collaboration_stats.who_you_review %}
+    <p class="stats-empty">No collaboration data available</p>
+    {% endif %}
+</div>

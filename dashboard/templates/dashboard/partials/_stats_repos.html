@@ -1,0 +1,33 @@
+<h2 class="stats-section-title">Repository Breakdown</h2>
+
+{% if repo_stats.repos %}
+<div class="chart-container chart-container-small">
+    <canvas id="repoChart"></canvas>
+</div>
+
+<script type="application/json" id="repoData">
+{
+    "labels": [{% for repo in repo_stats.repos|slice:":8" %}"{{ repo.full_name|truncatechars:20 }}"{% if not forloop.last %}, {% endif %}{% endfor %}],
+    "values": [{% for repo in repo_stats.repos|slice:":8" %}{{ repo.open_count|add:repo.merged_count }}{% if not forloop.last %}, {% endif %}{% endfor %}]
+}
+</script>
+
+<div class="repo-list-stats">
+    {% for repo in repo_stats.repos %}
+    <div class="repo-stat-item">
+        <span class="repo-stat-name">{{ repo.full_name }}</span>
+        <span class="repo-stat-counts">
+            <span class="repo-stat-open">{{ repo.open_count }} open</span>
+            <span class="repo-stat-merged">{{ repo.merged_count }} merged</span>
+        </span>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="repo-totals">
+    <span><strong>{{ repo_stats.total_open }}</strong> total open</span>
+    <span><strong>{{ repo_stats.total_merged }}</strong> total merged</span>
+</div>
+{% else %}
+<p class="stats-empty">No repository data available</p>
+{% endif %}

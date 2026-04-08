@@ -1,0 +1,92 @@
+<h2 class="stats-section-title">PR Health</h2>
+
+{% with aging_count=health_stats.aging_30_days|length %}
+{% with aging_14_count=health_stats.aging_14_days|length %}
+<div class="health-summary health-summary-clickable">
+    <button class="health-stat health-stat-warning" data-toggle="aging-section" type="button">
+        <div class="health-stat-value">{{ aging_count|add:aging_14_count }}</div>
+        <div class="health-stat-label">Aging PRs (14d+)</div>
+        <span class="health-stat-icon">+</span>
+    </button>
+    <button class="health-stat health-stat-danger" data-toggle="failing-ci-section" type="button">
+        <div class="health-stat-value">{{ health_stats.failing_ci_count }}</div>
+        <div class="health-stat-label">Failing CI</div>
+        <span class="health-stat-icon">+</span>
+    </button>
+</div>
+
+<div id="aging-section" class="health-collapsible" style="display: none;">
+    {% if health_stats.aging_30_days or health_stats.aging_14_days or health_stats.aging_7_days %}
+    <div class="aging-list">
+        <h3 class="leaderboard-title">PRs by Age</h3>
+
+        {% for aging in health_stats.aging_30_days %}
+        <div class="aging-item">
+            <span class="aging-badge aging-badge-danger">{{ aging.age_days }}d</span>
+            <a href="{{ aging.pr.url }}" target="_blank" class="aging-title">{{ aging.pr.title|truncatechars:50 }}</a>
+            <span class="aging-repo">{{ aging.pr.repo_full_name }}</span>
+        </div>
+        {% endfor %}
+
+        {% for aging in health_stats.aging_14_days %}
+        <div class="aging-item">
+            <span class="aging-badge aging-badge-warning">{{ aging.age_days }}d</span>
+            <a href="{{ aging.pr.url }}" target="_blank" class="aging-title">{{ aging.pr.title|truncatechars:50 }}</a>
+            <span class="aging-repo">{{ aging.pr.repo_full_name }}</span>
+        </div>
+        {% endfor %}
+
+        {% for aging in health_stats.aging_7_days %}
+        <div class="aging-item">
+            <span class="aging-badge">{{ aging.age_days }}d</span>
+            <a href="{{ aging.pr.url }}" target="_blank" class="aging-title">{{ aging.pr.title|truncatechars:50 }}</a>
+            <span class="aging-repo">{{ aging.pr.repo_full_name }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="stats-empty">No aging PRs - great job keeping things moving!</p>
+    {% endif %}
+</div>
+
+<div id="failing-ci-section" class="health-collapsible" style="display: none;">
+    {% if health_stats.failing_ci_prs %}
+    <div class="aging-list">
+        <h3 class="leaderboard-title">PRs with Failing CI</h3>
+        {% for pr in health_stats.failing_ci_prs %}
+        <div class="aging-item">
+            <span class="aging-badge aging-badge-danger">CI</span>
+            <a href="{{ pr.url }}" target="_blank" class="aging-title">{{ pr.title|truncatechars:50 }}</a>
+            <span class="aging-repo">{{ pr.repo_full_name }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="stats-empty">No PRs with failing CI</p>
+    {% endif %}
+</div>
+
+<script>
+(function() {
+    document.querySelectorAll('.health-stat[data-toggle]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var targetId = this.getAttribute('data-toggle');
+            var target = document.getElementById(targetId);
+            var icon = this.querySelector('.health-stat-icon');
+            if (target) {
+                if (target.style.display === 'none') {
+                    target.style.display = 'block';
+                    if (icon) icon.textContent = '−';
+                    this.classList.add('active');
+                } else {
+                    target.style.display = 'none';
+                    if (icon) icon.textContent = '+';
+                    this.classList.remove('active');
+                }
+            }
+        });
+    });
+})();
+</script>
+{% endwith %}
+{% endwith %}

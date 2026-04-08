@@ -70,3 +70,24 @@ def is_light_color(hex_color):
     luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
 
     return luminance > 0.5
+
+
+@register.filter
+def hours_display(hours):
+    """Convert hours to a human-readable display (e.g., '4d 5h' or '12h')."""
+    if not hours or hours == 0:
+        return "0h"
+
+    try:
+        hours = float(hours)
+    except (ValueError, TypeError):
+        return "0h"
+
+    if hours >= 24:
+        days = int(hours / 24)
+        remaining_hours = int(hours % 24)
+        if remaining_hours > 0:
+            return f"{days}d {remaining_hours}h"
+        return f"{days}d"
+    else:
+        return f"{int(hours)}h"

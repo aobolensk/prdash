@@ -1,0 +1,29 @@
+<h2 class="stats-section-title">Velocity</h2>
+
+<div class="chart-row">
+    <div class="chart-container">
+        <canvas id="velocityChart"></canvas>
+    </div>
+    <div class="chart-container">
+        <canvas id="linesChart"></canvas>
+    </div>
+</div>
+
+<script type="application/json" id="velocityData">
+{
+    "labels": [{% for week in velocity_stats.weekly_data %}"{{ week.week_start|date:'M j' }}"{% if not forloop.last %}, {% endif %}{% endfor %}],
+    "opened": [{% for week in velocity_stats.weekly_data %}{{ week.opened }}{% if not forloop.last %}, {% endif %}{% endfor %}],
+    "merged": [{% for week in velocity_stats.weekly_data %}{{ week.merged }}{% if not forloop.last %}, {% endif %}{% endfor %}],
+    "linesAdded": [{% for week in velocity_stats.weekly_data %}{{ week.lines_added }}{% if not forloop.last %}, {% endif %}{% endfor %}],
+    "linesRemoved": [{% for week in velocity_stats.weekly_data %}{{ week.lines_removed }}{% if not forloop.last %}, {% endif %}{% endfor %}]
+}
+</script>
+
+<div class="velocity-summary">
+    <span class="summary-item">
+        <strong>{{ velocity_stats.total_lines_changed|floatformat:0 }}</strong> lines changed
+    </span>
+    <span class="summary-item">
+        <strong>{{ velocity_stats.avg_prs_per_week|floatformat:1 }}</strong> PRs/week avg
+    </span>
+</div>

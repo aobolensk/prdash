@@ -7,6 +7,7 @@ import re
 
 from .models import TrackedRepository, PersonalAccessToken
 from .github_client import GitHubClient
+from .stats_service import StatsService
 
 
 def _parse_repo_input(repo_input):
@@ -518,6 +519,36 @@ def remove_repo(request, repo_id):
     response = render(request, 'dashboard/partials/_repo_list.html', {'repos': repos})
     response['HX-Trigger'] = 'repoRemoved'
     return response
+
+
+@login_required
+def stats(request):
+    """Stats and analytics page."""
+    repos = TrackedRepository.objects.filter(user=request.user)
+    repo_tuples = [(repo.owner, repo.name) for repo in repos]
+
+    days = int(request.GET.get('days', 30))
+    if days not in (7, 14, 30, 90, 180):
+        days = 30
+
+    client = GitHubClient(request.user)
+    stats_service = StatsService(client)
+
+    # Fetch all stats
+    all_stats = stats_service.get_all_stats(repo_tuples, days)
+
+    context = {
+        'days': days,
+        'quick_stats': all_stats['quick'],
+        'velocity_stats': all_stats['velocity'],
+        'review_stats': all_stats['reviews'],
+        'health_stats': all_stats['health'],
+        'repo_stats': all_stats['repos'],
+        'collaboration_stats': all_stats['collaboration'],
+        'repos': repos,
+    }
+
+    return render(request, 'dashboard/stats.html', context)
 
 
 @login_required

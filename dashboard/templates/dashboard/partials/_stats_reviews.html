@@ -1,0 +1,42 @@
+{% load dashboard_tags %}
+<h2 class="stats-section-title">Review Activity</h2>
+
+<div class="review-summary">
+    <div class="review-stat">
+        <div class="review-stat-value">{{ review_stats.reviews_given }}</div>
+        <div class="review-stat-label">Reviews Given</div>
+    </div>
+    <div class="review-stat">
+        <div class="review-stat-value">{{ review_stats.reviews_received }}</div>
+        <div class="review-stat-label">Reviews Received</div>
+    </div>
+    <div class="review-stat has-tooltip">
+        <div class="review-stat-value">{{ review_stats.avg_turnaround_hours|hours_display }}</div>
+        <div class="review-stat-label">Avg Turnaround <span class="stat-help">?</span></div>
+        <div class="stat-tooltip">Average time from PR creation to first review</div>
+    </div>
+</div>
+
+{% if review_stats.top_reviewed_by %}
+<div class="leaderboard">
+    <h3 class="leaderboard-title">Who Reviews Your PRs</h3>
+    <table class="leaderboard-table">
+        <tbody>
+            {% for reviewer in review_stats.top_reviewed_by %}
+            <tr>
+                <td class="leaderboard-rank">{{ forloop.counter }}</td>
+                <td class="leaderboard-user">
+                    {% if reviewer.avatar_url %}
+                    <img src="{{ reviewer.avatar_url }}" alt="" class="leaderboard-avatar">
+                    {% endif %}
+                    <span>{{ reviewer.username }}</span>
+                </td>
+                <td class="leaderboard-count">{{ reviewer.review_count }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p class="stats-empty">No review data available</p>
+{% endif %}

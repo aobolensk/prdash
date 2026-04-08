@@ -1111,6 +1111,228 @@ class GitHubClient:
             deletions=0,  # Can't get this from Issue without extra API call
         )
 
+    def get_reviews_for_stats(self, repos: list[tuple[str, str]], username: str, days: int = 30) -> dict:
+        """Get review statistics for a user across repos.
+
+        Returns dict with:
+        - reviews_given: count of reviews the user has given
+        - reviews_received: count of reviews received on user's PRs
+        - avg_turnaround_hours: average time to first review
+        - top_reviewers: list of {username, avatar_url, count} for PRs user reviewed
+        - top_reviewed_by: list of {username, avatar_url, count} for who reviews user's PRs
+        """
+        if not repos or not username:
+            return {
+                'reviews_given': 0,
+                'reviews_received': 0,
+                'avg_turnaround_hours': 0.0,
+                'top_reviewers': [],
+                'top_reviewed_by': [],
+            }
+
+        token = self._get_token()
+        if not token:
+            return {
+                'reviews_given': 0,
+                'reviews_received': 0,
+                'avg_turnaround_hours': 0.0,
+                'top_reviewers': [],
+                'top_reviewed_by': [],
+            }
+
+        import requests
+        from datetime import datetime, timedelta
+        from collections import defaultdict
+
+        cutoff = datetime.now() - timedelta(days=days)
+        cutoff_iso = cutoff.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+        reviews_given_to = defaultdict(lambda: {'count': 0, 'avatar': ''})  # username -> {count, avatar}
+        reviews_received_from = defaultdict(lambda: {'count': 0, 'avatar': ''})  # username -> {count, avatar}
+        reviews_given_count = 0
+        reviews_received_count = 0
+        total_turnaround = 0.0
+        turnaround_count = 0
+
+        for owner, name in repos:
+            # Query: PRs where user is author (to get reviews received)
+            query_received = f'''
+                query {{
+                    search(query: "repo:{owner}/{name} is:pr author:{username} updated:>{cutoff_iso[:10]}", type: ISSUE, first: 50) {{
+                        nodes {{
+                            ... on PullRequest {{
+                                number
+                                createdAt
+                                reviews(first: 100) {{
+                                    nodes {{
+                                        author {{
+                                            login
+                                            avatarUrl
+                                        }}
+                                        state
+                                        submittedAt
+                                    }}
+                                }}
+                            }}
+                        }}
+                    }}
+                }}
+            '''
+
+            # Query: PRs where user reviewed (to get reviews given)
+            query_given = f'''
+                query {{
+                    search(query: "repo:{owner}/{name} is:pr reviewed-by:{username} updated:>{cutoff_iso[:10]}", type: ISSUE, first: 50) {{
+                        nodes {{
+                            ... on PullRequest {{
+                                number
+                                author {{
+                                    login
+                                    avatarUrl
+                                }}
+                                reviews(first: 100) {{
+                                    nodes {{
+                                        author {{
+                                            login
+                                        }}
+                                        state
+                                        submittedAt
+                                    }}
+                                }}
+                            }}
+                        }}
+                    }}
+                }}
+            '''
+
+            try:
+                # Fetch PRs where user is author
+                resp_received = requests.post(
+                    'https://api.github.com/graphql',
+                    json={'query': query_received},
+                    headers={
+                        'Authorization': f'Bearer {token}',
+                        'Content-Type': 'application/json',
+                    },
+                    timeout=30
+                )
+
+                if resp_received.status_code == 200:
+                    data = resp_received.json()
+                    prs = data.get('data', {}).get('search', {}).get('nodes', [])
+
+                    for pr in prs:
+                        if not pr:
+                            continue
+                        reviews = pr.get('reviews', {}).get('nodes', [])
+                        pr_created = pr.get('createdAt')
+
+                        seen_reviewers = set()
+                        first_review_time = None
+
+                        for review in reviews:
+                            if not review or not review.get('author'):
+                                continue
+                            reviewer = review['author']['login']
+                            avatar = review['author'].get('avatarUrl', '')
+                            submitted = review.get('submittedAt')
+
+                            if reviewer == username:
+                                continue  # Skip self-reviews
+
+                            if reviewer not in seen_reviewers:
+                                seen_reviewers.add(reviewer)
+                                reviews_received_from[reviewer]['count'] += 1
+                                if avatar:
+                                    reviews_received_from[reviewer]['avatar'] = avatar
+
+                            # Track first review time
+                            if submitted and (first_review_time is None or submitted < first_review_time):
+                                first_review_time = submitted
+
+                        reviews_received_count += len(seen_reviewers)
+
+                        # Calculate turnaround
+                        if pr_created and first_review_time:
+                            try:
+                                created_dt = datetime.fromisoformat(pr_created.replace('Z', '+00:00'))
+                                review_dt = datetime.fromisoformat(first_review_time.replace('Z', '+00:00'))
+                                turnaround_hours = (review_dt - created_dt).total_seconds() / 3600
+                                if turnaround_hours > 0:
+                                    total_turnaround += turnaround_hours
+                                    turnaround_count += 1
+                            except Exception:
+                                pass
+
+                # Fetch PRs where user reviewed
+                resp_given = requests.post(
+                    'https://api.github.com/graphql',
+                    json={'query': query_given},
+                    headers={
+                        'Authorization': f'Bearer {token}',
+                        'Content-Type': 'application/json',
+                    },
+                    timeout=30
+                )
+
+                if resp_given.status_code == 200:
+                    data = resp_given.json()
+                    prs = data.get('data', {}).get('search', {}).get('nodes', [])
+
+                    for pr in prs:
+                        if not pr:
+                            continue
+                        author_data = pr.get('author')
+                        if not author_data:
+                            continue
+                        pr_author = author_data['login']
+                        pr_avatar = author_data.get('avatarUrl', '')
+
+                        if pr_author == username:
+                            continue  # Skip own PRs
+
+                        reviews = pr.get('reviews', {}).get('nodes', [])
+                        user_reviewed = False
+
+                        for review in reviews:
+                            if not review or not review.get('author'):
+                                continue
+                            reviewer = review['author']['login']
+                            if reviewer == username:
+                                user_reviewed = True
+                                break
+
+                        if user_reviewed:
+                            reviews_given_count += 1
+                            reviews_given_to[pr_author]['count'] += 1
+                            if pr_avatar:
+                                reviews_given_to[pr_author]['avatar'] = pr_avatar
+
+            except Exception as e:
+                print(f"ERROR: Failed to fetch review stats for {owner}/{name}: {e}")
+
+        # Build top reviewers (authors of PRs that user reviewed)
+        top_reviewers = [
+            {'username': author, 'count': data['count'], 'avatar_url': data['avatar']}
+            for author, data in sorted(reviews_given_to.items(), key=lambda x: -x[1]['count'])[:10]
+        ]
+
+        # Build top reviewed by
+        top_reviewed_by = [
+            {'username': reviewer, 'count': data['count'], 'avatar_url': data['avatar']}
+            for reviewer, data in sorted(reviews_received_from.items(), key=lambda x: -x[1]['count'])[:10]
+        ]
+
+        avg_turnaround = total_turnaround / turnaround_count if turnaround_count > 0 else 0.0
+
+        return {
+            'reviews_given': reviews_given_count,
+            'reviews_received': reviews_received_count,
+            'avg_turnaround_hours': avg_turnaround,
+            'top_reviewers': top_reviewers,
+            'top_reviewed_by': top_reviewed_by,
+        }
+
     def _pr_to_info(self, pr, repo_owner: str, repo_name: str) -> PullRequestInfo:
         """Convert a PyGithub PullRequest to PullRequestInfo."""
         labels = [

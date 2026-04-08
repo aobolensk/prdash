@@ -1,0 +1,276 @@
+{% extends 'dashboard/base.html' %}
+
+{% block title %}Stats - PR Dashboard{% endblock %}
+
+{% block content %}
+<div class="stats-layout">
+    <div class="stats-container">
+        <div class="stats-header">
+            <h1>PR Statistics</h1>
+            <div class="stats-controls">
+                <div class="time-filter">
+                    <a href="?days=7" class="btn btn-small {% if days == 7 %}btn-primary{% else %}btn-secondary{% endif %}">7d</a>
+                    <a href="?days=14" class="btn btn-small {% if days == 14 %}btn-primary{% else %}btn-secondary{% endif %}">14d</a>
+                    <a href="?days=30" class="btn btn-small {% if days == 30 %}btn-primary{% else %}btn-secondary{% endif %}">30d</a>
+                    <a href="?days=90" class="btn btn-small {% if days == 90 %}btn-primary{% else %}btn-secondary{% endif %}">90d</a>
+                    <a href="?days=180" class="btn btn-small {% if days == 180 %}btn-primary{% else %}btn-secondary{% endif %}">180d</a>
+                </div>
+                <a href="{% url 'dashboard:pr_list' %}" class="btn btn-secondary">Back to Dashboard</a>
+            </div>
+        </div>
+
+        {% if not repos %}
+        <div class="empty-state">
+            <p>No repositories tracked. Add some repositories from the dashboard to see stats.</p>
+            <a href="{% url 'dashboard:pr_list' %}" class="btn btn-primary">Go to Dashboard</a>
+        </div>
+        {% else %}
+
+        <!-- Quick Stats -->
+        {% include 'dashboard/partials/_stats_quick.html' %}
+
+        <!-- Charts Row -->
+        <div class="stats-row">
+            <!-- Velocity Chart -->
+            <div class="stats-section stats-section-wide">
+                {% include 'dashboard/partials/_stats_velocity.html' %}
+            </div>
+        </div>
+
+        <!-- Two Column Row -->
+        <div class="stats-row stats-row-2col">
+            <!-- Review Activity -->
+            <div class="stats-section">
+                {% include 'dashboard/partials/_stats_reviews.html' %}
+            </div>
+
+            <!-- Repository Breakdown -->
+            <div class="stats-section">
+                {% include 'dashboard/partials/_stats_repos.html' %}
+            </div>
+        </div>
+
+        <!-- Two Column Row -->
+        <div class="stats-row stats-row-2col">
+            <!-- PR Health -->
+            <div class="stats-section">
+                {% include 'dashboard/partials/_stats_health.html' %}
+            </div>
+
+            <!-- Collaboration -->
+            <div class="stats-section">
+                {% include 'dashboard/partials/_stats_collaboration.html' %}
+            </div>
+        </div>
+
+        {% endif %}
+    </div>
+</div>
+
+{% if repos %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Get theme-aware colors
+    function getChartColors() {
+        const style = getComputedStyle(document.documentElement);
+        return {
+            primary: style.getPropertyValue('--color-primary').trim() || '#0969da',
+            success: style.getPropertyValue('--color-success').trim() || '#1a7f37',
+            danger: style.getPropertyValue('--color-danger').trim() || '#cf222e',
+            text: style.getPropertyValue('--color-text').trim() || '#24292f',
+            textSecondary: style.getPropertyValue('--color-text-secondary').trim() || '#57606a',
+            border: style.getPropertyValue('--color-border').trim() || '#d0d7de',
+            bgSecondary: style.getPropertyValue('--color-bg-secondary').trim() || '#f6f8fa',
+        };
+    }
+
+    let colors = getChartColors();
+    let charts = [];
+
+    // Common chart options
+    const commonOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                labels: {
+                    color: colors.text,
+                    font: { size: 12 }
+                }
+            }
+        },
+        scales: {
+            x: {
+                ticks: { color: colors.textSecondary },
+                grid: { color: colors.border, drawBorder: false }
+            },
+            y: {
+                ticks: { color: colors.textSecondary },
+                grid: { color: colors.border, drawBorder: false },
+                beginAtZero: true
+            }
+        }
+    };
+
+    // Velocity Chart (PRs over time)
+    const velocityCtx = document.getElementById('velocityChart');
+    if (velocityCtx) {
+        const velocityData = JSON.parse(document.getElementById('velocityData').textContent);
+        const velocityChart = new Chart(velocityCtx, {
+            type: 'line',
+            data: {
+                labels: velocityData.labels,
+                datasets: [
+                    {
+                        label: 'Opened',
+                        data: velocityData.opened,
+                        borderColor: colors.primary,
+                        backgroundColor: colors.primary + '20',
+                        tension: 0.3,
+                        fill: true
+                    },
+                    {
+                        label: 'Merged',
+                        data: velocityData.merged,
+                        borderColor: colors.success,
+                        backgroundColor: colors.success + '20',
+                        tension: 0.3,
+                        fill: true
+                    }
+                ]
+            },
+            options: {
+                ...commonOptions,
+                plugins: {
+                    ...commonOptions.plugins,
+                    title: {
+                        display: true,
+                        text: 'PR Activity Over Time',
+                        color: colors.text
+                    }
+                }
+            }
+        });
+        charts.push(velocityChart);
+    }
+
+    // Lines Changed Chart
+    const linesCtx = document.getElementById('linesChart');
+    if (linesCtx) {
+        const velocityData = JSON.parse(document.getElementById('velocityData').textContent);
+        const linesChart = new Chart(linesCtx, {
+            type: 'bar',
+            data: {
+                labels: velocityData.labels,
+                datasets: [
+                    {
+                        label: 'Lines Added',
+                        data: velocityData.linesAdded,
+                        backgroundColor: colors.success + '80',
+                        borderColor: colors.success,
+                        borderWidth: 1
+                    },
+                    {
+                        label: 'Lines Removed',
+                        data: velocityData.linesRemoved,
+                        backgroundColor: colors.danger + '80',
+                        borderColor: colors.danger,
+                        borderWidth: 1
+                    }
+                ]
+            },
+            options: {
+                ...commonOptions,
+                plugins: {
+                    ...commonOptions.plugins,
+                    title: {
+                        display: true,
+                        text: 'Lines Changed Over Time',
+                        color: colors.text
+                    }
+                },
+                scales: {
+                    ...commonOptions.scales,
+                    x: { ...commonOptions.scales.x, stacked: false },
+                    y: { ...commonOptions.scales.y, stacked: false }
+                }
+            }
+        });
+        charts.push(linesChart);
+    }
+
+    // Repo Distribution Pie Chart
+    const repoCtx = document.getElementById('repoChart');
+    if (repoCtx) {
+        const repoData = JSON.parse(document.getElementById('repoData').textContent);
+        const repoChart = new Chart(repoCtx, {
+            type: 'doughnut',
+            data: {
+                labels: repoData.labels,
+                datasets: [{
+                    data: repoData.values,
+                    backgroundColor: [
+                        colors.primary,
+                        colors.success,
+                        colors.danger,
+                        '#8250df',
+                        '#bf8700',
+                        '#0550ae',
+                        '#1a7f37',
+                        '#cf222e',
+                    ],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'right',
+                        labels: {
+                            color: colors.text,
+                            font: { size: 11 },
+                            boxWidth: 12,
+                            padding: 8
+                        }
+                    }
+                }
+            }
+        });
+        charts.push(repoChart);
+    }
+
+    // Update charts on theme change
+    const observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            if (mutation.attributeName === 'data-theme') {
+                colors = getChartColors();
+                charts.forEach(chart => {
+                    // Update colors
+                    if (chart.options.plugins?.legend?.labels) {
+                        chart.options.plugins.legend.labels.color = colors.text;
+                    }
+                    if (chart.options.scales?.x) {
+                        chart.options.scales.x.ticks.color = colors.textSecondary;
+                        chart.options.scales.x.grid.color = colors.border;
+                    }
+                    if (chart.options.scales?.y) {
+                        chart.options.scales.y.ticks.color = colors.textSecondary;
+                        chart.options.scales.y.grid.color = colors.border;
+                    }
+                    chart.update();
+                });
+            }
+        });
+    });
+
+    observer.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['data-theme']
+    });
+});
+</script>
+{% endif %}
+{% endblock %}

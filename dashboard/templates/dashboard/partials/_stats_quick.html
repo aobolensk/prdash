@@ -1,0 +1,19 @@
+{% load dashboard_tags %}
+<div class="quick-stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{ quick_stats.open_count }}</div>
+        <div class="stat-label">Open PRs</div>
+    </div>
+    <div class="stat-card stat-card-success">
+        <div class="stat-value">{{ quick_stats.merged_count }}</div>
+        <div class="stat-label">Merged</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ quick_stats.avg_merge_time_hours|hours_display }}</div>
+        <div class="stat-label">Avg Merge Time</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ velocity_stats.avg_prs_per_week|floatformat:1 }}</div>
+        <div class="stat-label">PRs/Week</div>
+    </div>
+</div>
