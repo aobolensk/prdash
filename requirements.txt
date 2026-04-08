@@ -1,4 +1,4 @@
-Django==6.0.3
+Django==6.0.4
 django-allauth==65.14.1
 django-htmx==1.21.0
 PyGithub==2.5.0
