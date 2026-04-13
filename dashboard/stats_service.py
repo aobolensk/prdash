@@ -37,6 +37,13 @@ class VelocityStats:
     total_lines_changed: int = 0
     granularity: str = "week"  # "day" or "week"
 
+    @property
+    def avg_prs_per_week(self) -> float:
+        """Convert avg PRs per period to weekly rate."""
+        if self.granularity == "day":
+            return self.avg_prs_per_period * 7
+        return self.avg_prs_per_period
+
 
 @dataclass
 class ReviewerData:
