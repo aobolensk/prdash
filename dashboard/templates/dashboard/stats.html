@@ -44,6 +44,20 @@
                        hx-push-url="?days=180"
                        class="btn btn-small {% if days == 180 %}btn-primary{% else %}btn-secondary{% endif %}"
                        data-days="180">180d</a>
+                    <a href="?days=365"
+                       hx-get="{% url 'dashboard:stats_content' %}?days=365"
+                       hx-target="#stats-content"
+                       hx-swap="innerHTML"
+                       hx-push-url="?days=365"
+                       class="btn btn-small {% if days == 365 %}btn-primary{% else %}btn-secondary{% endif %}"
+                       data-days="365">365d</a>
+                    <a href="?days=all"
+                       hx-get="{% url 'dashboard:stats_content' %}?days=all"
+                       hx-target="#stats-content"
+                       hx-swap="innerHTML"
+                       hx-push-url="?days=all"
+                       class="btn btn-small {% if days == -1 %}btn-primary{% else %}btn-secondary{% endif %}"
+                       data-days="all">All Time</a>
                 </div>
                 <a href="{% url 'dashboard:pr_list' %}" class="btn btn-secondary">Back to Dashboard</a>
             </div>
@@ -58,7 +72,7 @@
 
         <!-- Stats content loaded via HTMX -->
         <div id="stats-content"
-             hx-get="{% url 'dashboard:stats_content' %}?days={{ days }}"
+             hx-get="{% url 'dashboard:stats_content' %}?days={% if days == -1 %}all{% else %}{{ days }}{% endif %}"
              hx-trigger="load"
              hx-swap="innerHTML">
             <!-- Loading skeleton -->

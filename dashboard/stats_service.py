@@ -18,9 +18,9 @@ class QuickStats:
 
 
 @dataclass
-class WeeklyData:
-    """Data for a single week."""
-    week_start: datetime
+class PeriodData:
+    """Data for a single time period (day or week)."""
+    period_start: datetime
     opened: int = 0
     merged: int = 0
     closed: int = 0
@@ -31,10 +31,11 @@ class WeeklyData:
 @dataclass
 class VelocityStats:
     """PR velocity over time."""
-    weekly_data: list[WeeklyData] = field(default_factory=list)
-    avg_prs_per_week: float = 0.0
+    period_data: list[PeriodData] = field(default_factory=list)
+    avg_prs_per_period: float = 0.0
     avg_merge_time_hours: float = 0.0
     total_lines_changed: int = 0
+    granularity: str = "week"  # "day" or "week"
 
 
 @dataclass
@@ -71,6 +72,11 @@ class HealthStats:
     aging_30_days: list[AgingPR] = field(default_factory=list)
     failing_ci_prs: list = field(default_factory=list)
     failing_ci_count: int = 0
+
+    @property
+    def aging_prs_count(self) -> int:
+        """Count of PRs that are 14+ days old."""
+        return len(self.aging_30_days) + len(self.aging_14_days)
 
 
 @dataclass
@@ -199,6 +205,10 @@ class StatsService:
         cache.set(cache_key, stats, self.CACHE_TTL)
         return stats
 
+    def _get_day_start(self, dt: datetime) -> datetime:
+        """Get the start of day for a date."""
+        return dt.replace(hour=0, minute=0, second=0, microsecond=0)
+
     def get_velocity_stats(self, repos: list[tuple[str, str]], days: int = 90) -> VelocityStats:
         """Get PR velocity statistics over time."""
         cache_key = self._get_cache_key("velocity", repos, days)
@@ -208,14 +218,31 @@ class StatsService:
 
         prs = self.get_prs_for_stats(repos, days)
         now = timezone.now()
-        cutoff_date = now - timedelta(days=days)
 
-        # Initialize weekly buckets
-        weeks: dict[datetime, WeeklyData] = {}
-        current = self._get_week_start(cutoff_date)
-        while current <= now:
-            weeks[current] = WeeklyData(week_start=current)
-            current += timedelta(days=7)
+        if days == -1 and prs:
+            # Find the earliest date from all PRs
+            earliest_dates = [pr.created_at for pr in prs]
+            earliest_dates.extend(pr.merged_at for pr in prs if pr.merged_at)
+            cutoff_date = min(earliest_dates)
+        else:
+            cutoff_date = now - timedelta(days=days)
+
+        # Use daily granularity for 7d and 14d, weekly for longer periods
+        use_daily = days <= 14
+        granularity = "day" if use_daily else "week"
+
+        # Initialize time period buckets
+        periods: dict[datetime, PeriodData] = {}
+        if use_daily:
+            current = self._get_day_start(cutoff_date)
+            while current <= now:
+                periods[current] = PeriodData(period_start=current)
+                current += timedelta(days=1)
+        else:
+            current = self._get_week_start(cutoff_date)
+            while current <= now:
+                periods[current] = PeriodData(period_start=current)
+                current += timedelta(days=7)
 
         total_merge_time = timedelta()
         merge_count = 0
@@ -224,36 +251,43 @@ class StatsService:
         for pr in prs:
             # Count opened PRs
             if pr.created_at >= cutoff_date:
-                week_start = self._get_week_start(pr.created_at)
-                if week_start in weeks:
-                    weeks[week_start].opened += 1
-                    weeks[week_start].lines_added += pr.additions
-                    weeks[week_start].lines_removed += pr.deletions
+                if use_daily:
+                    period_start = self._get_day_start(pr.created_at)
+                else:
+                    period_start = self._get_week_start(pr.created_at)
+                if period_start in periods:
+                    periods[period_start].opened += 1
+                    periods[period_start].lines_added += pr.additions
+                    periods[period_start].lines_removed += pr.deletions
                     total_lines += pr.additions + pr.deletions
 
             # Count merged PRs
             if pr.merged_at and pr.merged_at >= cutoff_date:
-                week_start = self._get_week_start(pr.merged_at)
-                if week_start in weeks:
-                    weeks[week_start].merged += 1
+                if use_daily:
+                    period_start = self._get_day_start(pr.merged_at)
+                else:
+                    period_start = self._get_week_start(pr.merged_at)
+                if period_start in periods:
+                    periods[period_start].merged += 1
                 merge_time = pr.merged_at - pr.created_at
                 total_merge_time += merge_time
                 merge_count += 1
 
-        weekly_data = sorted(weeks.values(), key=lambda w: w.week_start)
-        num_weeks = len(weekly_data) or 1
-        total_prs = sum(w.opened for w in weekly_data)
-        avg_prs = total_prs / num_weeks
+        period_data = sorted(periods.values(), key=lambda p: p.period_start)
+        num_periods = len(period_data) or 1
+        total_prs = sum(p.opened for p in period_data)
+        avg_prs = total_prs / num_periods
 
         avg_merge_hours = 0.0
         if merge_count > 0:
             avg_merge_hours = total_merge_time.total_seconds() / 3600 / merge_count
 
         stats = VelocityStats(
-            weekly_data=weekly_data,
-            avg_prs_per_week=avg_prs,
+            period_data=period_data,
+            avg_prs_per_period=avg_prs,
             avg_merge_time_hours=avg_merge_hours,
-            total_lines_changed=total_lines
+            total_lines_changed=total_lines,
+            granularity=granularity
         )
         cache.set(cache_key, stats, self.CACHE_TTL)
         return stats

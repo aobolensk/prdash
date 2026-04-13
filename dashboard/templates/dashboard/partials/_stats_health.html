@@ -1,10 +1,8 @@
 <h2 class="stats-section-title">PR Health</h2>
 
-{% with aging_count=health_stats.aging_30_days|length %}
-{% with aging_14_count=health_stats.aging_14_days|length %}
 <div class="health-summary health-summary-clickable">
     <button class="health-stat health-stat-warning" data-toggle="aging-section" type="button">
-        <div class="health-stat-value">{{ aging_count|add:aging_14_count }}</div>
+        <div class="health-stat-value">{{ health_stats.aging_prs_count }}</div>
         <div class="health-stat-label">Aging PRs (14d+)</div>
         <span class="health-stat-icon">+</span>
     </button>
@@ -88,5 +86,3 @@
     });
 })();
 </script>
-{% endwith %}
-{% endwith %}

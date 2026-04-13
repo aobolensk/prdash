@@ -520,14 +520,25 @@ def remove_repo(request, repo_id):
     return response
 
 
+def _parse_days_param(value: str) -> int:
+    """Parse the days parameter, returning -1 for 'all'."""
+    if value == 'all':
+        return -1
+    try:
+        days = int(value)
+        if days not in (7, 14, 30, 90, 180, 365):
+            return 30
+        return days
+    except (ValueError, TypeError):
+        return 30
+
+
 @login_required
 def stats(request):
     """Stats and analytics page."""
     repos = TrackedRepository.objects.filter(user=request.user)
 
-    days = int(request.GET.get('days', 30))
-    if days not in (7, 14, 30, 90, 180):
-        days = 30
+    days = _parse_days_param(request.GET.get('days', '30'))
 
     context = {
         'days': days,
@@ -543,9 +554,7 @@ def stats_content(request):
     repos = TrackedRepository.objects.filter(user=request.user)
     repo_tuples = [(repo.owner, repo.name) for repo in repos]
 
-    days = int(request.GET.get('days', 30))
-    if days not in (7, 14, 30, 90, 180):
-        days = 30
+    days = _parse_days_param(request.GET.get('days', '30'))
 
     client = GitHubClient(request.user)
     stats_service = StatsService(client)

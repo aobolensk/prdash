@@ -11,11 +11,11 @@
 
 <script type="application/json" id="velocityData">
 {
-    "labels": [{% for week in velocity_stats.weekly_data %}"{{ week.week_start|date:'M j' }}"{% if not forloop.last %}, {% endif %}{% endfor %}],
-    "opened": [{% for week in velocity_stats.weekly_data %}{{ week.opened }}{% if not forloop.last %}, {% endif %}{% endfor %}],
-    "merged": [{% for week in velocity_stats.weekly_data %}{{ week.merged }}{% if not forloop.last %}, {% endif %}{% endfor %}],
-    "linesAdded": [{% for week in velocity_stats.weekly_data %}{{ week.lines_added }}{% if not forloop.last %}, {% endif %}{% endfor %}],
-    "linesRemoved": [{% for week in velocity_stats.weekly_data %}{{ week.lines_removed }}{% if not forloop.last %}, {% endif %}{% endfor %}]
+    "labels": [{% for period in velocity_stats.period_data %}"{{ period.period_start|date:'M j' }}"{% if not forloop.last %}, {% endif %}{% endfor %}],
+    "opened": [{% for period in velocity_stats.period_data %}{{ period.opened }}{% if not forloop.last %}, {% endif %}{% endfor %}],
+    "merged": [{% for period in velocity_stats.period_data %}{{ period.merged }}{% if not forloop.last %}, {% endif %}{% endfor %}],
+    "linesAdded": [{% for period in velocity_stats.period_data %}{{ period.lines_added }}{% if not forloop.last %}, {% endif %}{% endfor %}],
+    "linesRemoved": [{% for period in velocity_stats.period_data %}{{ period.lines_removed }}{% if not forloop.last %}, {% endif %}{% endfor %}]
 }
 </script>
 
@@ -24,6 +24,6 @@
         <strong>{{ velocity_stats.total_lines_changed|floatformat:0 }}</strong> lines changed
     </span>
     <span class="summary-item">
-        <strong>{{ velocity_stats.avg_prs_per_week|floatformat:1 }}</strong> PRs/week avg
+        <strong>{{ velocity_stats.avg_prs_per_period|floatformat:1 }}</strong> PRs/{% if velocity_stats.granularity == "day" %}day{% else %}week{% endif %} avg
     </span>
 </div>
