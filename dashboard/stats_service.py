@@ -319,7 +319,7 @@ class StatsService:
                 avatar_url=r.get('avatar_url', ''),
                 review_count=r['count']
             )
-            for r in reviews_data.get('top_reviewers', [])[:5]
+            for r in reviews_data.get('top_reviewers', [])
         ]
 
         top_reviewed_by = [
@@ -328,7 +328,7 @@ class StatsService:
                 avatar_url=r.get('avatar_url', ''),
                 review_count=r['count']
             )
-            for r in reviews_data.get('top_reviewed_by', [])[:5]
+            for r in reviews_data.get('top_reviewed_by', [])
         ]
 
         stats = ReviewStats(
@@ -451,7 +451,7 @@ class StatsService:
                 avatar_url=r.get('avatar_url', ''),
                 count=r['count']
             )
-            for r in reviews_data.get('top_reviewed_by', [])[:10]
+            for r in reviews_data.get('top_reviewed_by', [])
         ]
 
         who_you_review = [
@@ -460,7 +460,7 @@ class StatsService:
                 avatar_url=r.get('avatar_url', ''),
                 count=r['count']
             )
-            for r in reviews_data.get('top_reviewers', [])[:10]
+            for r in reviews_data.get('top_reviewers', [])
         ]
 
         stats = CollaborationStats(

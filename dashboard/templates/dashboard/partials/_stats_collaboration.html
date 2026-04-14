@@ -6,7 +6,7 @@
         <h3 class="leaderboard-title">Top Reviewers of Your PRs</h3>
         <table class="leaderboard-table">
             <tbody>
-                {% for person in collaboration_stats.who_reviews_you|slice:":5" %}
+                {% for person in collaboration_stats.who_reviews_you %}
                 <tr>
                     <td class="leaderboard-rank">{{ forloop.counter }}</td>
                     <td class="leaderboard-user">
@@ -28,7 +28,7 @@
         <h3 class="leaderboard-title">Whose PRs You Review Most</h3>
         <table class="leaderboard-table">
             <tbody>
-                {% for person in collaboration_stats.who_you_review|slice:":5" %}
+                {% for person in collaboration_stats.who_you_review %}
                 <tr>
                     <td class="leaderboard-rank">{{ forloop.counter }}</td>
                     <td class="leaderboard-user">
