@@ -1,7 +1,7 @@
 {% extends 'dashboard/base.html' %}
 {% load socialaccount %}
 
-{% block title %}PR Dashboard{% endblock %}
+{% block title %}Sign In - PR Dashboard{% endblock %}
 
 {% block content %}
 <div class="landing">
@@ -14,7 +14,7 @@
                 <line x1="6" y1="9" x2="6" y2="21"></line>
             </svg>
             <h1>PR Dashboard</h1>
-            <p class="login-subtitle">Track and manage your pull requests across all your repositories in one dashboard</p>
+            <p class="login-subtitle">Track and manage your pull requests across all your repositories in one place.</p>
         </div>
 
         <a href="{% provider_login_url 'github' %}" class="btn btn-github">
@@ -25,7 +25,7 @@
         </a>
 
         <p class="login-note">
-            Add repositories you want to track after logging in
+            We'll request access to your repositories to fetch pull request data.
         </p>
     </div>
 </div>

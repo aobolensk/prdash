@@ -156,6 +156,12 @@ ACCOUNT_LOGOUT_REDIRECT_URL = '/'
 ACCOUNT_EMAIL_VERIFICATION = 'none'
 ACCOUNT_EMAIL_REQUIRED = False
 
+# GitHub-only authentication (no email/password signup or login)
+SOCIALACCOUNT_ONLY = True
+
+# Skip the intermediate "Continue to GitHub" confirmation page
+SOCIALACCOUNT_LOGIN_ON_GET = True
+
 # Store OAuth tokens
 SOCIALACCOUNT_STORE_TOKENS = True
 
