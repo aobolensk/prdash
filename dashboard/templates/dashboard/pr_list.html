@@ -1,7 +1,7 @@
 {% extends 'dashboard/base.html' %}
 {% load dashboard_tags %}
 
-{% block title %}My Pull Requests{% endblock %}
+{% block title %}{% if active_tab == 'review_requests' %}Review Requests{% elif active_tab == 'assigned' %}Assigned{% elif active_tab == 'merged' %}Merged PRs{% else %}My PRs{% endif %}{% if current_repo %} - {{ current_repo.owner }}/{{ current_repo.name }}{% endif %} - PR Dashboard{% endblock %}
 
 {% block content %}
 <div class="dashboard-layout"
