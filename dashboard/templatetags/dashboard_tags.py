@@ -38,10 +38,10 @@ def time_ago(value):
     elif days < 7:
         d = int(days)
         return f"{d} day{'s' if d != 1 else ''} ago"
-    elif weeks < 4:
+    elif days < 30:
         w = int(weeks)
         return f"{w} week{'s' if w != 1 else ''} ago"
-    elif months < 12:
+    elif days < 365:
         m = int(months)
         return f"{m} month{'s' if m != 1 else ''} ago"
     else:
