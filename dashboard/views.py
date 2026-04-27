@@ -61,13 +61,14 @@ def pr_list(request):
         'active_tab': 'open',
         'author': author,
         'current_username': current_username,
+        'errors': client.errors,
+        'warnings': client.warnings,
     }
 
     if request.headers.get('HX-Request') == 'true':
         response = render(request, 'dashboard/partials/_pr_content.html', context)
         triggers = {'tabChanged': 'my_prs', 'repoChanged': '', 'reviewTabChanged': 'pending'}
-        if client.errors:
-            triggers['showErrors'] = client.errors
+        triggers.update(client.get_notification_triggers())
         response['HX-Trigger'] = json.dumps(triggers)
         return response
 
@@ -92,13 +93,14 @@ def merged_pr_list(request):
         'active_tab': 'merged',
         'author': author,
         'current_username': current_username,
+        'errors': client.errors,
+        'warnings': client.warnings,
     }
 
     if request.headers.get('HX-Request') == 'true':
         response = render(request, 'dashboard/partials/_pr_content.html', context)
         triggers = {'tabChanged': 'merged', 'repoChanged': '', 'reviewTabChanged': 'pending'}
-        if client.errors:
-            triggers['showErrors'] = client.errors
+        triggers.update(client.get_notification_triggers())
         response['HX-Trigger'] = json.dumps(triggers)
         return response
 
@@ -128,13 +130,14 @@ def repo_pr_list(request, owner, repo):
         'active_tab': 'open',
         'author': author,
         'current_username': current_username,
+        'errors': client.errors,
+        'warnings': client.warnings,
     }
 
     if request.headers.get('HX-Request') == 'true':
         response = render(request, 'dashboard/partials/_pr_content.html', context)
         triggers = {'tabChanged': 'my_prs', 'repoChanged': f'{owner}/{repo}', 'reviewTabChanged': 'pending'}
-        if client.errors:
-            triggers['showErrors'] = client.errors
+        triggers.update(client.get_notification_triggers())
         response['HX-Trigger'] = json.dumps(triggers)
         return response
 
@@ -164,13 +167,14 @@ def repo_merged_pr_list(request, owner, repo):
         'active_tab': 'merged',
         'author': author,
         'current_username': current_username,
+        'errors': client.errors,
+        'warnings': client.warnings,
     }
 
     if request.headers.get('HX-Request') == 'true':
         response = render(request, 'dashboard/partials/_pr_content.html', context)
         triggers = {'tabChanged': 'merged', 'repoChanged': f'{owner}/{repo}', 'reviewTabChanged': 'pending'}
-        if client.errors:
-            triggers['showErrors'] = client.errors
+        triggers.update(client.get_notification_triggers())
         response['HX-Trigger'] = json.dumps(triggers)
         return response
 
@@ -196,13 +200,14 @@ def review_requests_list(request):
         'review_tab': 'pending',
         'author': author,
         'current_username': current_username,
+        'errors': client.errors,
+        'warnings': client.warnings,
     }
 
     if request.headers.get('HX-Request') == 'true':
         response = render(request, 'dashboard/partials/_pr_content.html', context)
         triggers = {'tabChanged': 'review_requests', 'repoChanged': '', 'reviewTabChanged': 'pending'}
-        if client.errors:
-            triggers['showErrors'] = client.errors
+        triggers.update(client.get_notification_triggers())
         response['HX-Trigger'] = json.dumps(triggers)
         return response
 
@@ -228,13 +233,14 @@ def review_approved_list(request):
         'review_tab': 'approved',
         'author': author,
         'current_username': current_username,
+        'errors': client.errors,
+        'warnings': client.warnings,
     }
 
     if request.headers.get('HX-Request') == 'true':
         response = render(request, 'dashboard/partials/_pr_content.html', context)
         triggers = {'tabChanged': 'review_approved', 'repoChanged': '', 'reviewTabChanged': 'approved'}
-        if client.errors:
-            triggers['showErrors'] = client.errors
+        triggers.update(client.get_notification_triggers())
         response['HX-Trigger'] = json.dumps(triggers)
         return response
 
@@ -263,13 +269,14 @@ def review_reviewed_list(request):
         'review_tab': 'reviewed',
         'author': author,
         'current_username': current_username,
+        'errors': client.errors,
+        'warnings': client.warnings,
     }
 
     if request.headers.get('HX-Request') == 'true':
         response = render(request, 'dashboard/partials/_pr_content.html', context)
         triggers = {'tabChanged': 'review_reviewed', 'repoChanged': '', 'reviewTabChanged': 'reviewed'}
-        if client.errors:
-            triggers['showErrors'] = client.errors
+        triggers.update(client.get_notification_triggers())
         response['HX-Trigger'] = json.dumps(triggers)
         return response
 
@@ -294,13 +301,14 @@ def assigned_list(request):
         'active_tab': 'assigned',
         'author': author,
         'current_username': current_username,
+        'errors': client.errors,
+        'warnings': client.warnings,
     }
 
     if request.headers.get('HX-Request') == 'true':
         response = render(request, 'dashboard/partials/_pr_content.html', context)
         triggers = {'tabChanged': 'assigned', 'repoChanged': '', 'reviewTabChanged': 'pending'}
-        if client.errors:
-            triggers['showErrors'] = client.errors
+        triggers.update(client.get_notification_triggers())
         response['HX-Trigger'] = json.dumps(triggers)
         return response
 
@@ -331,13 +339,14 @@ def repo_review_requests_list(request, owner, repo):
         'review_tab': 'pending',
         'author': author,
         'current_username': current_username,
+        'errors': client.errors,
+        'warnings': client.warnings,
     }
 
     if request.headers.get('HX-Request') == 'true':
         response = render(request, 'dashboard/partials/_pr_content.html', context)
         triggers = {'tabChanged': 'review_requests', 'repoChanged': f'{owner}/{repo}', 'reviewTabChanged': 'pending'}
-        if client.errors:
-            triggers['showErrors'] = client.errors
+        triggers.update(client.get_notification_triggers())
         response['HX-Trigger'] = json.dumps(triggers)
         return response
 
@@ -372,13 +381,14 @@ def repo_review_approved_list(request, owner, repo):
         'review_tab': 'approved',
         'author': author,
         'current_username': current_username,
+        'errors': client.errors,
+        'warnings': client.warnings,
     }
 
     if request.headers.get('HX-Request') == 'true':
         response = render(request, 'dashboard/partials/_pr_content.html', context)
         triggers = {'tabChanged': 'review_approved', 'repoChanged': f'{owner}/{repo}', 'reviewTabChanged': 'approved'}
-        if client.errors:
-            triggers['showErrors'] = client.errors
+        triggers.update(client.get_notification_triggers())
         response['HX-Trigger'] = json.dumps(triggers)
         return response
 
@@ -414,13 +424,14 @@ def repo_review_reviewed_list(request, owner, repo):
         'review_tab': 'reviewed',
         'author': author,
         'current_username': current_username,
+        'errors': client.errors,
+        'warnings': client.warnings,
     }
 
     if request.headers.get('HX-Request') == 'true':
         response = render(request, 'dashboard/partials/_pr_content.html', context)
         triggers = {'tabChanged': 'review_reviewed', 'repoChanged': f'{owner}/{repo}', 'reviewTabChanged': 'reviewed'}
-        if client.errors:
-            triggers['showErrors'] = client.errors
+        triggers.update(client.get_notification_triggers())
         response['HX-Trigger'] = json.dumps(triggers)
         return response
 
@@ -450,13 +461,14 @@ def repo_assigned_list(request, owner, repo):
         'active_tab': 'assigned',
         'author': author,
         'current_username': current_username,
+        'errors': client.errors,
+        'warnings': client.warnings,
     }
 
     if request.headers.get('HX-Request') == 'true':
         response = render(request, 'dashboard/partials/_pr_content.html', context)
         triggers = {'tabChanged': 'assigned', 'repoChanged': f'{owner}/{repo}', 'reviewTabChanged': 'pending'}
-        if client.errors:
-            triggers['showErrors'] = client.errors
+        triggers.update(client.get_notification_triggers())
         response['HX-Trigger'] = json.dumps(triggers)
         return response
 

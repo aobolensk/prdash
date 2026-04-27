@@ -110,6 +110,13 @@
                 }
             });
 
+            document.body.addEventListener('showWarnings', function(evt) {
+                const warnings = evt.detail.value || evt.detail;
+                if (Array.isArray(warnings)) {
+                    warnings.forEach(warning => showToast(warning, 'warning'));
+                }
+            });
+
             document.body.addEventListener('tabChanged', function(evt) {
                 const activeTab = evt.detail.value || evt.detail;
                 const dashboard = document.getElementById('dashboard-layout');

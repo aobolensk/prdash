@@ -74,4 +74,16 @@
         </div>
     </section>
 </div>
+{% if errors or warnings %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    {% for error in errors %}
+    showToast("{{ error|escapejs }}", 'error');
+    {% endfor %}
+    {% for warning in warnings %}
+    showToast("{{ warning|escapejs }}", 'warning');
+    {% endfor %}
+});
+</script>
+{% endif %}
 {% endblock %}

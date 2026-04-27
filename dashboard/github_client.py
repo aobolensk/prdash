@@ -1,10 +1,12 @@
 """GitHub API client for fetching PR information."""
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from django.core.cache import cache
+from github import RateLimitExceededException
+from urllib3.exceptions import MaxRetryError
 
 
 @dataclass
@@ -62,6 +64,8 @@ class GitHubClient:
         self.user = user
         self._client = None
         self.errors = []
+        self.warnings = []
+        self._rate_limited_repos = set()
 
     @property
     def client(self):
@@ -70,8 +74,8 @@ class GitHubClient:
             token = self._get_token()
             if token:
                 from github import Github
-                # Add timeout of 10 seconds to prevent hanging
-                self._client = Github(token, timeout=10)
+                # Disable automatic retries so we can handle rate limits ourselves
+                self._client = Github(token, timeout=10, retry=0)
         return self._client
 
     def _get_token(self) -> Optional[str]:
@@ -205,6 +209,58 @@ class GitHubClient:
             )
         except Exception:
             return ReviewStatus(state='not_reviewed', approval_count=0, comment_count=0)
+
+    def _add_error(self, msg: str) -> None:
+        """Add an error message if not already present."""
+        if msg not in self.errors:
+            self.errors.append(msg)
+        print(f"ERROR: {msg}")
+
+    def get_notification_triggers(self) -> dict:
+        """Get HX-Trigger dict for errors and warnings."""
+        triggers = {}
+        if self.errors:
+            triggers['showErrors'] = self.errors
+        if self.warnings:
+            triggers['showWarnings'] = self.warnings
+        return triggers
+
+    def _is_rate_limit_error(self, e: Exception) -> bool:
+        """Check if exception is a rate limit error."""
+        if isinstance(e, RateLimitExceededException):
+            return True
+        if isinstance(e, MaxRetryError):
+            return True
+        if not (hasattr(e, 'status') and e.status == 403):
+            return False
+        if not (hasattr(e, 'data') and isinstance(e.data, dict)):
+            return True
+        api_msg = e.data.get('message', '').lower()
+        return 'rate limit' in api_msg
+
+    def _handle_api_error(self, e: Exception, owner: str, name: str) -> None:
+        """Handle GitHub API errors and add human-readable messages to self.errors or self.warnings."""
+        repo_name = f"{owner}/{name}"
+
+        if self._is_rate_limit_error(e):
+            self._rate_limited_repos.add(repo_name)
+            print(f"WARNING: Rate limit hit for {repo_name}")
+            return
+
+        if hasattr(e, 'status') and e.status == 403:
+            api_msg = e.data.get('message', '') if hasattr(e, 'data') and isinstance(e.data, dict) else ''
+            if 'SAML' in api_msg:
+                self._add_error(f"Access denied to {repo_name}: SAML SSO required.")
+            else:
+                self._add_error(f"Access denied to {repo_name}.")
+            return
+
+        if hasattr(e, 'status') and e.status == 404:
+            self._add_error(f"Repository {repo_name} not found or not accessible.")
+        elif hasattr(e, 'status'):
+            self._add_error(f"GitHub API error for {repo_name} (HTTP {e.status}).")
+        else:
+            self._add_error(f"Failed to fetch PRs for {repo_name}.")
 
     def validate_repo(self, owner: str, name: str) -> tuple[bool, str]:
         """Validate that a repository exists and is accessible."""
@@ -565,6 +621,20 @@ class GitHubClient:
         except Exception:
             return None
 
+    def finalize_warnings(self) -> None:
+        """Convert rate-limited repos into a single consolidated warning message."""
+        if not self._rate_limited_repos:
+            return
+
+        count = len(self._rate_limited_repos)
+        if count <= 3:
+            repos_str = ', '.join(sorted(self._rate_limited_repos))
+            msg = f"Rate limit hit. Not loaded: {repos_str}"
+        else:
+            msg = f"Rate limit hit. {count} repos not loaded."
+        self.warnings.append(msg)
+        print(f"WARNING: {msg}")
+
     def get_user_prs_for_repo(self, owner: str, name: str, author: Optional[str] = None) -> list[PullRequestInfo]:
         """Get open PRs authored by the specified user (or current user) for a specific repository."""
         if not self.client:
@@ -580,8 +650,13 @@ class GitHubClient:
             query = f"repo:{owner}/{name} is:pr is:open author:{author}"
             issues = self.client.search_issues(query, sort='updated', order='desc')
 
-            # Collect PR numbers
-            pr_numbers = [issue.number for issue in issues]
+            # Collect PR numbers - wrap in try/except to catch rate limit errors
+            # that PyGithub may swallow during iteration
+            try:
+                pr_numbers = [issue.number for issue in issues]
+            except Exception:
+                self._rate_limited_repos.add(f"{owner}/{name}")
+                return []
 
             if not pr_numbers:
                 return []
@@ -591,7 +666,7 @@ class GitHubClient:
             result.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
             return result
         except Exception as e:
-            print(f"ERROR: Failed to get PRs for {owner}/{name}: {e}")
+            self._handle_api_error(e, owner, name)
             return []
 
     def get_all_user_prs(self, repos: list[tuple[str, str]], author: Optional[str] = None) -> list[PullRequestInfo]:
@@ -617,7 +692,9 @@ class GitHubClient:
                     all_prs.extend(prs)
                 except Exception as e:
                     owner, name = repo
-                    print(f"ERROR: Failed to fetch PRs for {owner}/{name}: {e}")
+                    self._handle_api_error(e, owner, name)
+
+        self.finalize_warnings()
 
         all_prs.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
         return all_prs
@@ -638,7 +715,11 @@ class GitHubClient:
             issues = self.client.search_issues(query, sort='updated', order='desc')
 
             # Collect PR numbers (limit to 50 most recent)
-            pr_numbers = [issue.number for issue in issues][:50]
+            try:
+                pr_numbers = [issue.number for issue in issues][:50]
+            except Exception:
+                self._rate_limited_repos.add(f"{owner}/{name}")
+                return []
 
             if not pr_numbers:
                 return []
@@ -648,7 +729,7 @@ class GitHubClient:
             result.sort(key=lambda pr: (pr.merged_at or pr.updated_at, pr.number), reverse=True)
             return result
         except Exception as e:
-            print(f"ERROR: Failed to get merged PRs for {owner}/{name}: {e}")
+            self._handle_api_error(e, owner, name)
             return []
 
     def get_all_merged_prs(self, repos: list[tuple[str, str]], author: Optional[str] = None) -> list[PullRequestInfo]:
@@ -672,8 +753,9 @@ class GitHubClient:
                     all_prs.extend(prs)
                 except Exception as e:
                     owner, name = repo
-                    print(f"ERROR: Failed to fetch merged PRs for {owner}/{name}: {e}")
+                    self._handle_api_error(e, owner, name)
 
+        self.finalize_warnings()
         all_prs.sort(key=lambda pr: (pr.merged_at or pr.updated_at, pr.number), reverse=True)
         return all_prs
 
@@ -709,7 +791,11 @@ class GitHubClient:
             issues = self.client.search_issues(query, sort='updated', order='desc')
 
             # Collect PR numbers
-            pr_numbers = [issue.number for issue in issues]
+            try:
+                pr_numbers = [issue.number for issue in issues]
+            except Exception:
+                self._rate_limited_repos.add(f"{owner}/{name}")
+                return []
 
             if not pr_numbers:
                 return []
@@ -719,7 +805,7 @@ class GitHubClient:
             result.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
             return result
         except Exception as e:
-            print(f"ERROR: Failed to get review requests for {owner}/{name}: {e}")
+            self._handle_api_error(e, owner, name)
             return []
 
     def get_all_review_requests(
@@ -756,7 +842,9 @@ class GitHubClient:
                     all_prs.extend(prs)
                 except Exception as e:
                     owner, name = repo
-                    print(f"ERROR: Failed to fetch review requests for {owner}/{name}: {e}")
+                    self._handle_api_error(e, owner, name)
+
+        self.finalize_warnings()
 
         # If approved_by_me, we need to filter PRs where we actually approved
         if approved_by_me and username:
@@ -791,7 +879,11 @@ class GitHubClient:
             issues = self.client.search_issues(query, sort='updated', order='desc')
 
             # Collect PR numbers
-            pr_numbers = [issue.number for issue in issues]
+            try:
+                pr_numbers = [issue.number for issue in issues]
+            except Exception:
+                self._rate_limited_repos.add(f"{owner}/{name}")
+                return []
 
             if not pr_numbers:
                 return []
@@ -801,7 +893,7 @@ class GitHubClient:
             result.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
             return result
         except Exception as e:
-            print(f"ERROR: Failed to get assigned PRs for {owner}/{name}: {e}")
+            self._handle_api_error(e, owner, name)
             return []
 
     def get_all_assigned_prs(self, repos: list[tuple[str, str]], author: Optional[str] = None) -> list[PullRequestInfo]:
@@ -829,8 +921,9 @@ class GitHubClient:
                     all_prs.extend(prs)
                 except Exception as e:
                     owner, name = repo
-                    print(f"ERROR: Failed to fetch assigned PRs for {owner}/{name}: {e}")
+                    self._handle_api_error(e, owner, name)
 
+        self.finalize_warnings()
         all_prs.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
         return all_prs
 
