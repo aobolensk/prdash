@@ -650,12 +650,12 @@ class GitHubClient:
             query = f"repo:{owner}/{name} is:pr is:open author:{author}"
             issues = self.client.search_issues(query, sort='updated', order='desc')
 
-            # Collect PR numbers - wrap in try/except to catch rate limit errors
-            # that PyGithub may swallow during iteration
+            # Collect PR numbers - wrap in try/except to catch errors
+            # that PyGithub may raise during lazy iteration
             try:
                 pr_numbers = [issue.number for issue in issues]
-            except Exception:
-                self._rate_limited_repos.add(f"{owner}/{name}")
+            except Exception as e:
+                self._handle_api_error(e, owner, name)
                 return []
 
             if not pr_numbers:
@@ -717,8 +717,8 @@ class GitHubClient:
             # Collect PR numbers (limit to 50 most recent)
             try:
                 pr_numbers = [issue.number for issue in issues][:50]
-            except Exception:
-                self._rate_limited_repos.add(f"{owner}/{name}")
+            except Exception as e:
+                self._handle_api_error(e, owner, name)
                 return []
 
             if not pr_numbers:
@@ -793,8 +793,8 @@ class GitHubClient:
             # Collect PR numbers
             try:
                 pr_numbers = [issue.number for issue in issues]
-            except Exception:
-                self._rate_limited_repos.add(f"{owner}/{name}")
+            except Exception as e:
+                self._handle_api_error(e, owner, name)
                 return []
 
             if not pr_numbers:
@@ -881,8 +881,8 @@ class GitHubClient:
             # Collect PR numbers
             try:
                 pr_numbers = [issue.number for issue in issues]
-            except Exception:
-                self._rate_limited_repos.add(f"{owner}/{name}")
+            except Exception as e:
+                self._handle_api_error(e, owner, name)
                 return []
 
             if not pr_numbers:
