@@ -67,6 +67,24 @@ class RepoInputParserTests(TestCase):
         self.assertEqual(owner, 'owner')
         self.assertEqual(name, '')
 
+    def test_repo_name_ending_in_git_chars(self):
+        """Test repo names ending in chars from '.git' set aren't truncated."""
+        owner, name = _parse_repo_input('owner/my-project')
+        self.assertEqual(owner, 'owner')
+        self.assertEqual(name, 'my-project')
+
+    def test_repo_name_ending_in_git(self):
+        """Test repo name ending in 'git' (but not '.git') is preserved."""
+        owner, name = _parse_repo_input('owner/test-git')
+        self.assertEqual(owner, 'owner')
+        self.assertEqual(name, 'test-git')
+
+    def test_repo_name_dotgit(self):
+        """Test repo name 'dotgit' is preserved."""
+        owner, name = _parse_repo_input('owner/dotgit')
+        self.assertEqual(owner, 'owner')
+        self.assertEqual(name, 'dotgit')
+
 
 class GitHubClientCIStatusTests(TestCase):
     """Tests for GitHub CI status parsing."""

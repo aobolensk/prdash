@@ -30,7 +30,7 @@ def _parse_repo_input(repo_input):
     if '/' in repo_input:
         parts = repo_input.split('/', 1)
         owner = parts[0].strip()
-        name = parts[1].strip().rstrip('.git')
+        name = parts[1].strip().removesuffix('.git')
         return owner, name
 
     return None, None
