@@ -510,11 +510,17 @@ class GitHubClient:
             contexts_data = rollup.get('contexts', {})
             total_count = contexts_data.get('totalCount', 0)
             contexts = contexts_data.get('nodes', [])
+            rollup_state = {
+                'ERROR': 'error',
+                'EXPECTED': 'pending',
+                'FAILURE': 'failure',
+                'PENDING': 'pending',
+                'SUCCESS': 'success',
+            }.get(rollup.get('state'))
 
             if total_count == 0:
-                return CIStatus(state='unknown')
+                return CIStatus(state=rollup_state or 'unknown')
 
-            # Count check runs by conclusion/state (matching REST API logic)
             success_count = 0
             failure_count = 0
             skipped_count = 0
@@ -545,8 +551,9 @@ class GitHubClient:
                     elif state_value == 'PENDING':
                         pending_count += 1
 
-            # Determine overall state (matching REST API logic)
-            if failure_count > 0:
+            if rollup_state:
+                state = rollup_state
+            elif failure_count > 0:
                 state = 'failure'
             elif pending_count > 0:
                 state = 'pending'

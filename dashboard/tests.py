@@ -1,4 +1,6 @@
 from django.test import TestCase
+
+from .github_client import GitHubClient
 from .views import _parse_repo_input
 
 
@@ -64,3 +66,62 @@ class RepoInputParserTests(TestCase):
         owner, name = _parse_repo_input('owner/')
         self.assertEqual(owner, 'owner')
         self.assertEqual(name, '')
+
+
+class GitHubClientCIStatusTests(TestCase):
+    """Tests for GitHub CI status parsing."""
+
+    def _client(self):
+        return GitHubClient(user=None)
+
+    def _pr_data(self, rollup_state, contexts):
+        return {
+            'number': 123,
+            'commits': {
+                'nodes': [
+                    {
+                        'commit': {
+                            'statusCheckRollup': {
+                                'state': rollup_state,
+                                'contexts': contexts,
+                            }
+                        }
+                    }
+                ]
+            },
+        }
+
+    def test_rollup_failure_overrides_truncated_green_context_page(self):
+        """GitHub rollup state is authoritative for a truncated contexts page."""
+        contexts = {
+            'totalCount': 174,
+            'nodes': (
+                [{'conclusion': 'SUCCESS', 'status': 'COMPLETED'} for _ in range(98)]
+                + [{'conclusion': 'SKIPPED', 'status': 'COMPLETED'} for _ in range(2)]
+            ),
+        }
+
+        ci_status = self._client()._parse_ci_status_from_graphql(
+            self._pr_data('FAILURE', contexts)
+        )
+
+        self.assertEqual(ci_status.state, 'failure')
+        self.assertEqual(ci_status.passed_count, 98)
+        self.assertEqual(ci_status.total_count, 174)
+
+    def test_rollup_success_is_preserved(self):
+        contexts = {
+            'totalCount': 2,
+            'nodes': [
+                {'conclusion': 'SUCCESS', 'status': 'COMPLETED'},
+                {'state': 'SUCCESS'},
+            ],
+        }
+
+        ci_status = self._client()._parse_ci_status_from_graphql(
+            self._pr_data('SUCCESS', contexts)
+        )
+
+        self.assertEqual(ci_status.state, 'success')
+        self.assertEqual(ci_status.passed_count, 2)
+        self.assertEqual(ci_status.total_count, 2)
