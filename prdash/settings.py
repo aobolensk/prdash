@@ -154,7 +154,7 @@ ACCOUNT_LOGOUT_REDIRECT_URL = '/'
 
 # Disable email verification for development
 ACCOUNT_EMAIL_VERIFICATION = 'none'
-ACCOUNT_EMAIL_REQUIRED = False
+ACCOUNT_SIGNUP_FIELDS = ['email', 'username*', 'password1*', 'password2*']
 
 # GitHub-only authentication (no email/password signup or login)
 SOCIALACCOUNT_ONLY = True
