@@ -1,13 +1,26 @@
 """GitHub API client for fetching PR information."""
+import logging
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from django.core.cache import cache
 from github import RateLimitExceededException
 from urllib3.exceptions import MaxRetryError
+
+
+logger = logging.getLogger(__name__)
+
+GITHUB_GRAPHQL_URL = 'https://api.github.com/graphql'
+GITHUB_API_VERSION = '2022-11-28'
+GRAPHQL_PR_BATCH_SIZE = 25
+GRAPHQL_RETRY_ATTEMPTS = 2
+GRAPHQL_RETRY_BACKOFF_SECONDS = 0.5
+GRAPHQL_TIMEOUT_SECONDS = 20
+GRAPHQL_TRANSIENT_STATUS_CODES = {502, 503, 504}
 
 
 @dataclass
@@ -218,6 +231,249 @@ class GitHubClient:
             self.errors.append(msg)
         print(f"ERROR: {msg}")
 
+    def _add_warning(self, msg: str) -> None:
+        """Add a warning message if not already present."""
+        if msg not in self.warnings:
+            self.warnings.append(msg)
+            print(f"WARNING: {msg}")
+
+    @staticmethod
+    def _repo_label(owner: Optional[str], name: Optional[str]) -> str:
+        """Return a display name for a repo-scoped GitHub request."""
+        return f"{owner}/{name}" if owner and name else "GitHub"
+
+    @staticmethod
+    def _iter_chunks(items: list[int], size: int):
+        """Yield fixed-size chunks from a list."""
+        for start in range(0, len(items), size):
+            yield items[start:start + size]
+
+    def _summarize_response(self, response: requests.Response) -> str:
+        """Return a short, safe description of a GitHub error response."""
+        try:
+            data = response.json()
+        except ValueError:
+            text = (response.text or '').strip()
+            headers = getattr(response, 'headers', {}) or {}
+            content_type = headers.get('Content-Type', '')
+            sample = text[:500].lower()
+
+            if (
+                'html' in content_type.lower()
+                or '<html' in sample
+                or '<!doctype html' in sample
+            ):
+                return 'HTML error page omitted'
+            if not text:
+                return 'empty response body'
+            return ' '.join(text.split())[:200]
+
+        if isinstance(data, dict):
+            message = data.get('message') or data.get('error')
+            if message:
+                return str(message)[:200]
+
+            errors = data.get('errors')
+            if isinstance(errors, list) and errors:
+                first_error = errors[0]
+                if isinstance(first_error, dict):
+                    message = first_error.get('message')
+                    if message:
+                        return str(message)[:200]
+                return str(first_error)[:200]
+
+        return 'JSON response without error message'
+
+    def _handle_graphql_http_error(
+        self,
+        response: requests.Response,
+        owner: Optional[str],
+        name: Optional[str],
+        operation: str,
+    ) -> None:
+        """Handle a non-200 GraphQL HTTP response without logging raw bodies."""
+        repo_name = self._repo_label(owner, name)
+        status_code = response.status_code
+        summary = self._summarize_response(response)
+
+        logger.warning(
+            "%s failed for %s: HTTP %s; %s",
+            operation,
+            repo_name,
+            status_code,
+            summary,
+        )
+        print(f"WARNING: {operation} failed for {repo_name}: HTTP {status_code}; {summary}")
+
+        if status_code in GRAPHQL_TRANSIENT_STATUS_CODES:
+            self._add_warning(
+                f"GitHub is temporarily unable to load PR details for {repo_name} "
+                f"(HTTP {status_code}). Try refreshing."
+            )
+            return
+
+        summary_lower = summary.lower()
+        if status_code == 403 and 'rate limit' in summary_lower:
+            self._rate_limited_repos.add(repo_name)
+            return
+
+        if status_code == 403:
+            if 'saml' in summary_lower:
+                self._add_error(f"Access denied to {repo_name}: SAML SSO required.")
+            else:
+                self._add_error(f"Access denied to {repo_name}.")
+            return
+
+        if status_code == 404:
+            self._add_error(f"Repository {repo_name} not found or not accessible.")
+            return
+
+        if status_code == 401:
+            self._add_error("GitHub authentication failed. Reconnect GitHub or update your PAT.")
+            return
+
+        self._add_warning(
+            f"GitHub returned HTTP {status_code} while loading PR details for {repo_name}."
+        )
+
+    def _handle_graphql_errors(
+        self,
+        data: dict,
+        owner: Optional[str],
+        name: Optional[str],
+        operation: str,
+    ) -> None:
+        """Handle GraphQL errors from a 200 response."""
+        errors = data.get('errors')
+        if not errors:
+            return
+
+        repo_name = self._repo_label(owner, name)
+        for error in errors:
+            if not isinstance(error, dict):
+                logger.warning("%s returned GraphQL error for %s: %s", operation, repo_name, error)
+                continue
+
+            error_type = error.get('type') or error.get('extensions', {}).get('code')
+            message = error.get('message', '')
+            logger.warning(
+                "%s returned GraphQL error for %s: %s %s",
+                operation,
+                repo_name,
+                error_type,
+                message,
+            )
+
+            message_lower = message.lower()
+            if error_type == 'NOT_FOUND':
+                self._add_error(f"Repository {repo_name} not found or not accessible")
+            elif error_type == 'RATE_LIMITED' or 'rate limit' in message_lower:
+                self._rate_limited_repos.add(repo_name)
+            elif 'timeout' in message_lower or 'timed out' in message_lower:
+                self._add_warning(
+                    f"GitHub timed out while loading PR details for {repo_name}. Try refreshing."
+                )
+
+    def _post_graphql(
+        self,
+        query: str,
+        owner: Optional[str] = None,
+        name: Optional[str] = None,
+        operation: str = 'GitHub GraphQL query',
+        token: Optional[str] = None,
+        max_attempts: int = GRAPHQL_RETRY_ATTEMPTS,
+    ) -> Optional[dict]:
+        """Execute a GitHub GraphQL query with retries and safe error reporting."""
+        token = token or self._get_token()
+        if not token:
+            return None
+
+        repo_name = self._repo_label(owner, name)
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Accept': 'application/vnd.github+json',
+            'Content-Type': 'application/json',
+            'X-GitHub-Api-Version': GITHUB_API_VERSION,
+        }
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = requests.post(
+                    GITHUB_GRAPHQL_URL,
+                    json={'query': query},
+                    headers=headers,
+                    timeout=GRAPHQL_TIMEOUT_SECONDS,
+                )
+            except requests.exceptions.Timeout:
+                if attempt < max_attempts:
+                    print(
+                        f"WARNING: {operation} timed out for {repo_name}; "
+                        f"retrying ({attempt}/{max_attempts})."
+                    )
+                    time.sleep(GRAPHQL_RETRY_BACKOFF_SECONDS * attempt)
+                    continue
+
+                logger.warning("%s timed out for %s", operation, repo_name)
+                self._add_warning(
+                    f"GitHub timed out while loading PR details for {repo_name}. Try refreshing."
+                )
+                return None
+            except requests.exceptions.RequestException as exc:
+                logger.warning("%s request failed for %s", operation, repo_name, exc_info=True)
+                self._add_warning(
+                    f"GitHub request failed while loading PR details for {repo_name}. Try refreshing."
+                )
+                print(
+                    f"WARNING: {operation} request failed for {repo_name}: "
+                    f"{exc.__class__.__name__}"
+                )
+                return None
+
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                except ValueError:
+                    summary = self._summarize_response(response)
+                    logger.warning(
+                        "%s returned non-JSON response for %s: %s",
+                        operation,
+                        repo_name,
+                        summary,
+                    )
+                    print(
+                        f"WARNING: {operation} returned non-JSON response for "
+                        f"{repo_name}; {summary}"
+                    )
+                    self._add_warning(
+                        f"GitHub returned an invalid response while loading PR details for "
+                        f"{repo_name}. Try refreshing."
+                    )
+                    return None
+
+                self._handle_graphql_errors(data, owner, name, operation)
+                return data
+
+            if response.status_code in GRAPHQL_TRANSIENT_STATUS_CODES and attempt < max_attempts:
+                summary = self._summarize_response(response)
+                logger.warning(
+                    "%s returned transient HTTP %s for %s; retrying. %s",
+                    operation,
+                    response.status_code,
+                    repo_name,
+                    summary,
+                )
+                print(
+                    f"WARNING: {operation} failed for {repo_name}: "
+                    f"HTTP {response.status_code}; retrying. {summary}"
+                )
+                time.sleep(GRAPHQL_RETRY_BACKOFF_SECONDS * attempt)
+                continue
+
+            self._handle_graphql_http_error(response, owner, name, operation)
+            return None
+
+        return None
+
     def get_notification_triggers(self) -> dict:
         """Get HX-Trigger dict for errors and warnings."""
         triggers = {}
@@ -312,11 +568,18 @@ class GitHubClient:
         if not pr_numbers:
             return []
 
+        limited_pr_numbers = pr_numbers[:100]
+        if len(limited_pr_numbers) > GRAPHQL_PR_BATCH_SIZE:
+            result = []
+            for pr_number_batch in self._iter_chunks(limited_pr_numbers, GRAPHQL_PR_BATCH_SIZE):
+                result.extend(self._fetch_prs_batch_graphql(owner, name, pr_number_batch))
+            return result
+
         try:
             # Build GraphQL query to fetch all PR data at once
-            # This reduces API calls from N (one per PR) to 1 for up to 100 PRs
+            # Keep batches bounded so GitHub does not time out on large repos.
             pr_queries = []
-            for i, pr_num in enumerate(pr_numbers[:100]):  # GraphQL has query complexity limits
+            for i, pr_num in enumerate(limited_pr_numbers):
                 pr_queries.append(f'''
                     pr{i}: pullRequest(number: {pr_num}) {{
                         number
@@ -396,33 +659,14 @@ class GitHubClient:
             '''
 
             # Execute GraphQL query
-            token = self._get_token()
-            if not token:
-                return []
-
-            import requests
-            response = requests.post(
-                'https://api.github.com/graphql',
-                json={'query': query},
-                headers={
-                    'Authorization': f'Bearer {token}',
-                    'Content-Type': 'application/json',
-                },
-                timeout=30
+            data = self._post_graphql(
+                query,
+                owner=owner,
+                name=name,
+                operation='PR details GraphQL query',
             )
-
-            if response.status_code != 200:
-                print(f"GraphQL query failed: {response.status_code} - {response.text}")
+            if data is None:
                 return []
-
-            data = response.json()
-            if 'errors' in data:
-                print(f"GraphQL errors: {data['errors']}")
-                # Collect GraphQL errors
-                for error in data['errors']:
-                    if error.get('type') == 'NOT_FOUND':
-                        error_msg = f"Repository {owner}/{name} not found or not accessible"
-                        self.errors.append(error_msg)
 
             # Parse results
             result = []
@@ -432,7 +676,7 @@ class GitHubClient:
                 print("ERROR: No repository data in GraphQL response")
                 return []
 
-            for i, pr_num in enumerate(pr_numbers[:100]):
+            for i, pr_num in enumerate(limited_pr_numbers):
                 pr_data = repo_data.get(f'pr{i}')
                 if not pr_data:
                     continue
@@ -1077,8 +1321,6 @@ class GitHubClient:
         if not token:
             return []
 
-        import requests
-
         for (owner, name), repo_prs in prs_by_repo.items():
             pr_numbers = [pr.number for pr in repo_prs]
 
@@ -1109,20 +1351,16 @@ class GitHubClient:
             '''
 
             try:
-                response = requests.post(
-                    'https://api.github.com/graphql',
-                    json={'query': query},
-                    headers={
-                        'Authorization': f'Bearer {token}',
-                        'Content-Type': 'application/json',
-                    },
-                    timeout=30
+                data = self._post_graphql(
+                    query,
+                    owner=owner,
+                    name=name,
+                    operation='Review approval GraphQL query',
+                    token=token,
                 )
-
-                if response.status_code != 200:
+                if data is None:
                     continue
 
-                data = response.json()
                 repo_data = data.get('data', {}).get('repository', {})
 
                 if not repo_data:
@@ -1184,8 +1422,6 @@ class GitHubClient:
         if not token:
             return []
 
-        import requests
-
         for (owner, name), repo_prs in prs_by_repo.items():
             pr_numbers = [pr.number for pr in repo_prs]
 
@@ -1216,20 +1452,16 @@ class GitHubClient:
             '''
 
             try:
-                response = requests.post(
-                    'https://api.github.com/graphql',
-                    json={'query': query},
-                    headers={
-                        'Authorization': f'Bearer {token}',
-                        'Content-Type': 'application/json',
-                    },
-                    timeout=30
+                data = self._post_graphql(
+                    query,
+                    owner=owner,
+                    name=name,
+                    operation='Review state GraphQL query',
+                    token=token,
                 )
-
-                if response.status_code != 200:
+                if data is None:
                     continue
 
-                data = response.json()
                 repo_data = data.get('data', {}).get('repository', {})
 
                 if not repo_data:
@@ -1374,7 +1606,6 @@ class GitHubClient:
                 'top_reviewed_by': [],
             }
 
-        import requests
         from datetime import datetime, timedelta
         from collections import defaultdict
 
@@ -1447,19 +1678,16 @@ class GitHubClient:
 
             try:
                 # Fetch PRs where user is author
-                resp_received = requests.post(
-                    'https://api.github.com/graphql',
-                    json={'query': query_received},
-                    headers={
-                        'Authorization': f'Bearer {token}',
-                        'Content-Type': 'application/json',
-                    },
-                    timeout=30
+                data_received = self._post_graphql(
+                    query_received,
+                    owner=owner,
+                    name=name,
+                    operation='Review stats received GraphQL query',
+                    token=token,
                 )
 
-                if resp_received.status_code == 200:
-                    data = resp_received.json()
-                    prs = data.get('data', {}).get('search', {}).get('nodes', [])
+                if data_received is not None:
+                    prs = data_received.get('data', {}).get('search', {}).get('nodes', [])
 
                     for pr in prs:
                         if not pr:
@@ -1505,19 +1733,16 @@ class GitHubClient:
                                 pass
 
                 # Fetch PRs where user reviewed
-                resp_given = requests.post(
-                    'https://api.github.com/graphql',
-                    json={'query': query_given},
-                    headers={
-                        'Authorization': f'Bearer {token}',
-                        'Content-Type': 'application/json',
-                    },
-                    timeout=30
+                data_given = self._post_graphql(
+                    query_given,
+                    owner=owner,
+                    name=name,
+                    operation='Review stats given GraphQL query',
+                    token=token,
                 )
 
-                if resp_given.status_code == 200:
-                    data = resp_given.json()
-                    prs = data.get('data', {}).get('search', {}).get('nodes', [])
+                if data_given is not None:
+                    prs = data_given.get('data', {}).get('search', {}).get('nodes', [])
 
                     for pr in prs:
                         if not pr:
