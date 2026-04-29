@@ -1,7 +1,6 @@
 """GitHub API client for fetching PR information."""
 from dataclasses import dataclass
 from datetime import datetime
-from hashlib import md5
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
