@@ -1,9 +1,11 @@
 """GitHub API client for fetching PR information."""
 from dataclasses import dataclass
 from datetime import datetime
+from hashlib import md5
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import requests
 from django.core.cache import cache
 from github import RateLimitExceededException
 from urllib3.exceptions import MaxRetryError
@@ -63,6 +65,7 @@ class GitHubClient:
     def __init__(self, user):
         self.user = user
         self._client = None
+        self._username = None  # Cached GitHub username
         self.errors = []
         self.warnings = []
         self._rate_limited_repos = set()
@@ -620,11 +623,14 @@ class GitHubClient:
             return ReviewStatus(state='not_reviewed', approval_count=0, comment_count=0)
 
     def get_username(self) -> Optional[str]:
-        """Get the authenticated user's GitHub username."""
+        """Get the authenticated user's GitHub username (cached)."""
+        if self._username:
+            return self._username
         if not self.client:
             return None
         try:
-            return self.client.get_user().login
+            self._username = self.client.get_user().login
+            return self._username
         except Exception:
             return None
 
@@ -642,6 +648,74 @@ class GitHubClient:
         self.warnings.append(msg)
         print(f"WARNING: {msg}")
 
+    def _search_prs(
+        self, query: str, owner: str, name: str, limit: Optional[int] = None
+    ) -> list[int]:
+        """Search for PR numbers using REST API."""
+        token = self._get_token()
+        if not token:
+            return []
+
+        # Hash the query to create memcached-safe cache keys
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Accept': 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28',
+        }
+
+        try:
+            response = requests.get(
+                'https://api.github.com/search/issues',
+                params={
+                    'q': query,
+                    'sort': 'updated',
+                    'order': 'desc',
+                    'per_page': 100,
+                },
+                headers=headers,
+                timeout=30,
+            )
+
+            if response.status_code == 403:
+                if 'rate limit' in response.text.lower():
+                    self._rate_limited_repos.add(f"{owner}/{name}")
+                    return []
+                self._handle_api_error_from_response(response, owner, name)
+                return []
+
+            if response.status_code != 200:
+                self._handle_api_error_from_response(response, owner, name)
+                return []
+
+            data = response.json()
+            pr_numbers = [item['number'] for item in data.get('items', [])]
+            return pr_numbers[:limit] if limit else pr_numbers
+
+        except requests.exceptions.RequestException as e:
+            print(f"ERROR: Search request failed for {owner}/{name}: {e}")
+            return []
+
+    def _handle_api_error_from_response(
+        self, response: requests.Response, owner: str, name: str
+    ) -> None:
+        """Handle errors from requests.Response objects."""
+        repo_name = f"{owner}/{name}"
+
+        if response.status_code == 403:
+            try:
+                data = response.json()
+                api_msg = data.get('message', '')
+                if 'SAML' in api_msg:
+                    self._add_error(f"Access denied to {repo_name}: SAML SSO required.")
+                    return
+            except ValueError:
+                pass
+            self._add_error(f"Access denied to {repo_name}.")
+        elif response.status_code == 404:
+            self._add_error(f"Repository {repo_name} not found or not accessible.")
+        else:
+            self._add_error(f"GitHub API error for {repo_name} (HTTP {response.status_code}).")
+
     def get_user_prs_for_repo(self, owner: str, name: str, author: Optional[str] = None) -> list[PullRequestInfo]:
         """Get open PRs authored by the specified user (or current user) for a specific repository."""
         if not self.client:
@@ -650,20 +724,13 @@ class GitHubClient:
         try:
             # Use provided author or default to authenticated user
             if author is None:
-                github_user = self.client.get_user()
-                author = github_user.login
+                author = self.get_username()
+                if not author:
+                    return []
 
-            # Use GitHub Search API to filter PRs by author - much more efficient!
+            # Use GitHub Search API
             query = f"repo:{owner}/{name} is:pr is:open author:{author}"
-            issues = self.client.search_issues(query, sort='updated', order='desc')
-
-            # Collect PR numbers - wrap in try/except to catch errors
-            # that PyGithub may raise during lazy iteration
-            try:
-                pr_numbers = [issue.number for issue in issues]
-            except Exception as e:
-                self._handle_api_error(e, owner, name)
-                return []
+            pr_numbers = self._search_prs(query, owner, name)
 
             if not pr_numbers:
                 return []
@@ -677,21 +744,34 @@ class GitHubClient:
             return []
 
     def get_all_user_prs(self, repos: list[tuple[str, str]], author: Optional[str] = None) -> list[PullRequestInfo]:
-        """Get all open PRs authored by the specified user (or current user) across multiple repositories."""
+        """Get all open PRs authored by the specified user (or current user) across multiple repositories.
+
+        Uses a single consolidated search query instead of one per repo to reduce API calls.
+        """
         if not repos:
             return []
 
-        all_prs = []
+        if author is None:
+            author = self.get_username()
+            if not author:
+                return []
 
-        # Fetch PRs from all repos in parallel
-        with ThreadPoolExecutor(max_workers=min(10, len(repos))) as executor:
-            # Submit all repo fetch tasks
+        # Single search for ALL open PRs by this author (1 API call instead of N)
+        query = f"is:pr is:open author:{author}"
+        pr_data = self._search_prs_consolidated(query, repos)
+
+        if not pr_data:
+            self.finalize_warnings()
+            return []
+
+        # Group PRs by repo for batch GraphQL fetching
+        all_prs = []
+        with ThreadPoolExecutor(max_workers=min(5, len(pr_data))) as executor:
             future_to_repo = {
-                executor.submit(self.get_user_prs_for_repo, owner, name, author): (owner, name)
-                for owner, name in repos
+                executor.submit(self._fetch_prs_batch_graphql, owner, name, numbers): (owner, name)
+                for (owner, name), numbers in pr_data.items()
             }
 
-            # Collect results as they complete
             for future in as_completed(future_to_repo):
                 repo = future_to_repo[future]
                 try:
@@ -702,9 +782,73 @@ class GitHubClient:
                     self._handle_api_error(e, owner, name)
 
         self.finalize_warnings()
-
         all_prs.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
         return all_prs
+
+    def _search_prs_consolidated(
+        self, query: str, repos: list[tuple[str, str]]
+    ) -> dict[tuple[str, str], list[int]]:
+        """Search for PRs across all repos with a single API call, filter by tracked repos.
+
+        Returns dict mapping (owner, name) -> [pr_numbers] for matching repos.
+        """
+        token = self._get_token()
+        if not token:
+            return {}
+
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Accept': 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28',
+        }
+
+        try:
+            response = requests.get(
+                'https://api.github.com/search/issues',
+                params={
+                    'q': query,
+                    'sort': 'updated',
+                    'order': 'desc',
+                    'per_page': 100,
+                },
+                headers=headers,
+                timeout=30,
+            )
+
+            if response.status_code == 403:
+                if 'rate limit' in response.text.lower():
+                    self.warnings.append("Rate limit hit. Some PRs may not be loaded.")
+                    return {}
+                return {}
+
+            if response.status_code != 200:
+                return {}
+
+            data = response.json()
+            items = data.get('items', [])
+
+            # Create set of tracked repos for fast lookup
+            tracked_repos = {(owner.lower(), name.lower()) for owner, name in repos}
+
+            # Group PR numbers by repo, filtering to only tracked repos
+            result: dict[tuple[str, str], list[int]] = {}
+            for item in items:
+                repo_url = item.get('repository_url', '')
+                # Extract owner/name from URL like "https://api.github.com/repos/owner/name"
+                parts = repo_url.rstrip('/').split('/')
+                if len(parts) >= 2:
+                    owner, name = parts[-2], parts[-1]
+                    if (owner.lower(), name.lower()) in tracked_repos:
+                        key = (owner, name)
+                        if key not in result:
+                            result[key] = []
+                        result[key].append(item['number'])
+
+            return result
+
+        except requests.exceptions.RequestException as e:
+            print(f"ERROR: Consolidated search failed: {e}")
+            return {}
 
     def get_merged_prs_for_repo(self, owner: str, name: str, author: Optional[str] = None) -> list[PullRequestInfo]:
         """Get recently merged PRs authored by the specified user (or current user) for a specific repository."""
@@ -714,19 +858,13 @@ class GitHubClient:
         try:
             # Use provided author or default to authenticated user
             if author is None:
-                github_user = self.client.get_user()
-                author = github_user.login
+                author = self.get_username()
+                if not author:
+                    return []
 
-            # Use GitHub Search API to find merged PRs by author
+            # Use GitHub Search API
             query = f"repo:{owner}/{name} is:pr is:merged author:{author}"
-            issues = self.client.search_issues(query, sort='updated', order='desc')
-
-            # Collect PR numbers (limit to 50 most recent)
-            try:
-                pr_numbers = [issue.number for issue in issues][:50]
-            except Exception as e:
-                self._handle_api_error(e, owner, name)
-                return []
+            pr_numbers = self._search_prs(query, owner, name, limit=50)
 
             if not pr_numbers:
                 return []
@@ -781,8 +919,9 @@ class GitHubClient:
             return []
 
         try:
-            github_user = self.client.get_user()
-            username = github_user.login
+            username = self.get_username()
+            if not username:
+                return []
 
             if approved_by_me or reviewed_by_me:
                 # Search for PRs where I was a reviewer
@@ -795,14 +934,7 @@ class GitHubClient:
             if author:
                 query += f" author:{author}"
 
-            issues = self.client.search_issues(query, sort='updated', order='desc')
-
-            # Collect PR numbers
-            try:
-                pr_numbers = [issue.number for issue in issues]
-            except Exception as e:
-                self._handle_api_error(e, owner, name)
-                return []
+            pr_numbers = self._search_prs(query, owner, name)
 
             if not pr_numbers:
                 return []
@@ -873,24 +1005,18 @@ class GitHubClient:
             return []
 
         try:
-            github_user = self.client.get_user()
-            username = github_user.login
+            username = self.get_username()
+            if not username:
+                return []
 
-            # Use GitHub Search API to find PRs assigned to the current user
+            # Use GitHub Search API
             query = f"repo:{owner}/{name} is:pr is:open assignee:{username}"
 
             # Add author filter if provided
             if author:
                 query += f" author:{author}"
 
-            issues = self.client.search_issues(query, sort='updated', order='desc')
-
-            # Collect PR numbers
-            try:
-                pr_numbers = [issue.number for issue in issues]
-            except Exception as e:
-                self._handle_api_error(e, owner, name)
-                return []
+            pr_numbers = self._search_prs(query, owner, name)
 
             if not pr_numbers:
                 return []
