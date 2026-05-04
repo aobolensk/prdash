@@ -78,8 +78,8 @@ class GitHubClient:
         self.user = user
         self._client = None
         self._username = None  # Cached GitHub username
-        self.errors = []
-        self.warnings = []
+        self._grouped_errors = {}  # {(error_type, detail): [repo1, repo2, ...]}
+        self._grouped_warnings = {}  # {(warning_type, detail): [repo1, repo2, ...]}
         self._rate_limited_repos = set()
 
     @property
@@ -225,17 +225,46 @@ class GitHubClient:
         except Exception:
             return ReviewStatus(state='not_reviewed', approval_count=0, comment_count=0)
 
-    def _add_error(self, msg: str) -> None:
-        """Add an error message if not already present."""
-        if msg not in self.errors:
-            self.errors.append(msg)
-        print(f"ERROR: {msg}")
+    def _add_grouped_message(
+        self, collection: dict, msg_type: str, repo_name: str, detail: str, level: str
+    ) -> None:
+        """Add a message to a grouped collection."""
+        key = (msg_type, detail)
+        if key not in collection:
+            collection[key] = []
+        if repo_name and repo_name not in collection[key]:
+            collection[key].append(repo_name)
+        suffix = f": {detail}" if detail else ""
+        print(f"{level}: {msg_type}: {repo_name}{suffix}")
 
-    def _add_warning(self, msg: str) -> None:
-        """Add a warning message if not already present."""
-        if msg not in self.warnings:
-            self.warnings.append(msg)
-            print(f"WARNING: {msg}")
+    def _add_error(self, error_type: str, repo_name: str = '', detail: str = '') -> None:
+        """Add a structured error, grouped by type and detail."""
+        self._add_grouped_message(self._grouped_errors, error_type, repo_name, detail, "ERROR")
+
+    def _add_warning(self, warning_type: str, repo_name: str = '', detail: str = '') -> None:
+        """Add a structured warning, grouped by type and detail."""
+        self._add_grouped_message(self._grouped_warnings, warning_type, repo_name, detail, "WARNING")
+
+    @staticmethod
+    def _format_grouped_messages(grouped: dict) -> list[str]:
+        """Format grouped messages into a list of strings."""
+        result = []
+        for (msg_type, detail), repos in grouped.items():
+            msg = f"{msg_type}: {', '.join(repos)}" if repos else msg_type
+            if detail:
+                msg += f": {detail}"
+            result.append(msg)
+        return result
+
+    @property
+    def errors(self) -> list[str]:
+        """Return formatted error messages grouped by type."""
+        return self._format_grouped_messages(self._grouped_errors)
+
+    @property
+    def warnings(self) -> list[str]:
+        """Return formatted warning messages grouped by type."""
+        return self._format_grouped_messages(self._grouped_warnings)
 
     @staticmethod
     def _repo_label(owner: Optional[str], name: Optional[str]) -> str:
@@ -307,8 +336,9 @@ class GitHubClient:
 
         if status_code in GRAPHQL_TRANSIENT_STATUS_CODES:
             self._add_warning(
-                f"GitHub is temporarily unable to load PR details for {repo_name} "
-                f"(HTTP {status_code}). Try refreshing."
+                "GitHub temporarily unavailable. Try refreshing",
+                repo_name,
+                f"HTTP {status_code}",
             )
             return
 
@@ -319,22 +349,20 @@ class GitHubClient:
 
         if status_code == 403:
             if 'saml' in summary_lower:
-                self._add_error(f"Access denied to {repo_name}: SAML SSO required.")
+                self._add_error("Access denied", repo_name, "SAML SSO required")
             else:
-                self._add_error(f"Access denied to {repo_name}.")
+                self._add_error("Access denied", repo_name)
             return
 
         if status_code == 404:
-            self._add_error(f"Repository {repo_name} not found or not accessible.")
+            self._add_error("Repository not found or not accessible", repo_name)
             return
 
         if status_code == 401:
-            self._add_error("GitHub authentication failed. Reconnect GitHub or update your PAT.")
+            self._add_error("GitHub authentication failed", detail="Reconnect GitHub or update your PAT")
             return
 
-        self._add_warning(
-            f"GitHub returned HTTP {status_code} while loading PR details for {repo_name}."
-        )
+        self._add_warning(f"GitHub returned HTTP {status_code}", repo_name)
 
     def _handle_graphql_errors(
         self,
@@ -366,13 +394,13 @@ class GitHubClient:
 
             message_lower = message.lower()
             if error_type == 'NOT_FOUND':
-                self._add_error(f"Repository {repo_name} not found or not accessible")
+                self._add_error("Repository not found or not accessible", repo_name)
+            elif error_type == 'FORBIDDEN':
+                self._add_error("Access denied", repo_name, message)
             elif error_type == 'RATE_LIMITED' or 'rate limit' in message_lower:
                 self._rate_limited_repos.add(repo_name)
             elif 'timeout' in message_lower or 'timed out' in message_lower:
-                self._add_warning(
-                    f"GitHub timed out while loading PR details for {repo_name}. Try refreshing."
-                )
+                self._add_warning("GitHub timed out. Try refreshing", repo_name)
 
     def _post_graphql(
         self,
@@ -414,15 +442,11 @@ class GitHubClient:
                     continue
 
                 logger.warning("%s timed out for %s", operation, repo_name)
-                self._add_warning(
-                    f"GitHub timed out while loading PR details for {repo_name}. Try refreshing."
-                )
+                self._add_warning("GitHub timed out. Try refreshing", repo_name)
                 return None
             except requests.exceptions.RequestException as exc:
                 logger.warning("%s request failed for %s", operation, repo_name, exc_info=True)
-                self._add_warning(
-                    f"GitHub request failed while loading PR details for {repo_name}. Try refreshing."
-                )
+                self._add_warning("GitHub request failed. Try refreshing", repo_name)
                 print(
                     f"WARNING: {operation} request failed for {repo_name}: "
                     f"{exc.__class__.__name__}"
@@ -444,10 +468,7 @@ class GitHubClient:
                         f"WARNING: {operation} returned non-JSON response for "
                         f"{repo_name}; {summary}"
                     )
-                    self._add_warning(
-                        f"GitHub returned an invalid response while loading PR details for "
-                        f"{repo_name}. Try refreshing."
-                    )
+                    self._add_warning("GitHub returned invalid response. Try refreshing", repo_name)
                     return None
 
                 self._handle_graphql_errors(data, owner, name, operation)
@@ -508,17 +529,17 @@ class GitHubClient:
         if hasattr(e, 'status') and e.status == 403:
             api_msg = e.data.get('message', '') if hasattr(e, 'data') and isinstance(e.data, dict) else ''
             if 'SAML' in api_msg:
-                self._add_error(f"Access denied to {repo_name}: SAML SSO required.")
+                self._add_error("Access denied", repo_name, "SAML SSO required")
             else:
-                self._add_error(f"Access denied to {repo_name}.")
+                self._add_error("Access denied", repo_name)
             return
 
         if hasattr(e, 'status') and e.status == 404:
-            self._add_error(f"Repository {repo_name} not found or not accessible.")
+            self._add_error("Repository not found or not accessible", repo_name)
         elif hasattr(e, 'status'):
-            self._add_error(f"GitHub API error for {repo_name} (HTTP {e.status}).")
+            self._add_error(f"GitHub API error (HTTP {e.status})", repo_name)
         else:
-            self._add_error(f"Failed to fetch PRs for {repo_name}.")
+            self._add_error("Failed to fetch PRs", repo_name)
 
     def validate_repo(self, owner: str, name: str) -> tuple[bool, str]:
         """Validate that a repository exists and is accessible."""
@@ -885,11 +906,9 @@ class GitHubClient:
         count = len(self._rate_limited_repos)
         if count <= 3:
             repos_str = ', '.join(sorted(self._rate_limited_repos))
-            msg = f"Rate limit hit. Not loaded: {repos_str}"
+            self._add_warning(f"Rate limit hit. Not loaded: {repos_str}")
         else:
-            msg = f"Rate limit hit. {count} repos not loaded."
-        self.warnings.append(msg)
-        print(f"WARNING: {msg}")
+            self._add_warning(f"Rate limit hit. {count} repos not loaded.")
 
     def _search_prs(
         self, query: str, owner: str, name: str, limit: Optional[int] = None
@@ -949,15 +968,15 @@ class GitHubClient:
                 data = response.json()
                 api_msg = data.get('message', '')
                 if 'SAML' in api_msg:
-                    self._add_error(f"Access denied to {repo_name}: SAML SSO required.")
+                    self._add_error("Access denied", repo_name, "SAML SSO required")
                     return
             except ValueError:
                 pass
-            self._add_error(f"Access denied to {repo_name}.")
+            self._add_error("Access denied", repo_name)
         elif response.status_code == 404:
-            self._add_error(f"Repository {repo_name} not found or not accessible.")
+            self._add_error("Repository not found or not accessible", repo_name)
         else:
-            self._add_error(f"GitHub API error for {repo_name} (HTTP {response.status_code}).")
+            self._add_error(f"GitHub API error (HTTP {response.status_code})", repo_name)
 
     def get_user_prs_for_repo(self, owner: str, name: str, author: Optional[str] = None) -> list[PullRequestInfo]:
         """Get open PRs authored by the specified user (or current user) for a specific repository."""
@@ -1060,8 +1079,7 @@ class GitHubClient:
 
             if response.status_code == 403:
                 if 'rate limit' in response.text.lower():
-                    self.warnings.append("Rate limit hit. Some PRs may not be loaded.")
-                    return {}
+                    self._add_warning("Rate limit hit. Some PRs may not be loaded.")
                 return {}
 
             if response.status_code != 200:

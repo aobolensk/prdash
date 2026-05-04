@@ -3,6 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
 import json
 import re
+import requests
 
 from .models import TrackedRepository, PersonalAccessToken
 from .github_client import GitHubClient
@@ -605,23 +606,27 @@ def save_pat(request):
     token = request.POST.get('token', '').strip()
 
     if not token:
-        # Delete existing PAT if empty token submitted
         PersonalAccessToken.objects.filter(user=request.user).delete()
         pat = None
     else:
-        # Validate the token by making a test API call
-        from github import Github
+        headers = {'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json'}
+        error = None
         try:
-            g = Github(token, timeout=10)
-            user = g.get_user()
-            _ = user.login  # Force API call to validate token
-        except Exception as e:
-            pat = PersonalAccessToken.objects.filter(user=request.user).first()
-            context = {'pat': pat, 'error': f'Invalid token: {str(e)}'}
-            return render(request, 'dashboard/partials/_pat_form.html', context)
+            resp = requests.get('https://api.github.com/user', headers=headers, timeout=10)
+            if resp.status_code == 401:
+                error = 'Invalid token: Bad credentials'
+            elif resp.status_code == 403:
+                fallback = requests.get('https://api.github.com/rate_limit', headers=headers, timeout=10)
+                if fallback.status_code != 200:
+                    error = f'Invalid token: HTTP {fallback.status_code}'
+        except requests.RequestException as e:
+            error = f'Failed to validate token: {e}'
 
-        # Save or update the PAT
-        pat, created = PersonalAccessToken.objects.update_or_create(
+        if error:
+            pat = PersonalAccessToken.objects.filter(user=request.user).first()
+            return render(request, 'dashboard/partials/_pat_form.html', {'pat': pat, 'error': error})
+
+        pat, _ = PersonalAccessToken.objects.update_or_create(
             user=request.user,
             defaults={'token': token}
         )
