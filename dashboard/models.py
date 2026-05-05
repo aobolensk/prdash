@@ -3,9 +3,13 @@ from django.contrib.auth.models import User
 
 
 class PersonalAccessToken(models.Model):
-    """A GitHub Personal Access Token for API access (useful for enterprise repos)."""
+    """A GitHub Personal Access Token for API access.
+
+    Supports both fine-grained tokens (github_pat_...) and classic PATs (ghp_...).
+    Fine-grained tokens are recommended as they allow scoping to specific repos.
+    """
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='github_pat')
-    token = models.CharField(max_length=255, help_text="GitHub Personal Access Token")
+    token = models.CharField(max_length=255, help_text="GitHub fine-grained or classic token")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

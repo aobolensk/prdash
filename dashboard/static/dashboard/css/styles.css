@@ -934,6 +934,63 @@ a:hover {
     color: var(--color-text-muted);
 }
 
+/* Token info section (extends .settings-help) */
+.token-info h3 {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0 0 8px 0;
+    color: var(--color-text);
+}
+
+.token-info h3:not(:first-child) {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--color-border-light);
+}
+
+.token-recommended {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--color-success);
+    background-color: rgba(26, 127, 55, 0.1);
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-left: 8px;
+}
+
+[data-theme="dark"] .token-recommended {
+    background-color: rgba(63, 185, 80, 0.15);
+}
+
+.token-alternative {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--color-text-muted);
+    background-color: var(--color-bg-tertiary);
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-left: 8px;
+}
+
+.token-info p {
+    margin: 0 0 8px 0;
+    line-height: 1.5;
+}
+
+.token-permissions {
+    margin: 8px 0 0 0;
+    padding-left: 20px;
+}
+
+.token-permissions li {
+    margin-bottom: 4px;
+    line-height: 1.4;
+}
+
+.token-permissions strong {
+    color: var(--color-text);
+}
+
 .settings-help {
     background-color: var(--color-bg-secondary);
     border: 1px solid var(--color-border);

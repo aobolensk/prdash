@@ -13,8 +13,27 @@
         <div class="settings-section">
             <h2>Personal Access Token <span class="settings-optional">(optional)</span></h2>
             <p class="settings-description">
-                Only needed for enterprise repos requiring SSO. <a href="https://github.com/settings/tokens" target="_blank" rel="noopener">Create a PAT</a> with <code>repo</code> scope and enable SSO for your org.
+                Only needed for enterprise repos requiring SSO or additional permissions.
             </p>
+
+            <div class="settings-help token-info">
+                <h3>Fine-grained token <span class="token-recommended">(recommended)</span></h3>
+                <p>
+                    <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create a fine-grained token</a> with these permissions:
+                </p>
+                <ul class="token-permissions">
+                    <li><strong>Repository access:</strong> Select repositories you want to track</li>
+                    <li><strong>Pull requests:</strong> Read-only</li>
+                    <li><strong>Contents:</strong> Read-only (for CI status)</li>
+                    <li><strong>Commit statuses:</strong> Read-only</li>
+                    <li><strong>Metadata:</strong> Read-only (required)</li>
+                </ul>
+
+                <h3>Classic token <span class="token-alternative">(alternative)</span></h3>
+                <p>
+                    <a href="https://github.com/settings/tokens/new" target="_blank" rel="noopener">Create a classic PAT</a> with <code>repo</code> scope. Enable SSO authorization if needed for your org.
+                </p>
+            </div>
 
             <div id="pat-form-container">
                 {% include 'dashboard/partials/_pat_form.html' %}
