@@ -234,7 +234,6 @@ class GitHubClient:
             collection[key] = []
         if repo_name and repo_name not in collection[key]:
             collection[key].append(repo_name)
-        suffix = f": {detail}" if detail else ""
 
     def _add_error(self, error_type: str, repo_name: str = '', detail: str = '') -> None:
         """Add a structured error, grouped by type and detail."""
