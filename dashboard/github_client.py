@@ -235,7 +235,6 @@ class GitHubClient:
         if repo_name and repo_name not in collection[key]:
             collection[key].append(repo_name)
         suffix = f": {detail}" if detail else ""
-        print(f"{level}: {msg_type}: {repo_name}{suffix}")
 
     def _add_error(self, error_type: str, repo_name: str = '', detail: str = '') -> None:
         """Add a structured error, grouped by type and detail."""
@@ -332,8 +331,6 @@ class GitHubClient:
             status_code,
             summary,
         )
-        print(f"WARNING: {operation} failed for {repo_name}: HTTP {status_code}; {summary}")
-
         if status_code in GRAPHQL_TRANSIENT_STATUS_CODES:
             self._add_warning(
                 "GitHub temporarily unavailable. Try refreshing",
@@ -434,23 +431,15 @@ class GitHubClient:
                 )
             except requests.exceptions.Timeout:
                 if attempt < max_attempts:
-                    print(
-                        f"WARNING: {operation} timed out for {repo_name}; "
-                        f"retrying ({attempt}/{max_attempts})."
-                    )
                     time.sleep(GRAPHQL_RETRY_BACKOFF_SECONDS * attempt)
                     continue
 
                 logger.warning("%s timed out for %s", operation, repo_name)
                 self._add_warning("GitHub timed out. Try refreshing", repo_name)
                 return None
-            except requests.exceptions.RequestException as exc:
+            except requests.exceptions.RequestException:
                 logger.warning("%s request failed for %s", operation, repo_name, exc_info=True)
                 self._add_warning("GitHub request failed. Try refreshing", repo_name)
-                print(
-                    f"WARNING: {operation} request failed for {repo_name}: "
-                    f"{exc.__class__.__name__}"
-                )
                 return None
 
             if response.status_code == 200:
@@ -463,10 +452,6 @@ class GitHubClient:
                         operation,
                         repo_name,
                         summary,
-                    )
-                    print(
-                        f"WARNING: {operation} returned non-JSON response for "
-                        f"{repo_name}; {summary}"
                     )
                     self._add_warning("GitHub returned invalid response. Try refreshing", repo_name)
                     return None
@@ -482,10 +467,6 @@ class GitHubClient:
                     response.status_code,
                     repo_name,
                     summary,
-                )
-                print(
-                    f"WARNING: {operation} failed for {repo_name}: "
-                    f"HTTP {response.status_code}; retrying. {summary}"
                 )
                 time.sleep(GRAPHQL_RETRY_BACKOFF_SECONDS * attempt)
                 continue
@@ -523,7 +504,6 @@ class GitHubClient:
 
         if self._is_rate_limit_error(e):
             self._rate_limited_repos.add(repo_name)
-            print(f"WARNING: Rate limit hit for {repo_name}")
             return
 
         if hasattr(e, 'status') and e.status == 403:
@@ -580,8 +560,7 @@ class GitHubClient:
             repo = self.client.get_repo(f"{owner}/{name}")
             pr = repo.get_pull(pr_number)
             return self._pr_to_info(pr, owner, name)
-        except Exception as e:
-            print(f"ERROR: Failed to fetch PR #{pr_number}: {e}")
+        except Exception:
             return None
 
     def _fetch_prs_batch_graphql(self, owner: str, name: str, pr_numbers: list[int]) -> list[PullRequestInfo]:
@@ -694,7 +673,6 @@ class GitHubClient:
             repo_data = data.get('data', {}).get('repository', {})
 
             if not repo_data:
-                print("ERROR: No repository data in GraphQL response")
                 return []
 
             for i, pr_num in enumerate(limited_pr_numbers):
@@ -759,8 +737,7 @@ class GitHubClient:
 
             return result
 
-        except Exception as e:
-            print(f"ERROR: Batch GraphQL fetch failed: {e}")
+        except Exception:
             return []
 
     def _parse_ci_status_from_graphql(self, pr_data: dict) -> CIStatus:
@@ -953,8 +930,7 @@ class GitHubClient:
             pr_numbers = [item['number'] for item in data.get('items', [])]
             return pr_numbers[:limit] if limit else pr_numbers
 
-        except requests.exceptions.RequestException as e:
-            print(f"ERROR: Search request failed for {owner}/{name}: {e}")
+        except requests.exceptions.RequestException:
             return []
 
     def _handle_api_error_from_response(
@@ -1107,8 +1083,7 @@ class GitHubClient:
 
             return result
 
-        except requests.exceptions.RequestException as e:
-            print(f"ERROR: Consolidated search failed: {e}")
+        except requests.exceptions.RequestException:
             return {}
 
     def get_merged_prs_for_repo(self, owner: str, name: str, author: Optional[str] = None) -> list[PullRequestInfo]:
@@ -1415,8 +1390,8 @@ class GitHubClient:
                         if pr_num in pr_map:
                             approved_prs.append(pr_map[pr_num])
 
-            except Exception as e:
-                print(f"ERROR: Failed to filter approved PRs for {owner}/{name}: {e}")
+            except Exception:
+                pass
 
         return approved_prs
 
@@ -1518,8 +1493,8 @@ class GitHubClient:
                             if pr_num in pr_map:
                                 reviewed_prs.append(pr_map[pr_num])
 
-            except Exception as e:
-                print(f"ERROR: Failed to filter reviewed PRs for {owner}/{name}: {e}")
+            except Exception:
+                pass
 
         return reviewed_prs
 
@@ -1791,8 +1766,8 @@ class GitHubClient:
                             if pr_avatar:
                                 reviews_given_to[pr_author]['avatar'] = pr_avatar
 
-            except Exception as e:
-                print(f"ERROR: Failed to fetch review stats for {owner}/{name}: {e}")
+            except Exception:
+                pass
 
         # Build top reviewers (authors of PRs that user reviewed)
         top_reviewers = [
