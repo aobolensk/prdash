@@ -74,6 +74,40 @@ class PullRequestInfo:
 class GitHubClient:
     """Client for interacting with the GitHub API."""
 
+    @staticmethod
+    def _compute_latest_review_states(
+        reviews: list[dict],
+        author_key: str = 'author',
+        login_key: str = 'login',
+        state_key: str = 'state',
+        time_key: str = 'submittedAt',
+    ) -> dict[str, tuple[str, str]]:
+        """Compute the latest review state per user from a list of reviews.
+
+        Returns dict mapping username -> (state, submitted_at).
+        Only considers APPROVED, CHANGES_REQUESTED, COMMENTED states.
+        COMMENTED reviews don't override APPROVED/CHANGES_REQUESTED.
+        """
+        latest: dict[str, tuple[str, str]] = {}
+        for review in reviews:
+            author = review.get(author_key)
+            if not author:
+                continue
+            user = author.get(login_key) if isinstance(author, dict) else author
+            if not user:
+                continue
+            state = review.get(state_key, '')
+            submitted_at = review.get(time_key)
+
+            if state in ('APPROVED', 'CHANGES_REQUESTED', 'COMMENTED'):
+                if user not in latest:
+                    latest[user] = (state, submitted_at)
+                elif submitted_at and submitted_at > latest[user][1]:
+                    old_state = latest[user][0]
+                    if state in ('APPROVED', 'CHANGES_REQUESTED') or old_state == 'COMMENTED':
+                        latest[user] = (state, submitted_at)
+        return latest
+
     def __init__(self, user):
         self.user = user
         self._client = None
@@ -822,27 +856,7 @@ class GitHubClient:
             comment_count = pr_data.get('comments', {}).get('totalCount', 0)
             comment_count += pr_data.get('reviewThreads', {}).get('totalCount', 0)
 
-            # Track latest review state per user
-            # Note: COMMENTED reviews don't override APPROVED/CHANGES_REQUESTED
-            latest_review_by_user = {}
-            for review in reviews:
-                if not review.get('author'):
-                    continue
-                user = review['author']['login']
-                state = review.get('state', '')
-                submitted_at = review.get('submittedAt')
-
-                if state in ('APPROVED', 'CHANGES_REQUESTED', 'COMMENTED'):
-                    # Only update if:
-                    # 1. User hasn't reviewed yet, OR
-                    # 2. New review is later AND (new is APPROVED/CHANGES_REQUESTED, or old was just COMMENTED)
-                    if user not in latest_review_by_user:
-                        latest_review_by_user[user] = (state, submitted_at)
-                    elif submitted_at > latest_review_by_user[user][1]:
-                        old_state = latest_review_by_user[user][0]
-                        # Only override if new state is "stronger" or old state was just COMMENTED
-                        if state in ('APPROVED', 'CHANGES_REQUESTED') or old_state == 'COMMENTED':
-                            latest_review_by_user[user] = (state, submitted_at)
+            latest_review_by_user = self._compute_latest_review_states(reviews)
 
             approval_count = sum(1 for state, _ in latest_review_by_user.values() if state == 'APPROVED')
             changes_requested = any(state == 'CHANGES_REQUESTED' for state, _ in latest_review_by_user.values())
@@ -1295,20 +1309,36 @@ class GitHubClient:
         all_prs.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
         return all_prs
 
-    def _filter_prs_approved_by_user(self, prs: list[PullRequestInfo], username: str) -> list[PullRequestInfo]:
-        """Filter PRs to only include those approved by the given user using GraphQL."""
-        if not prs:
-            return []
-
-        # Group PRs by repo
-        prs_by_repo = {}
+    @staticmethod
+    def _group_prs_by_repo(prs: list[PullRequestInfo]) -> dict[tuple[str, str], list[PullRequestInfo]]:
+        """Group PRs by (owner, name) tuple."""
+        prs_by_repo: dict[tuple[str, str], list[PullRequestInfo]] = {}
         for pr in prs:
             key = (pr.repo_owner, pr.repo_name)
             if key not in prs_by_repo:
                 prs_by_repo[key] = []
             prs_by_repo[key].append(pr)
+        return prs_by_repo
 
-        approved_prs = []
+    def _filter_prs_by_user_review_state(
+        self,
+        prs: list[PullRequestInfo],
+        username: str,
+        state_predicate: callable,
+    ) -> list[PullRequestInfo]:
+        """Filter PRs based on a user's review state using GraphQL.
+
+        Args:
+            prs: List of PRs to filter
+            username: GitHub username to check review state for
+            state_predicate: Function(state: str) -> bool that returns True if the state matches
+        """
+        if not prs:
+            return []
+
+        prs_by_repo = self._group_prs_by_repo(prs)
+
+        matching_prs = []
         token = self._get_token()
         if not token:
             return []
@@ -1316,7 +1346,6 @@ class GitHubClient:
         for (owner, name), repo_prs in prs_by_repo.items():
             pr_numbers = [pr.number for pr in repo_prs]
 
-            # Build GraphQL query to check reviews
             pr_queries = []
             for i, pr_num in enumerate(pr_numbers[:100]):
                 pr_queries.append(f'''
@@ -1347,18 +1376,16 @@ class GitHubClient:
                     query,
                     owner=owner,
                     name=name,
-                    operation='Review approval GraphQL query',
+                    operation='Review state filter GraphQL query',
                     token=token,
                 )
                 if data is None:
                     continue
 
                 repo_data = data.get('data', {}).get('repository', {})
-
                 if not repo_data:
                     continue
 
-                # Check each PR for user's approval
                 pr_map = {pr.number: pr for pr in repo_prs}
                 for i, pr_num in enumerate(pr_numbers[:100]):
                     pr_data = repo_data.get(f'pr{i}')
@@ -1366,136 +1393,31 @@ class GitHubClient:
                         continue
 
                     reviews = pr_data.get('reviews', {}).get('nodes', [])
+                    latest_review_by_user = self._compute_latest_review_states(reviews)
 
-                    # Track latest review state per user
-                    latest_review_by_user = {}
-                    for review in reviews:
-                        if not review.get('author'):
-                            continue
-                        user = review['author']['login']
-                        state = review.get('state', '')
-                        submitted_at = review.get('submittedAt')
-
-                        if state in ('APPROVED', 'CHANGES_REQUESTED', 'COMMENTED'):
-                            if user not in latest_review_by_user:
-                                latest_review_by_user[user] = (state, submitted_at)
-                            elif submitted_at > latest_review_by_user[user][1]:
-                                old_state = latest_review_by_user[user][0]
-                                if state in ('APPROVED', 'CHANGES_REQUESTED') or old_state == 'COMMENTED':
-                                    latest_review_by_user[user] = (state, submitted_at)
-
-                    # Check if user has approved
-                    if username in latest_review_by_user and latest_review_by_user[username][0] == 'APPROVED':
-                        if pr_num in pr_map:
-                            approved_prs.append(pr_map[pr_num])
+                    if username in latest_review_by_user:
+                        user_state = latest_review_by_user[username][0]
+                        if state_predicate(user_state) and pr_num in pr_map:
+                            matching_prs.append(pr_map[pr_num])
 
             except Exception:
                 pass
 
-        return approved_prs
+        return matching_prs
+
+    def _filter_prs_approved_by_user(self, prs: list[PullRequestInfo], username: str) -> list[PullRequestInfo]:
+        """Filter PRs to only include those approved by the given user."""
+        return self._filter_prs_by_user_review_state(
+            prs, username, lambda state: state == 'APPROVED'
+        )
 
     def _filter_prs_reviewed_not_approved_by_user(
         self, prs: list[PullRequestInfo], username: str
     ) -> list[PullRequestInfo]:
-        """Filter PRs to only include those reviewed (but not approved) by the given user using GraphQL."""
-        if not prs:
-            return []
-
-        # Group PRs by repo
-        prs_by_repo = {}
-        for pr in prs:
-            key = (pr.repo_owner, pr.repo_name)
-            if key not in prs_by_repo:
-                prs_by_repo[key] = []
-            prs_by_repo[key].append(pr)
-
-        reviewed_prs = []
-        token = self._get_token()
-        if not token:
-            return []
-
-        for (owner, name), repo_prs in prs_by_repo.items():
-            pr_numbers = [pr.number for pr in repo_prs]
-
-            # Build GraphQL query to check reviews
-            pr_queries = []
-            for i, pr_num in enumerate(pr_numbers[:100]):
-                pr_queries.append(f'''
-                    pr{i}: pullRequest(number: {pr_num}) {{
-                        number
-                        reviews(first: 100) {{
-                            nodes {{
-                                author {{
-                                    login
-                                }}
-                                state
-                                submittedAt
-                            }}
-                        }}
-                    }}
-                ''')
-
-            query = f'''
-                query {{
-                    repository(owner: "{owner}", name: "{name}") {{
-                        {' '.join(pr_queries)}
-                    }}
-                }}
-            '''
-
-            try:
-                data = self._post_graphql(
-                    query,
-                    owner=owner,
-                    name=name,
-                    operation='Review state GraphQL query',
-                    token=token,
-                )
-                if data is None:
-                    continue
-
-                repo_data = data.get('data', {}).get('repository', {})
-
-                if not repo_data:
-                    continue
-
-                # Check each PR for user's review (not approved)
-                pr_map = {pr.number: pr for pr in repo_prs}
-                for i, pr_num in enumerate(pr_numbers[:100]):
-                    pr_data = repo_data.get(f'pr{i}')
-                    if not pr_data:
-                        continue
-
-                    reviews = pr_data.get('reviews', {}).get('nodes', [])
-
-                    # Track latest review state per user
-                    latest_review_by_user = {}
-                    for review in reviews:
-                        if not review.get('author'):
-                            continue
-                        user = review['author']['login']
-                        state = review.get('state', '')
-                        submitted_at = review.get('submittedAt')
-
-                        if state in ('APPROVED', 'CHANGES_REQUESTED', 'COMMENTED'):
-                            if user not in latest_review_by_user:
-                                latest_review_by_user[user] = (state, submitted_at)
-                            elif submitted_at > latest_review_by_user[user][1]:
-                                old_state = latest_review_by_user[user][0]
-                                if state in ('APPROVED', 'CHANGES_REQUESTED') or old_state == 'COMMENTED':
-                                    latest_review_by_user[user] = (state, submitted_at)
-
-                    # Check if user has reviewed but NOT approved (i.e., COMMENTED or CHANGES_REQUESTED)
-                    if username in latest_review_by_user:
-                        user_state = latest_review_by_user[username][0]
-                        if user_state in ('COMMENTED', 'CHANGES_REQUESTED'):
-                            if pr_num in pr_map:
-                                reviewed_prs.append(pr_map[pr_num])
-
-            except Exception:
-                pass
-
-        return reviewed_prs
+        """Filter PRs to only include those reviewed (but not approved) by the given user."""
+        return self._filter_prs_by_user_review_state(
+            prs, username, lambda state: state in ('COMMENTED', 'CHANGES_REQUESTED')
+        )
 
     def _issue_to_pr_info_fast(self, issue, repo_owner: str, repo_name: str) -> PullRequestInfo:
         """Convert a PyGithub Issue (from search) to PullRequestInfo - FAST path with no extra API calls."""
