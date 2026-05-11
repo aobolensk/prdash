@@ -260,7 +260,7 @@ class GitHubClient:
             return ReviewStatus(state='not_reviewed', approval_count=0, comment_count=0)
 
     def _add_grouped_message(
-        self, collection: dict, msg_type: str, repo_name: str, detail: str, level: str
+        self, collection: dict, msg_type: str, repo_name: str, detail: str
     ) -> None:
         """Add a message to a grouped collection."""
         key = (msg_type, detail)
@@ -271,11 +271,11 @@ class GitHubClient:
 
     def _add_error(self, error_type: str, repo_name: str = '', detail: str = '') -> None:
         """Add a structured error, grouped by type and detail."""
-        self._add_grouped_message(self._grouped_errors, error_type, repo_name, detail, "ERROR")
+        self._add_grouped_message(self._grouped_errors, error_type, repo_name, detail)
 
     def _add_warning(self, warning_type: str, repo_name: str = '', detail: str = '') -> None:
         """Add a structured warning, grouped by type and detail."""
-        self._add_grouped_message(self._grouped_warnings, warning_type, repo_name, detail, "WARNING")
+        self._add_grouped_message(self._grouped_warnings, warning_type, repo_name, detail)
 
     @staticmethod
     def _format_grouped_messages(grouped: dict) -> list[str]:
@@ -575,15 +575,6 @@ class GitHubClient:
                         error_msg = f"Error accessing {owner}/{name}"
                 return False, error_msg
             return False, f"Error accessing {owner}/{name}: {str(e)}"
-
-    def _fetch_pr_details(self, pr_number: int, owner: str, name: str) -> Optional[PullRequestInfo]:
-        """Fetch full PR details including CI status for a single PR."""
-        try:
-            repo = self.client.get_repo(f"{owner}/{name}")
-            pr = repo.get_pull(pr_number)
-            return self._pr_to_info(pr, owner, name)
-        except Exception:
-            return None
 
     def _fetch_prs_batch_graphql(self, owner: str, name: str, pr_numbers: list[int]) -> list[PullRequestInfo]:
         """Fetch multiple PRs using GraphQL to minimize API calls."""
@@ -1392,78 +1383,6 @@ class GitHubClient:
         """Filter PRs to only include those reviewed (but not approved) by the given user."""
         return self._filter_prs_by_user_review_state(
             prs, username, lambda state: state in ('COMMENTED', 'CHANGES_REQUESTED')
-        )
-
-    def _issue_to_pr_info_fast(self, issue, repo_owner: str, repo_name: str) -> PullRequestInfo:
-        """Convert a PyGithub Issue (from search) to PullRequestInfo - FAST path with no extra API calls."""
-        labels = [
-            {
-                'name': label.name,
-                'color': label.color,
-            }
-            for label in issue.labels
-        ]
-
-        # Extract CI status from issue state if available
-        # GitHub's search API includes some status info in the issue object
-        ci_state = 'unknown'
-
-        # Check if issue has pull_request attribute with status info
-        if hasattr(issue, 'pull_request') and issue.pull_request:
-            # Some status might be available in raw_data
-            if hasattr(issue, '_rawData'):
-                raw = issue._rawData
-                if 'state_reason' in raw:
-                    # Try to infer from state_reason
-                    pass
-
-        return PullRequestInfo(
-            number=issue.number,
-            title=issue.title,
-            url=issue.html_url,
-            repo_owner=repo_owner,
-            repo_name=repo_name,
-            author=issue.user.login,
-            author_avatar=issue.user.avatar_url,
-            created_at=issue.created_at,
-            updated_at=issue.updated_at,
-            labels=labels,
-            ci_status=CIStatus(state=ci_state, passed_count=0, total_count=0),
-            review_status=ReviewStatus(state='not_reviewed', approval_count=0, comment_count=0),
-            draft='draft' in issue.title.lower(),  # Infer from title
-            additions=0,  # Not available without extra API call
-            deletions=0,  # Not available without extra API call
-        )
-
-    def _issue_to_pr_info(self, issue, repo_owner: str, repo_name: str) -> PullRequestInfo:
-        """Convert a PyGithub Issue (from search) to PullRequestInfo without extra API calls."""
-        labels = [
-            {
-                'name': label.name,
-                'color': label.color,
-            }
-            for label in issue.labels
-        ]
-
-        # Get PR-specific data only if needed
-        # Issue objects from search have most data we need
-        # We'll skip CI status and draft flag to avoid extra API calls
-        return PullRequestInfo(
-            number=issue.number,
-            title=issue.title,
-            url=issue.html_url,
-            repo_owner=repo_owner,
-            repo_name=repo_name,
-            author=issue.user.login,
-            author_avatar=issue.user.avatar_url,
-            created_at=issue.created_at,
-            updated_at=issue.updated_at,
-            labels=labels,
-            ci_status=CIStatus(state='unknown'),  # Skip CI check for performance
-            review_status=ReviewStatus(state='not_reviewed', approval_count=0, comment_count=0),
-            draft=False,  # Can't get this from Issue without extra API call
-            additions=0,  # Can't get this from Issue without extra API call
-            deletions=0,  # Can't get this from Issue without extra API call
         )
 
     def get_reviews_for_stats(self, repos: list[tuple[str, str]], username: str, days: int = 30) -> dict:
