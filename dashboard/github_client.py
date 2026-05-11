@@ -345,92 +345,68 @@ class GitHubClient:
 
         return 'JSON response without error message'
 
-    def _handle_graphql_http_error(
+    def _handle_error(
         self,
-        response: requests.Response,
-        owner: Optional[str],
-        name: Optional[str],
-        operation: str,
+        owner: str,
+        name: str,
+        status_code: Optional[int] = None,
+        message: str = '',
+        error_type: Optional[str] = None,
+        operation: str = 'GitHub request',
     ) -> None:
-        """Handle a non-200 GraphQL HTTP response without logging raw bodies."""
-        repo_name = self._repo_label(owner, name)
-        status_code = response.status_code
-        summary = self._summarize_response(response)
+        """Unified error handler for all GitHub API errors.
 
-        logger.warning(
-            "%s failed for %s: HTTP %s; %s",
-            operation,
-            repo_name,
-            status_code,
-            summary,
-        )
-        if status_code in GRAPHQL_TRANSIENT_STATUS_CODES:
+        Args:
+            owner: Repository owner
+            name: Repository name
+            status_code: HTTP status code (if applicable)
+            message: Error message from API
+            error_type: GraphQL error type (if applicable)
+            operation: Description of the operation that failed
+        """
+        repo_name = self._repo_label(owner, name)
+        message_lower = message.lower()
+
+        # Log the error
+        if status_code:
+            logger.warning("%s failed for %s: HTTP %s; %s", operation, repo_name, status_code, message)
+        else:
+            logger.warning("%s failed for %s: %s %s", operation, repo_name, error_type or 'Error', message)
+
+        # Check for rate limiting
+        if (
+            (status_code == 403 and 'rate limit' in message_lower)
+            or error_type == 'RATE_LIMITED'
+            or 'rate limit' in message_lower
+        ):
+            self._rate_limited_repos.add(repo_name)
+            return
+
+        # Check for SAML enforcement (case-insensitive)
+        if 'saml' in message_lower:
+            self._add_error("Access denied", repo_name, "SAML SSO required")
+            return
+
+        # Handle specific status codes and error types
+        if status_code == 401:
+            self._add_error("GitHub authentication failed", detail="Reconnect GitHub or update your PAT")
+        elif status_code == 403 or error_type == 'FORBIDDEN':
+            detail = message if message and not message_lower.startswith('github') else ''
+            self._add_error("Access denied", repo_name, detail)
+        elif status_code == 404 or error_type == 'NOT_FOUND':
+            self._add_error("Repository not found or not accessible", repo_name)
+        elif status_code in GRAPHQL_TRANSIENT_STATUS_CODES:
             self._add_warning(
                 "GitHub temporarily unavailable. Try refreshing",
                 repo_name,
                 f"HTTP {status_code}",
             )
-            return
-
-        summary_lower = summary.lower()
-        if status_code == 403 and 'rate limit' in summary_lower:
-            self._rate_limited_repos.add(repo_name)
-            return
-
-        if status_code == 403:
-            if 'saml' in summary_lower:
-                self._add_error("Access denied", repo_name, "SAML SSO required")
-            else:
-                self._add_error("Access denied", repo_name)
-            return
-
-        if status_code == 404:
-            self._add_error("Repository not found or not accessible", repo_name)
-            return
-
-        if status_code == 401:
-            self._add_error("GitHub authentication failed", detail="Reconnect GitHub or update your PAT")
-            return
-
-        self._add_warning(f"GitHub returned HTTP {status_code}", repo_name)
-
-    def _handle_graphql_errors(
-        self,
-        data: dict,
-        owner: Optional[str],
-        name: Optional[str],
-        operation: str,
-    ) -> None:
-        """Handle GraphQL errors from a 200 response."""
-        errors = data.get('errors')
-        if not errors:
-            return
-
-        repo_name = self._repo_label(owner, name)
-        for error in errors:
-            if not isinstance(error, dict):
-                logger.warning("%s returned GraphQL error for %s: %s", operation, repo_name, error)
-                continue
-
-            error_type = error.get('type') or error.get('extensions', {}).get('code')
-            message = error.get('message', '')
-            logger.warning(
-                "%s returned GraphQL error for %s: %s %s",
-                operation,
-                repo_name,
-                error_type,
-                message,
-            )
-
-            message_lower = message.lower()
-            if error_type == 'NOT_FOUND':
-                self._add_error("Repository not found or not accessible", repo_name)
-            elif error_type == 'FORBIDDEN':
-                self._add_error("Access denied", repo_name, message)
-            elif error_type == 'RATE_LIMITED' or 'rate limit' in message_lower:
-                self._rate_limited_repos.add(repo_name)
-            elif 'timeout' in message_lower or 'timed out' in message_lower:
-                self._add_warning("GitHub timed out. Try refreshing", repo_name)
+        elif 'timeout' in message_lower or 'timed out' in message_lower:
+            self._add_warning("GitHub timed out. Try refreshing", repo_name)
+        elif status_code:
+            self._add_warning(f"GitHub returned HTTP {status_code}", repo_name)
+        else:
+            self._add_error("Failed to fetch PRs", repo_name)
 
     def _post_graphql(
         self,
@@ -489,7 +465,24 @@ class GitHubClient:
                     self._add_warning("GitHub returned invalid response. Try refreshing", repo_name)
                     return None
 
-                self._handle_graphql_errors(data, owner, name, operation)
+                # Handle GraphQL errors from 200 response
+                errors = data.get('errors')
+                if errors:
+                    for error in errors:
+                        if not isinstance(error, dict):
+                            logger.warning("%s returned GraphQL error for %s: %s", operation, repo_name, error)
+                            continue
+
+                        error_type = error.get('type') or error.get('extensions', {}).get('code')
+                        message = error.get('message', '')
+                        self._handle_error(
+                            owner or '',
+                            name or '',
+                            error_type=error_type,
+                            message=message,
+                            operation=operation,
+                        )
+
                 return data
 
             if response.status_code in GRAPHQL_TRANSIENT_STATUS_CODES and attempt < max_attempts:
@@ -504,7 +497,15 @@ class GitHubClient:
                 time.sleep(GRAPHQL_RETRY_BACKOFF_SECONDS * attempt)
                 continue
 
-            self._handle_graphql_http_error(response, owner, name, operation)
+            # Handle non-200 HTTP response
+            summary = self._summarize_response(response)
+            self._handle_error(
+                owner or '',
+                name or '',
+                status_code=response.status_code,
+                message=summary,
+                operation=operation,
+            )
             return None
 
         return None
@@ -532,27 +533,15 @@ class GitHubClient:
         return 'rate limit' in api_msg
 
     def _handle_api_error(self, e: Exception, owner: str, name: str) -> None:
-        """Handle GitHub API errors and add human-readable messages to self.errors or self.warnings."""
-        repo_name = f"{owner}/{name}"
-
+        """Handle GitHub API errors from PyGithub exceptions."""
         if self._is_rate_limit_error(e):
-            self._rate_limited_repos.add(repo_name)
+            self._rate_limited_repos.add(f"{owner}/{name}")
             return
 
-        if hasattr(e, 'status') and e.status == 403:
-            api_msg = e.data.get('message', '') if hasattr(e, 'data') and isinstance(e.data, dict) else ''
-            if 'SAML' in api_msg:
-                self._add_error("Access denied", repo_name, "SAML SSO required")
-            else:
-                self._add_error("Access denied", repo_name)
-            return
+        status_code = e.status if hasattr(e, 'status') else None
+        message = e.data.get('message', '') if hasattr(e, 'data') and isinstance(e.data, dict) else str(e)
 
-        if hasattr(e, 'status') and e.status == 404:
-            self._add_error("Repository not found or not accessible", repo_name)
-        elif hasattr(e, 'status'):
-            self._add_error(f"GitHub API error (HTTP {e.status})", repo_name)
-        else:
-            self._add_error("Failed to fetch PRs", repo_name)
+        self._handle_error(owner, name, status_code=status_code, message=message)
 
     def validate_repo(self, owner: str, name: str) -> tuple[bool, str]:
         """Validate that a repository exists and is accessible."""
@@ -950,22 +939,8 @@ class GitHubClient:
         self, response: requests.Response, owner: str, name: str
     ) -> None:
         """Handle errors from requests.Response objects."""
-        repo_name = f"{owner}/{name}"
-
-        if response.status_code == 403:
-            try:
-                data = response.json()
-                api_msg = data.get('message', '')
-                if 'SAML' in api_msg:
-                    self._add_error("Access denied", repo_name, "SAML SSO required")
-                    return
-            except ValueError:
-                pass
-            self._add_error("Access denied", repo_name)
-        elif response.status_code == 404:
-            self._add_error("Repository not found or not accessible", repo_name)
-        else:
-            self._add_error(f"GitHub API error (HTTP {response.status_code})", repo_name)
+        message = self._summarize_response(response)
+        self._handle_error(owner, name, status_code=response.status_code, message=message)
 
     def get_user_prs_for_repo(self, owner: str, name: str, author: Optional[str] = None) -> list[PullRequestInfo]:
         """Get open PRs authored by the specified user (or current user) for a specific repository."""
