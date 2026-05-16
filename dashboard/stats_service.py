@@ -1,4 +1,5 @@
 """Stats computation service for PR analytics."""
+import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -138,7 +139,8 @@ class StatsService:
     def _get_cache_key(self, prefix: str, repos: list[tuple[str, str]], days: int) -> str:
         """Generate cache key for stats."""
         repos_str = ",".join(f"{o}/{n}" for o, n in sorted(repos))
-        return f"stats:{prefix}:{self.username}:{repos_str}:{days}"
+        repos_hash = hashlib.md5(repos_str.encode()).hexdigest()[:16]
+        return f"stats:{prefix}:{self.username}:{repos_hash}:{days}"
 
     def _get_week_start(self, dt: datetime) -> datetime:
         """Get the Monday of the week for a date."""
