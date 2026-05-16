@@ -1,4 +1,5 @@
 """Stats computation service for PR analytics."""
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -471,12 +472,40 @@ class StatsService:
         return stats
 
     def get_all_stats(self, repos: list[tuple[str, str]], days: int = 30) -> dict:
-        """Get all stats in one call."""
-        return {
-            'quick': self.get_quick_stats(repos, days),
-            'velocity': self.get_velocity_stats(repos, days),
-            'reviews': self.get_review_stats(repos, days),
-            'health': self.get_health_stats(repos),
-            'repos': self.get_repo_stats(repos, days),
-            'collaboration': self.get_collaboration_stats(repos, days),
+        """Get all stats in one call, using parallel execution for independent methods."""
+        results = {}
+
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            # Submit all stat collection tasks
+            futures = {
+                executor.submit(self.get_quick_stats, repos, days): 'quick',
+                executor.submit(self.get_velocity_stats, repos, days): 'velocity',
+                executor.submit(self.get_review_stats, repos, days): 'reviews',
+                executor.submit(self.get_health_stats, repos): 'health',
+                executor.submit(self.get_repo_stats, repos, days): 'repos',
+                executor.submit(self.get_collaboration_stats, repos, days): 'collaboration',
+            }
+
+            # Collect results as they complete
+            for future in as_completed(futures):
+                stat_name = futures[future]
+                try:
+                    results[stat_name] = future.result()
+                except Exception:
+                    # If a stat fails, return empty/default data for that stat
+                    # to prevent the entire stats page from breaking
+                    results[stat_name] = self._get_default_stat(stat_name)
+
+        return results
+
+    def _get_default_stat(self, stat_name: str):
+        """Return default/empty stat object for error cases."""
+        defaults = {
+            'quick': QuickStats(),
+            'velocity': VelocityStats(),
+            'reviews': ReviewStats(),
+            'health': HealthStats(),
+            'repos': RepoStats(),
+            'collaboration': CollaborationStats(),
         }
+        return defaults.get(stat_name, {})
