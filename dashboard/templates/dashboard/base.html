@@ -179,6 +179,13 @@
                 });
             });
 
+            document.body.addEventListener('repoToggled', function(evt) {
+                const refreshBtn = document.querySelector('.refresh-wrapper button');
+                if (refreshBtn) {
+                    refreshBtn.click();
+                }
+            });
+
             document.body.addEventListener('reviewTabChanged', function(evt) {
                 const reviewTab = evt.detail.value || evt.detail;
                 const dashboard = document.getElementById('dashboard-layout');
@@ -187,8 +194,12 @@
                 }
             });
 
-            // Intercept HTMX requests to dynamically set the correct URL based on current tab/repo
             document.body.addEventListener('htmx:configRequest', function(evt) {
+                const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]');
+                if (csrfToken) {
+                    evt.detail.headers['X-CSRFToken'] = csrfToken.value;
+                }
+
                 const elt = evt.detail.elt;
                 const dashboard = document.getElementById('dashboard-layout');
                 if (!dashboard) return;

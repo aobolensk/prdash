@@ -1,29 +1,23 @@
-<ul class="repo-list">
+<ul class="repo-list" id="repo-list">
     {% for repo in repos %}
         <li class="repo-item">
-            <a href="{% url 'dashboard:repo_pr_list' repo.owner repo.name %}"
-               class="repo-link {% if current_repo and current_repo.id == repo.id %}active{% endif %}"
-               data-repo="{{ repo.owner }}/{{ repo.name }}"
-               data-url-my_prs="{% url 'dashboard:repo_pr_list' repo.owner repo.name %}"
-               data-url-merged="{% url 'dashboard:repo_merged_pr_list' repo.owner repo.name %}"
-               data-url-review_requests="{% url 'dashboard:repo_review_requests_list' repo.owner repo.name %}"
-               data-url-review_approved="{% url 'dashboard:repo_review_approved_list' repo.owner repo.name %}"
-               data-url-assigned="{% url 'dashboard:repo_assigned_list' repo.owner repo.name %}"
-               hx-get="{% url 'dashboard:repo_pr_list' repo.owner repo.name %}"
-               hx-target="#pr-content"
-               hx-swap="innerHTML"
-               hx-push-url="true">
-                {{ repo.full_name }}
-            </a>
-            <form hx-post="{% url 'dashboard:remove_repo' repo.id %}"
-                  hx-target="#repo-list"
-                  hx-swap="innerHTML"
-                  class="repo-remove-form">
-                {% csrf_token %}
-                <button type="submit" class="btn-icon" aria-label="Remove repository">
-                    &#10005;
-                </button>
-            </form>
+            <label class="repo-toggle">
+                <input type="checkbox"
+                       {% if repo.enabled %}checked{% endif %}
+                       hx-post="{% url 'dashboard:toggle_repo' repo.id %}"
+                       hx-target="#repo-list"
+                       hx-swap="outerHTML">
+                <span class="repo-name">{{ repo.full_name }}</span>
+            </label>
+            <button type="button"
+                    class="btn-icon repo-remove-btn"
+                    aria-label="Remove repository"
+                    hx-post="{% url 'dashboard:remove_repo' repo.id %}"
+                    hx-target="#repo-list"
+                    hx-swap="outerHTML"
+                    hx-confirm="Remove {{ repo.full_name }}?">
+                &#10005;
+            </button>
         </li>
     {% empty %}
         <li class="repo-empty">No repositories tracked yet.</li>

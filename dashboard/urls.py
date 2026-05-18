@@ -22,6 +22,7 @@ urlpatterns = [
     path('prs/<str:owner>/<str:repo>/assigned/', views.repo_assigned_list, name='repo_assigned_list'),
     path('repos/add/', views.add_repo, name='add_repo'),
     path('repos/<int:repo_id>/remove/', views.remove_repo, name='remove_repo'),
+    path('repos/<int:repo_id>/toggle/', views.toggle_repo, name='toggle_repo'),
     path('stats/', views.stats, name='stats'),
     path('stats/content/', views.stats_content, name='stats_content'),
     path('settings/', views.settings, name='settings'),

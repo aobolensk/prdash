@@ -28,6 +28,7 @@ class TrackedRepository(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='tracked_repos')
     owner = models.CharField(max_length=255, help_text="GitHub username or organization")
     name = models.CharField(max_length=255, help_text="Repository name")
+    enabled = models.BooleanField(default=True, help_text="Whether to include in PR fetching")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

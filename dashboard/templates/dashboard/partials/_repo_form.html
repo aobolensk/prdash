@@ -1,6 +1,6 @@
 <form hx-post="{% url 'dashboard:add_repo' %}"
       hx-target="#repo-list"
-      hx-swap="innerHTML"
+      hx-swap="outerHTML"
       class="add-repo-form">
     {% csrf_token %}
     <input type="text"

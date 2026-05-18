@@ -405,33 +405,61 @@ a:hover {
 .repo-item {
     display: flex;
     align-items: center;
-    gap: 8px;
     margin-bottom: 4px;
+    position: relative;
 }
 
-.repo-link {
-    flex: 1;
-    padding: 8px 12px;
-    color: var(--color-text);
+.repo-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
     border-radius: 6px;
+    width: 100%;
+}
+
+.repo-toggle:hover {
+    background-color: var(--color-bg-tertiary);
+}
+
+.repo-toggle input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--color-primary);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.repo-name {
     font-size: 13px;
+    color: var(--color-text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    flex: 1;
 }
 
-.repo-link:hover {
-    background-color: var(--color-bg-tertiary);
-    text-decoration: none;
+.repo-remove-btn {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    opacity: 0;
+    color: var(--color-text-muted);
+    transition: opacity 0.15s;
+    padding: 2px 6px;
+    font-size: 12px;
+    background: var(--color-bg-secondary);
+    border-radius: 4px;
 }
 
-.repo-link.active {
-    background-color: var(--color-primary);
-    color: #ffffff;
+.repo-item:hover .repo-remove-btn {
+    opacity: 1;
 }
 
-.repo-remove-form {
-    flex-shrink: 0;
+.repo-remove-btn:hover {
+    color: var(--color-error, #dc3545);
 }
 
 .repo-empty {

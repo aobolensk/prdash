@@ -47,7 +47,7 @@
             <h2 class="sidebar-title">Repositories</h2>
             <form hx-post="{% url 'dashboard:add_repo' %}"
                   hx-target="#repo-list"
-                  hx-swap="innerHTML"
+                  hx-swap="outerHTML"
                   class="add-repo-form">
                 {% csrf_token %}
                 <input type="text"
@@ -58,11 +58,7 @@
                 <button type="submit" class="btn btn-primary">Add</button>
             </form>
 
-            <div id="repo-list"
-                 hx-trigger="repoAdded from:body, repoRemoved from:body"
-                 hx-get="{% url 'dashboard:pr_list' %}"
-                 hx-select="#repo-list"
-                 hx-swap="outerHTML">
+            <div id="repo-list-container">
                 {% include 'dashboard/partials/_repo_list.html' %}
             </div>
         </div>

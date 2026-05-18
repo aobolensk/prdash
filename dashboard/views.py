@@ -70,7 +70,8 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
         repo_changed = f'{owner}/{repo}'
     else:
         current_repo = None
-        repo_tuples = [(r.owner, r.name) for r in repos]
+        enabled_repos = repos.filter(enabled=True)
+        repo_tuples = [(r.owner, r.name) for r in enabled_repos]
         prs = fetch_prs(client, repo_tuples, author)
         repo_changed = ''
 
@@ -246,48 +247,41 @@ def repo_assigned_list(request, owner, repo):
     )
 
 
+def _render_repo_list(request, trigger='repoToggled', errors=None):
+    """Render the repo list partial with appropriate HX-Trigger."""
+    repos = TrackedRepository.objects.filter(user=request.user)
+    response = render(request, 'dashboard/partials/_repo_list.html', {'repos': repos})
+    if errors:
+        response['HX-Trigger'] = json.dumps({'showErrors': errors})
+    else:
+        response['HX-Trigger'] = trigger
+    return response
+
+
 @login_required
 @require_POST
 def add_repo(request):
     """Add a new repository to track."""
     repo_input = request.POST.get('repo', '').strip()
-
-    # Extract owner/repo from various formats
     owner, name = _parse_repo_input(repo_input)
 
     if not owner or not name:
-        repos = TrackedRepository.objects.filter(user=request.user)
-        response = render(request, 'dashboard/partials/_repo_list.html', {'repos': repos})
-        response['HX-Trigger'] = json.dumps({'showErrors': ['Invalid format. Use owner/repo']})
-        return response
+        return _render_repo_list(request, errors=['Invalid format. Use owner/repo'])
 
-    # Validate the repository exists
     client = GitHubClient(request.user)
     valid, message = client.validate_repo(owner, name)
-
     if not valid:
-        repos = TrackedRepository.objects.filter(user=request.user)
-        response = render(request, 'dashboard/partials/_repo_list.html', {'repos': repos})
-        response['HX-Trigger'] = json.dumps({'showErrors': [message]})
-        return response
+        return _render_repo_list(request, errors=[message])
 
-    # Create or get the repository
     repo, created = TrackedRepository.objects.get_or_create(
         user=request.user,
         owner=owner,
         name=name
     )
-
     if not created:
-        repos = TrackedRepository.objects.filter(user=request.user)
-        response = render(request, 'dashboard/partials/_repo_list.html', {'repos': repos})
-        response['HX-Trigger'] = json.dumps({'showErrors': ['Repository already tracked']})
-        return response
+        return _render_repo_list(request, errors=['Repository already tracked'])
 
-    repos = TrackedRepository.objects.filter(user=request.user)
-    response = render(request, 'dashboard/partials/_repo_list.html', {'repos': repos})
-    response['HX-Trigger'] = 'repoAdded'
-    return response
+    return _render_repo_list(request)
 
 
 @login_required
@@ -296,11 +290,17 @@ def remove_repo(request, repo_id):
     """Remove a tracked repository."""
     repo = get_object_or_404(TrackedRepository, id=repo_id, user=request.user)
     repo.delete()
+    return _render_repo_list(request)
 
-    repos = TrackedRepository.objects.filter(user=request.user)
-    response = render(request, 'dashboard/partials/_repo_list.html', {'repos': repos})
-    response['HX-Trigger'] = 'repoRemoved'
-    return response
+
+@login_required
+@require_POST
+def toggle_repo(request, repo_id):
+    """Toggle a repository's enabled state."""
+    repo = get_object_or_404(TrackedRepository, id=repo_id, user=request.user)
+    repo.enabled = not repo.enabled
+    repo.save()
+    return _render_repo_list(request)
 
 
 def _parse_days_param(value: str) -> int:
@@ -334,7 +334,7 @@ def stats(request):
 @login_required
 def stats_content(request):
     """HTMX endpoint that returns the actual stats content."""
-    repos = TrackedRepository.objects.filter(user=request.user)
+    repos = TrackedRepository.objects.filter(user=request.user, enabled=True)
     repo_tuples = [(repo.owner, repo.name) for repo in repos]
 
     days = _parse_days_param(request.GET.get('days', '30'))
