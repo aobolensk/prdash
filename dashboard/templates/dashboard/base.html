@@ -71,7 +71,29 @@
             });
         }
 
+        const TIMESTAMP_FORMAT = {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+            timeZoneName: 'short'
+        };
+
+        function formatTimestampTitles(root = document) {
+            root.querySelectorAll('[data-timestamp]').forEach(el => {
+                if (el.title) return;
+                const ts = el.dataset.timestamp;
+                if (!ts) return;
+                const date = new Date(ts);
+                if (isNaN(date)) return;
+                el.title = date.toLocaleString(undefined, TIMESTAMP_FORMAT);
+            });
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
+            formatTimestampTitles();
+
             const settingsLink = document.getElementById('settings-link');
             if (settingsLink && window.location.pathname === settingsLink.getAttribute('href')) {
                 settingsLink.addEventListener('click', function(e) {
@@ -102,6 +124,7 @@
                 if (evt.detail.target.innerHTML.length === 0 && evt.detail.xhr) {
                     evt.detail.target.innerHTML = evt.detail.xhr.responseText;
                 }
+                formatTimestampTitles(evt.detail.target);
             });
 
             document.body.addEventListener('showErrors', function(evt) {
