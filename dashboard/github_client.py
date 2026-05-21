@@ -304,7 +304,7 @@ class GitHubClient:
         return f"{owner}/{name}" if owner and name else "GitHub"
 
     @staticmethod
-    def _iter_chunks(items: list[int], size: int):
+    def _iter_chunks(items: list, size: int):
         """Yield fixed-size chunks from a list."""
         for start in range(0, len(items), size):
             yield items[start:start + size]
@@ -693,65 +693,218 @@ class GitHubClient:
                 if not pr_data:
                     continue
 
-                # Parse labels
-                labels = [
-                    {'name': label['name'], 'color': label['color']}
-                    for label in pr_data.get('labels', {}).get('nodes', [])
-                ]
-
-                # Parse CI status
-                ci_status = self._parse_ci_status_from_graphql(pr_data)
-
-                # Parse review status
-                review_status = self._parse_review_status_from_graphql(pr_data)
-
-                merged_at = None
-                if pr_data.get('mergedAt'):
-                    merged_at = datetime.fromisoformat(pr_data['mergedAt'].replace('Z', '+00:00'))
-
-                mergeable = pr_data.get('mergeable')
-                cache_key = f"pr_mergeable:{owner}/{name}:{pr_data['number']}"
-                if mergeable and mergeable != 'UNKNOWN':
-                    cache.set(cache_key, mergeable, 3600)
-                elif mergeable is None or mergeable == 'UNKNOWN':
-                    mergeable = cache.get(cache_key)
-
-                # Extract head repository info (could be a fork)
-                head_repo = pr_data.get('headRepository')
-                head_repo_owner = owner
-                head_repo_name = name
-                if head_repo and head_repo.get('owner'):
-                    head_repo_owner = head_repo['owner']['login']
-                    head_repo_name = head_repo['name']
-
-                pr_info = PullRequestInfo(
-                    number=pr_data['number'],
-                    title=pr_data['title'],
-                    url=pr_data['url'],
-                    repo_owner=owner,
-                    repo_name=name,
-                    author=pr_data['author']['login'],
-                    author_avatar=pr_data['author']['avatarUrl'],
-                    created_at=datetime.fromisoformat(pr_data['createdAt'].replace('Z', '+00:00')),
-                    updated_at=datetime.fromisoformat(pr_data['updatedAt'].replace('Z', '+00:00')),
-                    labels=labels,
-                    ci_status=ci_status,
-                    review_status=review_status,
-                    draft=pr_data.get('isDraft', False),
-                    additions=pr_data.get('additions', 0),
-                    deletions=pr_data.get('deletions', 0),
-                    branch_name=pr_data.get('headRefName', ''),
-                    head_repo_owner=head_repo_owner,
-                    head_repo_name=head_repo_name,
-                    mergeable=mergeable,
-                    merged_at=merged_at,
-                )
-                result.append(pr_info)
+                pr_info = self._parse_pr_from_graphql(pr_data, owner, name)
+                if pr_info:
+                    result.append(pr_info)
 
             return result
 
         except Exception:
             return []
+
+    def _fetch_prs_multi_repo_graphql(
+        self, pr_data: dict[tuple[str, str], list[int]]
+    ) -> list[PullRequestInfo]:
+        """Fetch PRs from multiple repos in a single GraphQL query.
+
+        This reduces API calls from N (one per repo) to ceil(total_prs / batch_size).
+        """
+        if not pr_data:
+            return []
+
+        # Flatten to list of (owner, name, pr_number) for batching
+        all_prs: list[tuple[str, str, int]] = []
+        for (owner, name), pr_numbers in pr_data.items():
+            for pr_num in pr_numbers[:100]:
+                all_prs.append((owner, name, pr_num))
+
+        if not all_prs:
+            return []
+
+        result = []
+        batch_size = 50
+
+        for batch in self._iter_chunks(all_prs, batch_size):
+            batch_result = self._fetch_pr_batch_multi_repo(batch)
+            result.extend(batch_result)
+
+        return result
+
+    def _fetch_pr_batch_multi_repo(
+        self, prs: list[tuple[str, str, int]]
+    ) -> list[PullRequestInfo]:
+        """Fetch a batch of PRs from multiple repos in one GraphQL query."""
+        if not prs:
+            return []
+
+        # Build query with aliased repository blocks
+        pr_queries = []
+        alias_map: dict[str, tuple[str, str]] = {}
+
+        for i, (owner, name, pr_num) in enumerate(prs):
+            alias = f"r{i}"
+            alias_map[alias] = (owner, name)
+            pr_queries.append(f'''
+                {alias}: repository(owner: "{owner}", name: "{name}") {{
+                    pullRequest(number: {pr_num}) {{
+                        number
+                        title
+                        url
+                        author {{
+                            login
+                            avatarUrl
+                        }}
+                        createdAt
+                        updatedAt
+                        mergedAt
+                        isDraft
+                        additions
+                        deletions
+                        mergeable
+                        headRefName
+                        headRepository {{
+                            owner {{
+                                login
+                            }}
+                            name
+                        }}
+                        labels(first: 20) {{
+                            nodes {{
+                                name
+                                color
+                            }}
+                        }}
+                        commits(last: 1) {{
+                            nodes {{
+                                commit {{
+                                    statusCheckRollup {{
+                                        state
+                                        contexts(first: 100) {{
+                                            totalCount
+                                            nodes {{
+                                                ... on CheckRun {{
+                                                    name
+                                                    status
+                                                    conclusion
+                                                }}
+                                                ... on StatusContext {{
+                                                    state
+                                                    context
+                                                }}
+                                            }}
+                                        }}
+                                    }}
+                                }}
+                            }}
+                        }}
+                        reviews(first: 100) {{
+                            nodes {{
+                                author {{
+                                    login
+                                }}
+                                state
+                                submittedAt
+                            }}
+                        }}
+                        comments {{
+                            totalCount
+                        }}
+                        reviewThreads {{
+                            totalCount
+                        }}
+                    }}
+                }}
+            ''')
+
+        query = f'''
+            query {{
+                {' '.join(pr_queries)}
+            }}
+        '''
+
+        data = self._post_graphql(
+            query,
+            operation='Multi-repo PR details GraphQL query',
+        )
+        if data is None:
+            return []
+
+        result = []
+        query_data = data.get('data', {})
+
+        for alias, (owner, name) in alias_map.items():
+            repo_data = query_data.get(alias)
+            if not repo_data:
+                continue
+
+            pr_node = repo_data.get('pullRequest')
+            if not pr_node:
+                continue
+
+            pr_info = self._parse_pr_from_graphql(pr_node, owner, name)
+            if pr_info:
+                result.append(pr_info)
+
+        return result
+
+    def _parse_pr_from_graphql(
+        self, pr_data: dict, owner: str, name: str
+    ) -> Optional[PullRequestInfo]:
+        """Parse a single PR from GraphQL response into PullRequestInfo."""
+        try:
+            if not pr_data or not pr_data.get('author'):
+                return None
+
+            labels = [
+                {'name': label['name'], 'color': label['color']}
+                for label in pr_data.get('labels', {}).get('nodes', [])
+            ]
+
+            ci_status = self._parse_ci_status_from_graphql(pr_data)
+            review_status = self._parse_review_status_from_graphql(pr_data)
+
+            merged_at = None
+            if pr_data.get('mergedAt'):
+                merged_at = datetime.fromisoformat(pr_data['mergedAt'].replace('Z', '+00:00'))
+
+            mergeable = pr_data.get('mergeable')
+            cache_key = f"pr_mergeable:{owner}/{name}:{pr_data['number']}"
+            if mergeable and mergeable != 'UNKNOWN':
+                cache.set(cache_key, mergeable, 3600)
+            elif mergeable is None or mergeable == 'UNKNOWN':
+                mergeable = cache.get(cache_key)
+
+            head_repo = pr_data.get('headRepository')
+            head_repo_owner = owner
+            head_repo_name = name
+            if head_repo and head_repo.get('owner'):
+                head_repo_owner = head_repo['owner']['login']
+                head_repo_name = head_repo['name']
+
+            return PullRequestInfo(
+                number=pr_data['number'],
+                title=pr_data['title'],
+                url=pr_data['url'],
+                repo_owner=owner,
+                repo_name=name,
+                author=pr_data['author']['login'],
+                author_avatar=pr_data['author']['avatarUrl'],
+                created_at=datetime.fromisoformat(pr_data['createdAt'].replace('Z', '+00:00')),
+                updated_at=datetime.fromisoformat(pr_data['updatedAt'].replace('Z', '+00:00')),
+                labels=labels,
+                ci_status=ci_status,
+                review_status=review_status,
+                draft=pr_data.get('isDraft', False),
+                additions=pr_data.get('additions', 0),
+                deletions=pr_data.get('deletions', 0),
+                branch_name=pr_data.get('headRefName', ''),
+                head_repo_owner=head_repo_owner,
+                head_repo_name=head_repo_name,
+                mergeable=mergeable,
+                merged_at=merged_at,
+            )
+        except Exception:
+            return None
 
     def _parse_ci_status_from_graphql(self, pr_data: dict) -> CIStatus:
         """Parse CI status from GraphQL response."""
@@ -981,22 +1134,8 @@ class GitHubClient:
             self.finalize_warnings()
             return []
 
-        # Group PRs by repo for batch GraphQL fetching
-        all_prs = []
-        with ThreadPoolExecutor(max_workers=min(5, len(pr_data))) as executor:
-            future_to_repo = {
-                executor.submit(self._fetch_prs_batch_graphql, owner, name, numbers): (owner, name)
-                for (owner, name), numbers in pr_data.items()
-            }
-
-            for future in as_completed(future_to_repo):
-                repo = future_to_repo[future]
-                try:
-                    prs = future.result()
-                    all_prs.extend(prs)
-                except Exception as e:
-                    owner, name = repo
-                    self._handle_api_error(e, owner, name)
+        # Fetch all PRs across repos in batched multi-repo GraphQL queries
+        all_prs = self._fetch_prs_multi_repo_graphql(pr_data)
 
         self.finalize_warnings()
         all_prs.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
