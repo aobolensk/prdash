@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Optional
 
 import requests
+from allauth.socialaccount.models import SocialAccount
 from django.core.cache import cache
 from github import RateLimitExceededException
 from urllib3.exceptions import MaxRetryError
@@ -16,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 GITHUB_GRAPHQL_URL = 'https://api.github.com/graphql'
 GITHUB_API_VERSION = '2022-11-28'
+GITHUB_PROVIDER = 'github'
+USERNAME_CACHE_TTL_SECONDS = 86400
 GRAPHQL_PR_BATCH_SIZE = 25
 GRAPHQL_RETRY_ATTEMPTS = 2
 GRAPHQL_RETRY_BACKOFF_SECONDS = 0.5
@@ -1010,14 +1013,50 @@ class GitHubClient:
             return ReviewStatus(state='not_reviewed', approval_count=0, comment_count=0)
 
     def get_username(self) -> Optional[str]:
-        """Get the authenticated user's GitHub username (cached)."""
+        """Get the authenticated user's GitHub username (cached).
+
+        Uses multiple layers of caching: instance -> Django cache -> SocialAccount -> API.
+        """
         if self._username:
             return self._username
+
+        cache_key = f"github_username:{self.user.id}"
+        cached_username = cache.get(cache_key)
+        if cached_username:
+            self._username = cached_username
+            return self._username
+
+        login = self._get_username_from_social_account()
+        if login:
+            self._username = login
+            cache.set(cache_key, login, USERNAME_CACHE_TTL_SECONDS)
+            return self._username
+
+        login = self._get_username_from_api()
+        if login:
+            self._username = login
+            cache.set(cache_key, login, USERNAME_CACHE_TTL_SECONDS)
+        return login
+
+    def _get_username_from_social_account(self) -> Optional[str]:
+        """Get username from SocialAccount.extra_data (stored at OAuth login)."""
+        try:
+            extra_data = SocialAccount.objects.filter(
+                user=self.user,
+                provider=GITHUB_PROVIDER
+            ).only('extra_data').values_list('extra_data', flat=True).first()
+            if extra_data:
+                return extra_data.get('login')
+        except Exception as e:
+            logger.debug("Failed to get username from SocialAccount: %s", e)
+        return None
+
+    def _get_username_from_api(self) -> Optional[str]:
+        """Get username from PyGithub API (fallback, can be sporadic)."""
         if not self.client:
             return None
         try:
-            self._username = self.client.get_user().login
-            return self._username
+            return self.client.get_user().login
         except Exception:
             return None
 
@@ -1177,19 +1216,21 @@ class GitHubClient:
                 return {}
 
             if response.status_code != 200:
+                self._handle_error(
+                    '', '', status_code=response.status_code,
+                    message=self._summarize_response(response),
+                    operation='PR search',
+                )
                 return {}
 
             data = response.json()
             items = data.get('items', [])
 
-            # Create set of tracked repos for fast lookup
             tracked_repos = {(owner.lower(), name.lower()) for owner, name in repos}
 
-            # Group PR numbers by repo, filtering to only tracked repos
             result: dict[tuple[str, str], list[int]] = {}
             for item in items:
                 repo_url = item.get('repository_url', '')
-                # Extract owner/name from URL like "https://api.github.com/repos/owner/name"
                 parts = repo_url.rstrip('/').split('/')
                 if len(parts) >= 2:
                     owner, name = parts[-2], parts[-1]
@@ -1201,7 +1242,11 @@ class GitHubClient:
 
             return result
 
+        except requests.exceptions.Timeout:
+            self._add_warning("GitHub search timed out. Try refreshing.")
+            return {}
         except requests.exceptions.RequestException:
+            self._add_warning("GitHub search failed. Try refreshing.")
             return {}
 
     def get_merged_prs_for_repo(self, owner: str, name: str, author: Optional[str] = None) -> list[PullRequestInfo]:
