@@ -28,4 +28,5 @@ urlpatterns = [
     path('settings/', views.settings, name='settings'),
     path('settings/pat/save/', views.save_pat, name='save_pat'),
     path('settings/pat/delete/', views.delete_pat, name='delete_pat'),
+    path('settings/preferences/save/', views.save_preferences, name='save_preferences'),
 ]

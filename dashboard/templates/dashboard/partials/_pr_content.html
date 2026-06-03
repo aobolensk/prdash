@@ -22,6 +22,16 @@
     {% endif %}
 {% endif %}
 
+<div id="auto-refresh-container"
+     {% if auto_refresh_enabled %}
+     hx-get="{{ current_url }}"
+     hx-include=".filter-toolbar"
+     hx-trigger="every {{ auto_refresh_interval }}s"
+     hx-target="#pr-content"
+     hx-swap="innerHTML"
+     hx-indicator="#refresh-spinner"
+     {% endif %}>
+
 <div class="content-header">
     <h1>
         {% if current_repo %}
@@ -35,6 +45,15 @@
         {% endif %}
     </h1>
     <div class="refresh-wrapper">
+        {% if auto_refresh_enabled %}
+        <span class="auto-refresh-indicator" title="Auto-refresh every {{ auto_refresh_interval_mins }} min">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M23 4v6h-6"></path>
+                <path d="M1 20v-6h6"></path>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+            </svg>
+        </span>
+        {% endif %}
         <span class="refresh-spinner htmx-indicator" id="refresh-spinner"></span>
         <button class="btn btn-secondary"
                 hx-get="{{ current_url }}"
@@ -195,3 +214,5 @@
 </div>
 
 {% include 'dashboard/partials/_pr_list.html' %}
+
+</div>

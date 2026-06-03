@@ -1,0 +1,36 @@
+<div class="preferences-form-wrapper">
+    {% if success %}
+    <div class="alert alert-success">Preferences saved!</div>
+    {% endif %}
+
+    <form hx-post="{% url 'dashboard:save_preferences' %}"
+          hx-target="#preferences-form-container"
+          hx-swap="innerHTML"
+          class="preferences-form">
+        {% csrf_token %}
+
+        <div class="form-group checkbox-group">
+            <label class="checkbox-label">
+                <input type="checkbox"
+                       name="auto_refresh_enabled"
+                       {% if prefs.auto_refresh_enabled %}checked{% endif %}>
+                <span>Enable auto-refresh</span>
+            </label>
+            <p class="form-help">Automatically refresh the PR list at regular intervals.</p>
+        </div>
+
+        <div class="form-group">
+            <label for="auto_refresh_interval">Refresh interval</label>
+            <select name="auto_refresh_interval"
+                    id="auto_refresh_interval"
+                    class="input select-input">
+                <option value="1" {% if prefs.auto_refresh_interval == 1 %}selected{% endif %}>1 minute</option>
+                <option value="2" {% if prefs.auto_refresh_interval == 2 %}selected{% endif %}>2 minutes</option>
+                <option value="5" {% if prefs.auto_refresh_interval == 5 %}selected{% endif %}>5 minutes</option>
+                <option value="10" {% if prefs.auto_refresh_interval == 10 %}selected{% endif %}>10 minutes</option>
+            </select>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Save Preferences</button>
+    </form>
+</div>

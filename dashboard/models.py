@@ -42,3 +42,25 @@ class TrackedRepository(models.Model):
     @property
     def full_name(self):
         return f"{self.owner}/{self.name}"
+
+
+class UserPreferences(models.Model):
+    """User preferences for dashboard behavior."""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='preferences')
+    auto_refresh_enabled = models.BooleanField(default=False)
+    auto_refresh_interval = models.PositiveIntegerField(
+        default=5,
+        choices=[(1, '1 minute'), (2, '2 minutes'), (5, '5 minutes'), (10, '10 minutes')]
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name_plural = "User preferences"
+
+    def __str__(self):
+        return f"Preferences for {self.user.username}"
+
+    @property
+    def auto_refresh_interval_seconds(self):
+        return self.auto_refresh_interval * 60

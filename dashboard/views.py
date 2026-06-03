@@ -5,9 +5,15 @@ import json
 import re
 import requests
 
-from .models import TrackedRepository, PersonalAccessToken
+from .models import TrackedRepository, PersonalAccessToken, UserPreferences
 from .github_client import GitHubClient
 from .stats_service import StatsService
+
+
+def _get_user_preferences(user):
+    """Get or create user preferences with defaults."""
+    prefs, _ = UserPreferences.objects.get_or_create(user=user)
+    return prefs
 
 
 def _get_filter_params(request):
@@ -129,6 +135,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
 
     prs = _apply_filters_and_sort(prs, filters)
 
+    user_prefs = _get_user_preferences(request.user)
     context = {
         'prs': prs,
         'repos': repos,
@@ -139,6 +146,9 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
         'filters': filters,
         'errors': client.errors,
         'warnings': client.warnings,
+        'auto_refresh_enabled': user_prefs.auto_refresh_enabled,
+        'auto_refresh_interval': user_prefs.auto_refresh_interval_seconds,
+        'auto_refresh_interval_mins': user_prefs.auto_refresh_interval,
     }
     if review_tab != 'pending':
         context['review_tab'] = review_tab
@@ -457,8 +467,10 @@ def stats_content(request):
 def settings(request):
     """User settings page."""
     pat = PersonalAccessToken.objects.filter(user=request.user).first()
+    prefs = _get_user_preferences(request.user)
     context = {
         'pat': pat,
+        'prefs': prefs,
     }
     return render(request, 'dashboard/settings.html', context)
 
@@ -506,3 +518,29 @@ def delete_pat(request):
     PersonalAccessToken.objects.filter(user=request.user).delete()
     context = {'pat': None, 'deleted': True}
     return render(request, 'dashboard/partials/_pat_form.html', context)
+
+
+@login_required
+@require_POST
+def save_preferences(request):
+    """Save user preferences."""
+    auto_refresh_enabled = request.POST.get('auto_refresh_enabled') == 'on'
+    try:
+        auto_refresh_interval = int(request.POST.get('auto_refresh_interval', 5))
+    except (ValueError, TypeError):
+        auto_refresh_interval = 5
+
+    valid_intervals = [choice[0] for choice in UserPreferences._meta.get_field('auto_refresh_interval').choices]
+    if auto_refresh_interval not in valid_intervals:
+        auto_refresh_interval = 5
+
+    prefs, _ = UserPreferences.objects.update_or_create(
+        user=request.user,
+        defaults={
+            'auto_refresh_enabled': auto_refresh_enabled,
+            'auto_refresh_interval': auto_refresh_interval,
+        }
+    )
+
+    context = {'prefs': prefs, 'success': True}
+    return render(request, 'dashboard/partials/_preferences_form.html', context)
