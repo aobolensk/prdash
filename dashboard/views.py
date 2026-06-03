@@ -1,6 +1,7 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
+from django.core.cache import cache
 import json
 import re
 import requests
@@ -8,6 +9,8 @@ import requests
 from .models import TrackedRepository, PersonalAccessToken, UserPreferences
 from .github_client import GitHubClient
 from .stats_service import StatsService
+
+PR_COUNT_CACHE_TTL = 300  # 5 minutes
 
 
 def _get_user_preferences(user):
@@ -136,6 +139,28 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
     prs = _apply_filters_and_sort(prs, filters)
 
     user_prefs = _get_user_preferences(request.user)
+
+    # Cache the count for this tab (only when no filters are active)
+    # Map active_tab to cache key
+    tab_to_cache_key = {
+        'open': 'my_prs',
+        'review_requests': 'review_requests',
+        'assigned': 'assigned',
+    }
+    cache_key_suffix = tab_to_cache_key.get(active_tab)
+    has_filters = any(filters.get(k) for k in ('ci', 'review', 'draft', 'conflicts'))
+    if cache_key_suffix and not author and not current_repo and not has_filters:
+        # Only cache when viewing all repos with no filters
+        count_cache_key = f"pr_count:{request.user.id}:{cache_key_suffix}"
+        cache.set(count_cache_key, len(prs), PR_COUNT_CACHE_TTL)
+
+    # Retrieve all cached counts for sidebar display
+    pr_counts = {
+        'my_prs': cache.get(f"pr_count:{request.user.id}:my_prs"),
+        'review_requests': cache.get(f"pr_count:{request.user.id}:review_requests"),
+        'assigned': cache.get(f"pr_count:{request.user.id}:assigned"),
+    }
+
     context = {
         'prs': prs,
         'repos': repos,
@@ -149,6 +174,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
         'auto_refresh_enabled': user_prefs.auto_refresh_enabled,
         'auto_refresh_interval': user_prefs.auto_refresh_interval_seconds,
         'auto_refresh_interval_mins': user_prefs.auto_refresh_interval,
+        'pr_counts': pr_counts,
     }
     if review_tab != 'pending':
         context['review_tab'] = review_tab

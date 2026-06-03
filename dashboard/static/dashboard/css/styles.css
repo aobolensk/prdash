@@ -363,7 +363,9 @@ a:hover {
 }
 
 .sidebar-link {
-    display: block;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     padding: 8px 12px;
     color: var(--color-text);
     border-radius: 6px;
@@ -377,6 +379,20 @@ a:hover {
 
 .sidebar-link.active {
     background-color: var(--color-primary);
+    color: #ffffff;
+}
+
+.sidebar-count {
+    font-size: 12px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background-color: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
+}
+
+.sidebar-link.active .sidebar-count {
+    background-color: rgba(255, 255, 255, 0.2);
     color: #ffffff;
 }
 
