@@ -10,6 +10,51 @@ from .github_client import GitHubClient
 from .stats_service import StatsService
 
 
+def _get_filter_params(request):
+    """Extract filter and sort parameters from request."""
+    return {
+        'ci': request.GET.get('ci', ''),
+        'review': request.GET.get('review', ''),
+        'my_review': request.GET.get('my_review', ''),
+        'draft': request.GET.get('draft', ''),
+        'conflicts': request.GET.get('conflicts', ''),
+        'sort': request.GET.get('sort', 'updated_desc'),
+    }
+
+
+def _apply_filters_and_sort(prs, filters):
+    """Apply filters and sorting to PR list."""
+    ci = filters.get('ci')
+    review = filters.get('review')
+    draft = filters.get('draft')
+    conflicts = filters.get('conflicts')
+    sort = filters.get('sort', 'updated_desc')
+
+    if ci:
+        prs = [p for p in prs if p.ci_status.state == ci]
+    if review:
+        prs = [p for p in prs if p.review_status.state == review]
+    if draft == 'ready':
+        prs = [p for p in prs if not p.draft]
+    elif draft == 'draft':
+        prs = [p for p in prs if p.draft]
+    if conflicts == 'has':
+        prs = [p for p in prs if p.mergeable == 'CONFLICTING']
+    elif conflicts == 'none':
+        prs = [p for p in prs if p.mergeable == 'MERGEABLE']
+
+    sort_keys = {
+        'updated': lambda p: (p.updated_at, p.number),
+        'created': lambda p: (p.created_at, p.number),
+    }
+    sort_field = sort.replace('_desc', '').replace('_asc', '')
+    sort_key = sort_keys.get(sort_field, sort_keys['updated'])
+    reverse = sort.endswith('_desc') or not sort.endswith('_asc')
+    prs = sorted(prs, key=sort_key, reverse=reverse)
+
+    return prs
+
+
 def _parse_repo_input(repo_input):
     """
     Parse repository input in various formats and return (owner, name) tuple.
@@ -45,7 +90,7 @@ def home(request):
 
 
 def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pending',
-                  owner=None, repo=None, post_filter=None):
+                  owner=None, repo=None, post_filter=None, post_filter_factory=None):
     """
     Generic PR list view helper.
 
@@ -56,11 +101,13 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
         review_tab: Value for context['review_tab'] and reviewTabChanged trigger
         owner/repo: If provided, filters to single repo
         post_filter: Optional callable(prs, username) -> filtered prs
+        post_filter_factory: Optional callable(client) -> post_filter function
     """
     repos = TrackedRepository.objects.filter(user=request.user)
     client = GitHubClient(request.user)
     author = request.GET.get('author', '').strip() or None
     current_username = client.get_username()
+    filters = _get_filter_params(request)
 
     if owner and repo:
         current_repo = get_object_or_404(
@@ -75,8 +122,12 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
         prs = fetch_prs(client, repo_tuples, author)
         repo_changed = ''
 
+    if post_filter_factory:
+        post_filter = post_filter_factory(client)
     if post_filter and current_username:
         prs = post_filter(prs, current_username)
+
+    prs = _apply_filters_and_sort(prs, filters)
 
     context = {
         'prs': prs,
@@ -85,6 +136,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
         'active_tab': active_tab,
         'author': author,
         'current_username': current_username,
+        'filters': filters,
         'errors': client.errors,
         'warnings': client.warnings,
     }
@@ -145,13 +197,34 @@ def repo_merged_pr_list(request, owner, repo):
     )
 
 
+def _get_review_fetch_params(my_review):
+    """Get fetch parameters based on my_review filter value."""
+    if my_review == 'approved':
+        return {'approved_by_me': True, 'reviewed_by_me': False}
+    elif my_review == 'reviewed':
+        return {'approved_by_me': False, 'reviewed_by_me': True}
+    else:
+        return {'approved_by_me': False, 'reviewed_by_me': False}
+
+
 @login_required
 def review_requests_list(request):
+    my_review = request.GET.get('my_review', '')
+    fetch_params = _get_review_fetch_params(my_review)
+
+    def post_filter(prs, username):
+        if my_review == 'reviewed':
+            return [pr for pr in prs if pr.author != username]
+        return prs
+
     return _pr_list_view(
         request,
-        fetch_prs=lambda c, repos, author: c.get_all_review_requests(repos, approved_by_me=False, author=author),
+        fetch_prs=lambda c, repos, author: c.get_all_review_requests(
+            repos, author=author, **fetch_params
+        ),
         active_tab='review_requests',
         tab_changed='review_requests',
+        post_filter=post_filter if my_review == 'reviewed' else None,
     )
 
 
@@ -193,18 +266,37 @@ def assigned_list(request):
 
 @login_required
 def repo_review_requests_list(request, owner, repo):
+    my_review = request.GET.get('my_review', '')
+    fetch_params = _get_review_fetch_params(my_review)
+
+    def make_post_filter(client):
+        def post_filter(prs, username):
+            if my_review == 'approved':
+                return client._filter_prs_approved_by_user(prs, username)
+            elif my_review == 'reviewed':
+                filtered = client._filter_prs_reviewed_not_approved_by_user(prs, username)
+                return [pr for pr in filtered if pr.author != username]
+            return prs
+        return post_filter
+
     return _pr_list_view(
         request,
-        fetch_prs=lambda c, o, r, author: c.get_review_requests_for_repo(o, r, approved_by_me=False, author=author),
+        fetch_prs=lambda c, o, r, author: c.get_review_requests_for_repo(
+            o, r, author=author, **fetch_params
+        ),
         active_tab='review_requests',
         tab_changed='review_requests',
         owner=owner,
         repo=repo,
+        post_filter_factory=make_post_filter if my_review else None,
     )
 
 
 @login_required
 def repo_review_approved_list(request, owner, repo):
+    def make_post_filter(client):
+        return lambda prs, u: client._filter_prs_approved_by_user(prs, u)
+
     return _pr_list_view(
         request,
         fetch_prs=lambda c, o, r, author: c.get_review_requests_for_repo(o, r, approved_by_me=True, author=author),
@@ -213,15 +305,17 @@ def repo_review_approved_list(request, owner, repo):
         review_tab='approved',
         owner=owner,
         repo=repo,
-        post_filter=lambda prs, u: GitHubClient._filter_prs_approved_by_user(None, prs, u),
+        post_filter_factory=make_post_filter,
     )
 
 
 @login_required
 def repo_review_reviewed_list(request, owner, repo):
-    def filter_reviewed_not_own(prs, username):
-        filtered = GitHubClient._filter_prs_reviewed_not_approved_by_user(None, prs, username)
-        return [pr for pr in filtered if pr.author != username]
+    def make_post_filter(client):
+        def filter_reviewed_not_own(prs, username):
+            filtered = client._filter_prs_reviewed_not_approved_by_user(prs, username)
+            return [pr for pr in filtered if pr.author != username]
+        return filter_reviewed_not_own
 
     return _pr_list_view(
         request,
@@ -231,7 +325,7 @@ def repo_review_reviewed_list(request, owner, repo):
         review_tab='reviewed',
         owner=owner,
         repo=repo,
-        post_filter=filter_reviewed_not_own,
+        post_filter_factory=make_post_filter,
     )
 
 

@@ -1,5 +1,27 @@
 {% load dashboard_tags %}
 
+{% if current_repo %}
+    {% if active_tab == 'review_requests' %}
+        {% url 'dashboard:repo_review_requests_list' current_repo.owner current_repo.name as current_url %}
+    {% elif active_tab == 'assigned' %}
+        {% url 'dashboard:repo_assigned_list' current_repo.owner current_repo.name as current_url %}
+    {% elif active_tab == 'merged' %}
+        {% url 'dashboard:repo_merged_pr_list' current_repo.owner current_repo.name as current_url %}
+    {% else %}
+        {% url 'dashboard:repo_pr_list' current_repo.owner current_repo.name as current_url %}
+    {% endif %}
+{% else %}
+    {% if active_tab == 'review_requests' %}
+        {% url 'dashboard:review_requests_list' as current_url %}
+    {% elif active_tab == 'assigned' %}
+        {% url 'dashboard:assigned_list' as current_url %}
+    {% elif active_tab == 'merged' %}
+        {% url 'dashboard:merged_pr_list' as current_url %}
+    {% else %}
+        {% url 'dashboard:pr_list' as current_url %}
+    {% endif %}
+{% endif %}
+
 <div class="content-header">
     <h1>
         {% if current_repo %}
@@ -15,7 +37,8 @@
     <div class="refresh-wrapper">
         <span class="refresh-spinner htmx-indicator" id="refresh-spinner"></span>
         <button class="btn btn-secondary"
-                hx-get="{% if current_repo %}{% if active_tab == 'review_requests' %}{% if review_tab == 'approved' %}{% url 'dashboard:repo_review_approved_list' current_repo.owner current_repo.name %}{% elif review_tab == 'reviewed' %}{% url 'dashboard:repo_review_reviewed_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:repo_review_requests_list' current_repo.owner current_repo.name %}{% endif %}{% elif active_tab == 'assigned' %}{% url 'dashboard:repo_assigned_list' current_repo.owner current_repo.name %}{% elif active_tab == 'merged' %}{% url 'dashboard:repo_merged_pr_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:repo_pr_list' current_repo.owner current_repo.name %}{% endif %}{% else %}{% if active_tab == 'review_requests' %}{% if review_tab == 'approved' %}{% url 'dashboard:review_approved_list' %}{% elif review_tab == 'reviewed' %}{% url 'dashboard:review_reviewed_list' %}{% else %}{% url 'dashboard:review_requests_list' %}{% endif %}{% elif active_tab == 'assigned' %}{% url 'dashboard:assigned_list' %}{% elif active_tab == 'merged' %}{% url 'dashboard:merged_pr_list' %}{% else %}{% url 'dashboard:pr_list' %}{% endif %}{% endif %}{% if author %}?author={{ author }}{% endif %}"
+                hx-get="{{ current_url }}"
+                hx-include=".filter-toolbar"
                 hx-target="#pr-content"
                 hx-swap="innerHTML"
                 hx-indicator="#refresh-spinner">
@@ -24,108 +47,119 @@
     </div>
 </div>
 
-<div class="pr-toolbar">
-    {% if active_tab == 'review_requests' %}
+<div class="filter-toolbar">
+    {% if active_tab == 'open' or active_tab == 'merged' %}
     <div class="tab-navigation">
-        <a href="{% if current_repo %}{% url 'dashboard:repo_review_requests_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:review_requests_list' %}{% endif %}{% if author %}?author={{ author }}{% endif %}"
-           class="tab {% if review_tab == 'pending' %}active{% endif %}"
-           hx-get="{% if current_repo %}{% url 'dashboard:repo_review_requests_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:review_requests_list' %}{% endif %}{% if author %}?author={{ author }}{% endif %}"
-           hx-target="#pr-content"
-           hx-swap="innerHTML"
-           hx-push-url="true">
-            On Review
-        </a>
-        <a href="{% if current_repo %}{% url 'dashboard:repo_review_reviewed_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:review_reviewed_list' %}{% endif %}{% if author %}?author={{ author }}{% endif %}"
-           class="tab {% if review_tab == 'reviewed' %}active{% endif %}"
-           hx-get="{% if current_repo %}{% url 'dashboard:repo_review_reviewed_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:review_reviewed_list' %}{% endif %}{% if author %}?author={{ author }}{% endif %}"
-           hx-target="#pr-content"
-           hx-swap="innerHTML"
-           hx-push-url="true">
-            Reviewed
-        </a>
-        <a href="{% if current_repo %}{% url 'dashboard:repo_review_approved_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:review_approved_list' %}{% endif %}{% if author %}?author={{ author }}{% endif %}"
-           class="tab {% if review_tab == 'approved' %}active{% endif %}"
-           hx-get="{% if current_repo %}{% url 'dashboard:repo_review_approved_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:review_approved_list' %}{% endif %}{% if author %}?author={{ author }}{% endif %}"
-           hx-target="#pr-content"
-           hx-swap="innerHTML"
-           hx-push-url="true">
-            Approved
-        </a>
-    </div>
-
-    <form class="author-filter-form"
-          hx-get="{% if current_repo %}{% if review_tab == 'approved' %}{% url 'dashboard:repo_review_approved_list' current_repo.owner current_repo.name %}{% elif review_tab == 'reviewed' %}{% url 'dashboard:repo_review_reviewed_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:repo_review_requests_list' current_repo.owner current_repo.name %}{% endif %}{% else %}{% if review_tab == 'approved' %}{% url 'dashboard:review_approved_list' %}{% elif review_tab == 'reviewed' %}{% url 'dashboard:review_reviewed_list' %}{% else %}{% url 'dashboard:review_requests_list' %}{% endif %}{% endif %}"
-          hx-target="#pr-content"
-          hx-swap="innerHTML"
-          hx-push-url="true"
-          hx-indicator="#refresh-spinner">
-        <label for="author-input">Author:</label>
-        <input type="text"
-               id="author-input"
-               name="author"
-               value="{{ author|default:'' }}"
-               placeholder="{{ current_username|default:'username' }}"
-               class="input input-small">
-        <button type="submit" class="btn btn-secondary btn-small">Filter</button>
-        {% if author %}
-            <a href="{% if current_repo %}{% if review_tab == 'approved' %}{% url 'dashboard:repo_review_approved_list' current_repo.owner current_repo.name %}{% elif review_tab == 'reviewed' %}{% url 'dashboard:repo_review_reviewed_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:repo_review_requests_list' current_repo.owner current_repo.name %}{% endif %}{% else %}{% if review_tab == 'approved' %}{% url 'dashboard:review_approved_list' %}{% elif review_tab == 'reviewed' %}{% url 'dashboard:review_reviewed_list' %}{% else %}{% url 'dashboard:review_requests_list' %}{% endif %}{% endif %}"
-               class="btn btn-secondary btn-small"
-               hx-get="{% if current_repo %}{% if review_tab == 'approved' %}{% url 'dashboard:repo_review_approved_list' current_repo.owner current_repo.name %}{% elif review_tab == 'reviewed' %}{% url 'dashboard:repo_review_reviewed_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:repo_review_requests_list' current_repo.owner current_repo.name %}{% endif %}{% else %}{% if review_tab == 'approved' %}{% url 'dashboard:review_approved_list' %}{% elif review_tab == 'reviewed' %}{% url 'dashboard:review_reviewed_list' %}{% else %}{% url 'dashboard:review_requests_list' %}{% endif %}{% endif %}"
-               hx-target="#pr-content"
-               hx-swap="innerHTML"
-               hx-push-url="true"
-               hx-indicator="#refresh-spinner">Clear</a>
-        {% endif %}
-    </form>
-    {% elif active_tab == 'assigned' %}
-    <div class="tab-navigation"></div>
-
-    <form class="author-filter-form"
-          hx-get="{% if current_repo %}{% url 'dashboard:repo_assigned_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:assigned_list' %}{% endif %}"
-          hx-target="#pr-content"
-          hx-swap="innerHTML"
-          hx-push-url="true"
-          hx-indicator="#refresh-spinner">
-        <label for="author-input">Author:</label>
-        <input type="text"
-               id="author-input"
-               name="author"
-               value="{{ author|default:'' }}"
-               placeholder="{{ current_username|default:'username' }}"
-               class="input input-small">
-        <button type="submit" class="btn btn-secondary btn-small">Filter</button>
-        {% if author %}
-            <a href="{% if current_repo %}{% url 'dashboard:repo_assigned_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:assigned_list' %}{% endif %}"
-               class="btn btn-secondary btn-small"
-               hx-get="{% if current_repo %}{% url 'dashboard:repo_assigned_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:assigned_list' %}{% endif %}"
-               hx-target="#pr-content"
-               hx-swap="innerHTML"
-               hx-push-url="true"
-               hx-indicator="#refresh-spinner">Clear</a>
-        {% endif %}
-    </form>
-    {% else %}
-    <div class="tab-navigation">
-        <a href="{% if current_repo %}{% url 'dashboard:repo_pr_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:pr_list' %}{% endif %}{% if author %}?author={{ author }}{% endif %}"
+        <a href="{% if current_repo %}{% url 'dashboard:repo_pr_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:pr_list' %}{% endif %}"
            class="tab {% if active_tab == 'open' %}active{% endif %}"
-           hx-get="{% if current_repo %}{% url 'dashboard:repo_pr_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:pr_list' %}{% endif %}{% if author %}?author={{ author }}{% endif %}"
+           hx-get="{% if current_repo %}{% url 'dashboard:repo_pr_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:pr_list' %}{% endif %}"
+           hx-include=".filter-toolbar"
            hx-target="#pr-content"
            hx-swap="innerHTML"
            hx-push-url="true">
             Open
         </a>
-        <a href="{% if current_repo %}{% url 'dashboard:repo_merged_pr_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:merged_pr_list' %}{% endif %}{% if author %}?author={{ author }}{% endif %}"
+        <a href="{% if current_repo %}{% url 'dashboard:repo_merged_pr_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:merged_pr_list' %}{% endif %}"
            class="tab {% if active_tab == 'merged' %}active{% endif %}"
-           hx-get="{% if current_repo %}{% url 'dashboard:repo_merged_pr_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:merged_pr_list' %}{% endif %}{% if author %}?author={{ author }}{% endif %}"
+           hx-get="{% if current_repo %}{% url 'dashboard:repo_merged_pr_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:merged_pr_list' %}{% endif %}"
+           hx-include=".filter-toolbar"
            hx-target="#pr-content"
            hx-swap="innerHTML"
            hx-push-url="true">
             Merged
         </a>
     </div>
+    {% endif %}
+
+    <div class="filter-group">
+        {% if active_tab == 'review_requests' %}
+        <select name="my_review" class="filter-select {% if filters.my_review %}active{% endif %}"
+                hx-get="{{ current_url }}"
+                hx-include=".filter-toolbar"
+                hx-target="#pr-content"
+                hx-swap="innerHTML"
+                hx-push-url="true"
+                hx-trigger="change"
+                hx-indicator="#refresh-spinner">
+            <option value="">My Review</option>
+            <option value="pending" {% if filters.my_review == 'pending' %}selected{% endif %}>Pending My Review</option>
+            <option value="reviewed" {% if filters.my_review == 'reviewed' %}selected{% endif %}>Reviewed by Me</option>
+            <option value="approved" {% if filters.my_review == 'approved' %}selected{% endif %}>Approved by Me</option>
+        </select>
+        {% endif %}
+
+        <select name="ci" class="filter-select {% if filters.ci %}active{% endif %}"
+                hx-get="{{ current_url }}"
+                hx-include=".filter-toolbar"
+                hx-target="#pr-content"
+                hx-swap="innerHTML"
+                hx-push-url="true"
+                hx-trigger="change"
+                hx-indicator="#refresh-spinner">
+            <option value="">CI Status</option>
+            <option value="success" {% if filters.ci == 'success' %}selected{% endif %}>Passing</option>
+            <option value="pending" {% if filters.ci == 'pending' %}selected{% endif %}>Pending</option>
+            <option value="failure" {% if filters.ci == 'failure' %}selected{% endif %}>Failing</option>
+        </select>
+
+        <select name="review" class="filter-select {% if filters.review %}active{% endif %}"
+                hx-get="{{ current_url }}"
+                hx-include=".filter-toolbar"
+                hx-target="#pr-content"
+                hx-swap="innerHTML"
+                hx-push-url="true"
+                hx-trigger="change"
+                hx-indicator="#refresh-spinner">
+            <option value="">Review Status</option>
+            <option value="approved" {% if filters.review == 'approved' %}selected{% endif %}>Approved</option>
+            <option value="changes_requested" {% if filters.review == 'changes_requested' %}selected{% endif %}>Changes Requested</option>
+            <option value="not_reviewed" {% if filters.review == 'not_reviewed' %}selected{% endif %}>Not Reviewed</option>
+        </select>
+
+        <select name="draft" class="filter-select {% if filters.draft %}active{% endif %}"
+                hx-get="{{ current_url }}"
+                hx-include=".filter-toolbar"
+                hx-target="#pr-content"
+                hx-swap="innerHTML"
+                hx-push-url="true"
+                hx-trigger="change"
+                hx-indicator="#refresh-spinner">
+            <option value="">All PRs</option>
+            <option value="ready" {% if filters.draft == 'ready' %}selected{% endif %}>Ready for Review</option>
+            <option value="draft" {% if filters.draft == 'draft' %}selected{% endif %}>Draft</option>
+        </select>
+
+        <select name="conflicts" class="filter-select {% if filters.conflicts %}active{% endif %}"
+                hx-get="{{ current_url }}"
+                hx-include=".filter-toolbar"
+                hx-target="#pr-content"
+                hx-swap="innerHTML"
+                hx-push-url="true"
+                hx-trigger="change"
+                hx-indicator="#refresh-spinner">
+            <option value="">Conflicts</option>
+            <option value="none" {% if filters.conflicts == 'none' %}selected{% endif %}>No Conflicts</option>
+            <option value="has" {% if filters.conflicts == 'has' %}selected{% endif %}>Has Conflicts</option>
+        </select>
+
+        <select name="sort" class="filter-select"
+                hx-get="{{ current_url }}"
+                hx-include=".filter-toolbar"
+                hx-target="#pr-content"
+                hx-swap="innerHTML"
+                hx-push-url="true"
+                hx-trigger="change"
+                hx-indicator="#refresh-spinner">
+            <option value="updated_desc" {% if filters.sort == 'updated_desc' or not filters.sort %}selected{% endif %}>Updated (Newest)</option>
+            <option value="updated_asc" {% if filters.sort == 'updated_asc' %}selected{% endif %}>Updated (Oldest)</option>
+            <option value="created_desc" {% if filters.sort == 'created_desc' %}selected{% endif %}>Created (Newest)</option>
+            <option value="created_asc" {% if filters.sort == 'created_asc' %}selected{% endif %}>Created (Oldest)</option>
+        </select>
+    </div>
 
     <form class="author-filter-form"
-          hx-get="{% if current_repo %}{% if active_tab == 'merged' %}{% url 'dashboard:repo_merged_pr_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:repo_pr_list' current_repo.owner current_repo.name %}{% endif %}{% else %}{% if active_tab == 'merged' %}{% url 'dashboard:merged_pr_list' %}{% else %}{% url 'dashboard:pr_list' %}{% endif %}{% endif %}"
+          hx-get="{{ current_url }}"
+          hx-include=".filter-toolbar"
           hx-target="#pr-content"
           hx-swap="innerHTML"
           hx-push-url="true"
@@ -135,19 +169,28 @@
                id="author-input"
                name="author"
                value="{{ author|default:'' }}"
-               placeholder="{{ current_username|default:'me' }}"
+               placeholder="{{ current_username|default:'username' }}"
                class="input input-small">
         <button type="submit" class="btn btn-secondary btn-small">Filter</button>
         {% if author %}
-            <a href="{% if current_repo %}{% if active_tab == 'merged' %}{% url 'dashboard:repo_merged_pr_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:repo_pr_list' current_repo.owner current_repo.name %}{% endif %}{% else %}{% if active_tab == 'merged' %}{% url 'dashboard:merged_pr_list' %}{% else %}{% url 'dashboard:pr_list' %}{% endif %}{% endif %}"
+            <a href="{{ current_url }}"
                class="btn btn-secondary btn-small"
-               hx-get="{% if current_repo %}{% if active_tab == 'merged' %}{% url 'dashboard:repo_merged_pr_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:repo_pr_list' current_repo.owner current_repo.name %}{% endif %}{% else %}{% if active_tab == 'merged' %}{% url 'dashboard:merged_pr_list' %}{% else %}{% url 'dashboard:pr_list' %}{% endif %}{% endif %}"
+               hx-get="{{ current_url }}"
                hx-target="#pr-content"
                hx-swap="innerHTML"
                hx-push-url="true"
                hx-indicator="#refresh-spinner">Clear</a>
         {% endif %}
     </form>
+
+    {% if filters.ci or filters.review or filters.my_review or filters.draft or filters.conflicts or author %}
+    <a href="{{ current_url }}"
+       class="btn btn-secondary btn-small filter-clear-all"
+       hx-get="{{ current_url }}"
+       hx-target="#pr-content"
+       hx-swap="innerHTML"
+       hx-push-url="true"
+       hx-indicator="#refresh-spinner">Clear All</a>
     {% endif %}
 </div>
 
