@@ -23,14 +23,13 @@
 {% endif %}
 
 <div id="auto-refresh-container"
-     {% if auto_refresh_enabled %}
      hx-get="{{ current_url }}"
      hx-include=".filter-toolbar"
-     hx-trigger="every {{ auto_refresh_interval }}s"
+     hx-trigger="{% if auto_refresh_enabled %}every {{ auto_refresh_interval }}s, {% endif %}manualRefresh from:body"
      hx-target="#pr-content"
      hx-swap="innerHTML"
      hx-indicator="#refresh-spinner"
-     {% endif %}>
+     hx-sync="this:replace">
 
 <div class="content-header">
     <h1>
@@ -56,11 +55,7 @@
         {% endif %}
         <span class="refresh-spinner htmx-indicator" id="refresh-spinner"></span>
         <button class="btn btn-secondary"
-                hx-get="{{ current_url }}"
-                hx-include=".filter-toolbar"
-                hx-target="#pr-content"
-                hx-swap="innerHTML"
-                hx-indicator="#refresh-spinner">
+                onclick="htmx.trigger(document.body, 'manualRefresh')">
             Refresh
         </button>
     </div>
