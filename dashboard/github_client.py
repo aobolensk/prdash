@@ -1305,13 +1305,16 @@ class GitHubClient:
 
     def get_review_requests_for_repo(
         self, owner: str, name: str, approved_by_me: bool = False,
-        reviewed_by_me: bool = False, author: Optional[str] = None
+        reviewed_by_me: bool = False, include_all: bool = False,
+        author: Optional[str] = None
     ) -> list[PullRequestInfo]:
         """Get open PRs where the current user's review is requested for a specific repository.
 
         Args:
-            approved_by_me: If True, only return PRs that I have approved. If False, return PRs pending my review.
+            approved_by_me: If True, only return PRs that I have approved.
             reviewed_by_me: If True, return PRs that I have reviewed (any review state).
+            include_all: If True, return all PRs where user is involved as reviewer
+                (pending + reviewed + approved). Overrides other flags.
             author: If provided, filter PRs to only include those authored by this user.
         """
         if not self.client:
@@ -1322,23 +1325,47 @@ class GitHubClient:
             if not username:
                 return []
 
-            if approved_by_me or reviewed_by_me:
-                # Search for PRs where I was a reviewer
-                query = f"repo:{owner}/{name} is:pr is:open reviewed-by:{username}"
+            if include_all:
+                # Fetch both pending requests and reviewed PRs in parallel
+                pending_query = f"repo:{owner}/{name} is:pr is:open review-requested:{username}"
+                reviewed_query = f"repo:{owner}/{name} is:pr is:open reviewed-by:{username}"
+
+                if author:
+                    pending_query += f" author:{author}"
+                    reviewed_query += f" author:{author}"
+
+                # Run searches in parallel to reduce latency
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    pending_future = executor.submit(self._search_prs, pending_query, owner, name)
+                    reviewed_future = executor.submit(self._search_prs, reviewed_query, owner, name)
+                    pending_numbers = pending_future.result()
+                    reviewed_numbers = reviewed_future.result()
+
+                # Combine and deduplicate using set (order doesn't matter as results are sorted later)
+                all_numbers = list(set(pending_numbers) | set(reviewed_numbers))
+
+                if not all_numbers:
+                    return []
+
+                result = self._fetch_prs_batch_graphql(owner, name, all_numbers)
             else:
-                # Search for PRs where review is requested from me
-                query = f"repo:{owner}/{name} is:pr is:open review-requested:{username}"
+                if approved_by_me or reviewed_by_me:
+                    # Search for PRs where I was a reviewer
+                    query = f"repo:{owner}/{name} is:pr is:open reviewed-by:{username}"
+                else:
+                    # Search for PRs where review is requested from me
+                    query = f"repo:{owner}/{name} is:pr is:open review-requested:{username}"
 
-            # Add author filter if provided
-            if author:
-                query += f" author:{author}"
+                # Add author filter if provided
+                if author:
+                    query += f" author:{author}"
 
-            pr_numbers = self._search_prs(query, owner, name)
+                pr_numbers = self._search_prs(query, owner, name)
 
-            if not pr_numbers:
-                return []
+                if not pr_numbers:
+                    return []
 
-            result = self._fetch_prs_batch_graphql(owner, name, pr_numbers)
+                result = self._fetch_prs_batch_graphql(owner, name, pr_numbers)
 
             result.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
             return result
@@ -1348,13 +1375,16 @@ class GitHubClient:
 
     def get_all_review_requests(
         self, repos: list[tuple[str, str]], approved_by_me: bool = False,
-        reviewed_by_me: bool = False, author: Optional[str] = None
+        reviewed_by_me: bool = False, include_all: bool = False,
+        author: Optional[str] = None
     ) -> list[PullRequestInfo]:
         """Get all open PRs where the current user's review is requested across multiple repositories.
 
         Args:
-            approved_by_me: If True, only return PRs that I have approved. If False, return PRs pending my review.
+            approved_by_me: If True, only return PRs that I have approved.
             reviewed_by_me: If True, return PRs that I have reviewed (any review state).
+            include_all: If True, return all PRs where user is involved as reviewer
+                (pending + reviewed + approved). Overrides other flags.
             author: If provided, filter PRs to only include those authored by this user.
         """
         if not repos:
@@ -1368,7 +1398,7 @@ class GitHubClient:
             future_to_repo = {
                 executor.submit(
                     self.get_review_requests_for_repo, owner, name,
-                    approved_by_me, reviewed_by_me, author
+                    approved_by_me, reviewed_by_me, include_all, author
                 ): (owner, name)
                 for owner, name in repos
             }
@@ -1385,10 +1415,10 @@ class GitHubClient:
         self.finalize_warnings()
 
         # If approved_by_me, we need to filter PRs where we actually approved
-        if approved_by_me and username:
+        if not include_all and approved_by_me and username:
             all_prs = self._filter_prs_approved_by_user(all_prs, username)
         # If reviewed_by_me, filter to PRs where user has reviewed but NOT approved
-        elif reviewed_by_me and username:
+        elif not include_all and reviewed_by_me and username:
             all_prs = self._filter_prs_reviewed_not_approved_by_user(all_prs, username)
 
         all_prs.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)

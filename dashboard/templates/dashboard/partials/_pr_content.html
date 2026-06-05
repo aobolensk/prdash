@@ -95,9 +95,9 @@
                 hx-push-url="true"
                 hx-trigger="change"
                 hx-indicator="#refresh-spinner">
-            <option value="">My Review</option>
+            <option value="">All Review Requests</option>
             <option value="pending" {% if filters.my_review == 'pending' %}selected{% endif %}>Pending My Review</option>
-            <option value="reviewed" {% if filters.my_review == 'reviewed' %}selected{% endif %}>Reviewed by Me</option>
+            <option value="reviewed" {% if filters.my_review == 'reviewed' %}selected{% endif %}>Reviewed (Not Approved)</option>
             <option value="approved" {% if filters.my_review == 'approved' %}selected{% endif %}>Approved by Me</option>
         </select>
         {% endif %}

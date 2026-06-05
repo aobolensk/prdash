@@ -148,7 +148,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
         'assigned': 'assigned',
     }
     cache_key_suffix = tab_to_cache_key.get(active_tab)
-    has_filters = any(filters.get(k) for k in ('ci', 'review', 'draft', 'conflicts'))
+    has_filters = any(filters.get(k) for k in ('ci', 'review', 'my_review', 'draft', 'conflicts'))
     if cache_key_suffix and not author and not current_repo and not has_filters:
         # Only cache when viewing all repos with no filters
         count_cache_key = f"pr_count:{request.user.id}:{cache_key_suffix}"
@@ -239,8 +239,11 @@ def _get_review_fetch_params(my_review):
         return {'approved_by_me': True, 'reviewed_by_me': False}
     elif my_review == 'reviewed':
         return {'approved_by_me': False, 'reviewed_by_me': True}
-    else:
+    elif my_review == 'pending':
         return {'approved_by_me': False, 'reviewed_by_me': False}
+    else:
+        # Default: show all review requests (pending + reviewed + approved)
+        return {'include_all': True}
 
 
 @login_required
@@ -249,9 +252,8 @@ def review_requests_list(request):
     fetch_params = _get_review_fetch_params(my_review)
 
     def post_filter(prs, username):
-        if my_review == 'reviewed':
-            return [pr for pr in prs if pr.author != username]
-        return prs
+        # Always exclude own PRs from review requests
+        return [pr for pr in prs if pr.author != username]
 
     return _pr_list_view(
         request,
@@ -260,18 +262,22 @@ def review_requests_list(request):
         ),
         active_tab='review_requests',
         tab_changed='review_requests',
-        post_filter=post_filter if my_review == 'reviewed' else None,
+        post_filter=post_filter,
     )
 
 
 @login_required
 def review_approved_list(request):
+    def exclude_own_prs(prs, username):
+        return [pr for pr in prs if pr.author != username]
+
     return _pr_list_view(
         request,
         fetch_prs=lambda c, repos, author: c.get_all_review_requests(repos, approved_by_me=True, author=author),
         active_tab='review_requests',
         tab_changed='review_approved',
         review_tab='approved',
+        post_filter=exclude_own_prs,
     )
 
 
@@ -308,11 +314,13 @@ def repo_review_requests_list(request, owner, repo):
     def make_post_filter(client):
         def post_filter(prs, username):
             if my_review == 'approved':
-                return client._filter_prs_approved_by_user(prs, username)
+                filtered = client._filter_prs_approved_by_user(prs, username)
             elif my_review == 'reviewed':
                 filtered = client._filter_prs_reviewed_not_approved_by_user(prs, username)
-                return [pr for pr in filtered if pr.author != username]
-            return prs
+            else:
+                filtered = prs
+            # Always exclude own PRs from review requests
+            return [pr for pr in filtered if pr.author != username]
         return post_filter
 
     return _pr_list_view(
@@ -324,14 +332,17 @@ def repo_review_requests_list(request, owner, repo):
         tab_changed='review_requests',
         owner=owner,
         repo=repo,
-        post_filter_factory=make_post_filter if my_review else None,
+        post_filter_factory=make_post_filter,
     )
 
 
 @login_required
 def repo_review_approved_list(request, owner, repo):
     def make_post_filter(client):
-        return lambda prs, u: client._filter_prs_approved_by_user(prs, u)
+        def filter_approved_not_own(prs, username):
+            filtered = client._filter_prs_approved_by_user(prs, username)
+            return [pr for pr in filtered if pr.author != username]
+        return filter_approved_not_own
 
     return _pr_list_view(
         request,
