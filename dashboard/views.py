@@ -171,7 +171,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
         'filters': filters,
         'errors': client.errors,
         'warnings': client.warnings,
-        'auto_refresh_enabled': user_prefs.auto_refresh_enabled,
+        'auto_refresh_enabled': user_prefs.is_auto_refresh_enabled_for_tab(active_tab),
         'auto_refresh_interval': user_prefs.auto_refresh_interval_seconds,
         'auto_refresh_interval_mins': user_prefs.auto_refresh_interval,
         'pr_counts': pr_counts,
@@ -561,7 +561,9 @@ def delete_pat(request):
 @require_POST
 def save_preferences(request):
     """Save user preferences."""
-    auto_refresh_enabled = request.POST.get('auto_refresh_enabled') == 'on'
+    auto_refresh_my_prs = request.POST.get('auto_refresh_my_prs') == 'on'
+    auto_refresh_review_requests = request.POST.get('auto_refresh_review_requests') == 'on'
+    auto_refresh_assigned = request.POST.get('auto_refresh_assigned') == 'on'
     try:
         auto_refresh_interval = int(request.POST.get('auto_refresh_interval', 5))
     except (ValueError, TypeError):
@@ -574,7 +576,9 @@ def save_preferences(request):
     prefs, _ = UserPreferences.objects.update_or_create(
         user=request.user,
         defaults={
-            'auto_refresh_enabled': auto_refresh_enabled,
+            'auto_refresh_my_prs': auto_refresh_my_prs,
+            'auto_refresh_review_requests': auto_refresh_review_requests,
+            'auto_refresh_assigned': auto_refresh_assigned,
             'auto_refresh_interval': auto_refresh_interval,
         }
     )

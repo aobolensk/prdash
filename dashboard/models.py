@@ -47,7 +47,9 @@ class TrackedRepository(models.Model):
 class UserPreferences(models.Model):
     """User preferences for dashboard behavior."""
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='preferences')
-    auto_refresh_enabled = models.BooleanField(default=False)
+    auto_refresh_my_prs = models.BooleanField(default=False)
+    auto_refresh_review_requests = models.BooleanField(default=False)
+    auto_refresh_assigned = models.BooleanField(default=False)
     auto_refresh_interval = models.PositiveIntegerField(
         default=5,
         choices=[(1, '1 minute'), (2, '2 minutes'), (5, '5 minutes'), (10, '10 minutes')]
@@ -64,3 +66,13 @@ class UserPreferences(models.Model):
     @property
     def auto_refresh_interval_seconds(self):
         return self.auto_refresh_interval * 60
+
+    def is_auto_refresh_enabled_for_tab(self, tab):
+        """Check if auto-refresh is enabled for a specific tab."""
+        tab_map = {
+            'open': self.auto_refresh_my_prs,
+            'merged': self.auto_refresh_my_prs,
+            'review_requests': self.auto_refresh_review_requests,
+            'assigned': self.auto_refresh_assigned,
+        }
+        return tab_map.get(tab, False)

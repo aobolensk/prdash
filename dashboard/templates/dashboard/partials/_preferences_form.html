@@ -9,14 +9,29 @@
           class="preferences-form">
         {% csrf_token %}
 
-        <div class="form-group checkbox-group">
-            <label class="checkbox-label">
-                <input type="checkbox"
-                       name="auto_refresh_enabled"
-                       {% if prefs.auto_refresh_enabled %}checked{% endif %}>
-                <span>Enable auto-refresh</span>
-            </label>
-            <p class="form-help">Automatically refresh the PR list at regular intervals.</p>
+        <div class="form-group">
+            <label>Auto-refresh tabs</label>
+            <p class="form-help">Select which tabs should automatically refresh at regular intervals.</p>
+            <div class="checkbox-group">
+                <label class="checkbox-label">
+                    <input type="checkbox"
+                           name="auto_refresh_my_prs"
+                           {% if prefs.auto_refresh_my_prs %}checked{% endif %}>
+                    <span>My PRs</span>
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox"
+                           name="auto_refresh_review_requests"
+                           {% if prefs.auto_refresh_review_requests %}checked{% endif %}>
+                    <span>Review Requests</span>
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox"
+                           name="auto_refresh_assigned"
+                           {% if prefs.auto_refresh_assigned %}checked{% endif %}>
+                    <span>Assigned</span>
+                </label>
+            </div>
         </div>
 
         <div class="form-group">
