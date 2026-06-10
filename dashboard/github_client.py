@@ -68,6 +68,7 @@ class PullRequestInfo:
     head_repo_name: str = ""
     mergeable: Optional[str] = None
     merged_at: Optional[datetime] = None
+    auto_merge_enabled: bool = False
 
     @property
     def repo_full_name(self) -> str:
@@ -612,6 +613,9 @@ class GitHubClient:
                         additions
                         deletions
                         mergeable
+                        autoMergeRequest {{
+                            enabledAt
+                        }}
                         headRefName
                         headRepository {{
                             owner {{
@@ -764,6 +768,9 @@ class GitHubClient:
                         additions
                         deletions
                         mergeable
+                        autoMergeRequest {{
+                            enabledAt
+                        }}
                         headRefName
                         headRepository {{
                             owner {{
@@ -884,6 +891,9 @@ class GitHubClient:
                 head_repo_owner = head_repo['owner']['login']
                 head_repo_name = head_repo['name']
 
+            auto_merge_request = pr_data.get('autoMergeRequest')
+            auto_merge_enabled = auto_merge_request is not None and auto_merge_request.get('enabledAt') is not None
+
             return PullRequestInfo(
                 number=pr_data['number'],
                 title=pr_data['title'],
@@ -905,6 +915,7 @@ class GitHubClient:
                 head_repo_name=head_repo_name,
                 mergeable=mergeable,
                 merged_at=merged_at,
+                auto_merge_enabled=auto_merge_enabled,
             )
         except Exception:
             return None

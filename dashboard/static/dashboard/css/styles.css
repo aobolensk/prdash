@@ -776,6 +776,15 @@ a:hover {
     font-weight: 500;
 }
 
+.pr-auto-merge {
+    background-color: #ae89f9;
+    color: #1c1c1c;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
 .pr-conflicts {
     background-color: var(--color-danger);
     color: #ffffff;
