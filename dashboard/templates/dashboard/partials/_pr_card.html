@@ -58,7 +58,7 @@
                 {% if pr.draft %}
                     <span class="pr-draft">Draft</span>
                 {% endif %}
-                {% if pr.auto_merge_enabled %}
+                {% if pr.auto_merge_enabled and not pr.merged_at %}
                     <span class="pr-auto-merge">Auto merge enabled</span>
                 {% endif %}
                 {% if pr.mergeable == 'CONFLICTING' %}
