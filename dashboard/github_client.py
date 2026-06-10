@@ -46,6 +46,13 @@ class ReviewStatus:
 
 
 @dataclass
+class LinkedIssue:
+    """Represents a linked issue."""
+    number: int
+    url: str
+
+
+@dataclass
 class PullRequestInfo:
     """Represents a pull request with relevant information."""
     number: int
@@ -69,6 +76,11 @@ class PullRequestInfo:
     mergeable: Optional[str] = None
     merged_at: Optional[datetime] = None
     auto_merge_enabled: bool = False
+    linked_issues: list[LinkedIssue] = None
+
+    def __post_init__(self):
+        if self.linked_issues is None:
+            self.linked_issues = []
 
     @property
     def repo_full_name(self) -> str:
@@ -623,6 +635,12 @@ class GitHubClient:
                             }}
                             name
                         }}
+                        closingIssuesReferences(first: 10) {{
+                            nodes {{
+                                number
+                                url
+                            }}
+                        }}
                         labels(first: 20) {{
                             nodes {{
                                 name
@@ -778,6 +796,12 @@ class GitHubClient:
                             }}
                             name
                         }}
+                        closingIssuesReferences(first: 10) {{
+                            nodes {{
+                                number
+                                url
+                            }}
+                        }}
                         labels(first: 20) {{
                             nodes {{
                                 name
@@ -894,6 +918,12 @@ class GitHubClient:
             auto_merge_request = pr_data.get('autoMergeRequest')
             auto_merge_enabled = auto_merge_request is not None and auto_merge_request.get('enabledAt') is not None
 
+            linked_issues = [
+                LinkedIssue(number=issue['number'], url=issue['url'])
+                for issue in pr_data.get('closingIssuesReferences', {}).get('nodes', [])
+                if issue
+            ]
+
             return PullRequestInfo(
                 number=pr_data['number'],
                 title=pr_data['title'],
@@ -916,6 +946,7 @@ class GitHubClient:
                 mergeable=mergeable,
                 merged_at=merged_at,
                 auto_merge_enabled=auto_merge_enabled,
+                linked_issues=linked_issues,
             )
         except Exception:
             return None

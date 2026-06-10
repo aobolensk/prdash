@@ -855,12 +855,41 @@ a:hover {
     color: var(--color-danger);
 }
 
+.pr-branch-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+}
+
+.pr-linked-issues {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.pr-issue-icon {
+    color: var(--color-text-muted);
+    flex-shrink: 0;
+}
+
+.pr-issue-link {
+    font-size: 11px;
+    color: var(--color-text-muted);
+    text-decoration: none;
+}
+
+.pr-issue-link:hover {
+    color: var(--color-link);
+    text-decoration: underline;
+}
+
 .pr-branch {
     display: inline-flex;
     align-items: center;
     gap: 4px;
     white-space: nowrap;
-    margin-left: auto;
 }
 
 .pr-branch-icon {
