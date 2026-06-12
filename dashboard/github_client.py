@@ -26,7 +26,7 @@ GRAPHQL_TIMEOUT_SECONDS = 20
 GRAPHQL_TRANSIENT_STATUS_CODES = {502, 503, 504}
 
 
-@dataclass
+@dataclass(slots=True)
 class CIStatus:
     """Represents the CI status of a pull request."""
     state: str  # 'success', 'pending', 'failure', 'error', or 'unknown'
@@ -37,7 +37,7 @@ class CIStatus:
     target_url: Optional[str] = None
 
 
-@dataclass
+@dataclass(slots=True)
 class ReviewStatus:
     """Represents the review status of a pull request."""
     state: str  # 'approved', 'changes_requested', 'not_reviewed'
@@ -45,14 +45,14 @@ class ReviewStatus:
     comment_count: int = 0
 
 
-@dataclass
+@dataclass(slots=True)
 class LinkedIssue:
     """Represents a linked issue."""
     number: int
     url: str
 
 
-@dataclass
+@dataclass(slots=True)
 class PullRequestInfo:
     """Represents a pull request with relevant information."""
     number: int
