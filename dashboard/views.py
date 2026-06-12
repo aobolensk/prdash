@@ -31,6 +31,11 @@ def _get_filter_params(request):
     }
 
 
+def _exclude_own_prs(prs, username):
+    """Filter out PRs authored by the given user."""
+    return [pr for pr in prs if pr.author != username]
+
+
 def _apply_filters_and_sort(prs, filters):
     """Apply filters and sorting to PR list."""
     ci = filters.get('ci')
@@ -251,10 +256,6 @@ def review_requests_list(request):
     my_review = request.GET.get('my_review', '')
     fetch_params = _get_review_fetch_params(my_review)
 
-    def post_filter(prs, username):
-        # Always exclude own PRs from review requests
-        return [pr for pr in prs if pr.author != username]
-
     return _pr_list_view(
         request,
         fetch_prs=lambda c, repos, author: c.get_all_review_requests(
@@ -262,37 +263,31 @@ def review_requests_list(request):
         ),
         active_tab='review_requests',
         tab_changed='review_requests',
-        post_filter=post_filter,
+        post_filter=_exclude_own_prs,
     )
 
 
 @login_required
 def review_approved_list(request):
-    def exclude_own_prs(prs, username):
-        return [pr for pr in prs if pr.author != username]
-
     return _pr_list_view(
         request,
         fetch_prs=lambda c, repos, author: c.get_all_review_requests(repos, approved_by_me=True, author=author),
         active_tab='review_requests',
         tab_changed='review_approved',
         review_tab='approved',
-        post_filter=exclude_own_prs,
+        post_filter=_exclude_own_prs,
     )
 
 
 @login_required
 def review_reviewed_list(request):
-    def exclude_own_prs(prs, username):
-        return [pr for pr in prs if pr.author != username]
-
     return _pr_list_view(
         request,
         fetch_prs=lambda c, repos, author: c.get_all_review_requests(repos, reviewed_by_me=True, author=author),
         active_tab='review_requests',
         tab_changed='review_reviewed',
         review_tab='reviewed',
-        post_filter=exclude_own_prs,
+        post_filter=_exclude_own_prs,
     )
 
 
