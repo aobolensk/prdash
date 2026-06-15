@@ -476,6 +476,7 @@ class StatsService:
     def get_all_stats(self, repos: list[tuple[str, str]], days: int = 30) -> dict:
         """Get all stats in one call, using parallel execution for independent methods."""
         results = {}
+        self.get_prs_for_stats(repos, days)
 
         with ThreadPoolExecutor(max_workers=6) as executor:
             # Submit all stat collection tasks
