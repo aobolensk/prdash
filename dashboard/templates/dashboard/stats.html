@@ -59,6 +59,16 @@
                        class="btn btn-small {% if days == -1 %}btn-primary{% else %}btn-secondary{% endif %}"
                        data-days="all">All Time</a>
                 </div>
+                <div class="refresh-wrapper">
+                    <span class="refresh-spinner htmx-indicator" id="stats-refresh-spinner"></span>
+                    <button class="btn btn-secondary" id="stats-refresh-btn"
+                            hx-get="{% url 'dashboard:stats_content' %}?days={% if days == -1 %}all{% else %}{{ days }}{% endif %}"
+                            hx-target="#stats-content"
+                            hx-swap="innerHTML"
+                            hx-indicator="#stats-refresh-spinner">
+                        Refresh
+                    </button>
+                </div>
                 <a href="{% url 'dashboard:pr_list' %}" class="btn btn-secondary">Back to Dashboard</a>
             </div>
         </div>
@@ -162,6 +172,14 @@ document.body.addEventListener('htmx:beforeRequest', function(event) {
             });
             clickedBtn.classList.remove('btn-secondary');
             clickedBtn.classList.add('btn-primary');
+
+            // Keep refresh button URL in sync with selected time period
+            const days = clickedBtn.dataset.days;
+            const refreshBtn = document.getElementById('stats-refresh-btn');
+            if (refreshBtn && days) {
+                refreshBtn.setAttribute('hx-get', `{% url 'dashboard:stats_content' %}?days=${days}`);
+                htmx.process(refreshBtn);
+            }
         }
 
         // Show loading skeleton
