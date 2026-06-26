@@ -81,11 +81,13 @@ class HealthStats:
     aging_30_days: list[AgingPR] = field(default_factory=list)
     failing_ci_prs: list = field(default_factory=list)
     failing_ci_count: int = 0
+    aging_14_count: int = 0
+    aging_30_count: int = 0
 
     @property
     def aging_prs_count(self) -> int:
         """Count of PRs that are 14+ days old."""
-        return len(self.aging_30_days) + len(self.aging_14_days)
+        return self.aging_30_count + self.aging_14_count
 
 
 @dataclass
@@ -142,6 +144,13 @@ class StatsService:
         repos_hash = hashlib.md5(repos_str.encode()).hexdigest()[:16]
         return f"stats:{prefix}:{self.username}:{repos_hash}:{days}"
 
+    def _get_cutoff_date(self, days: int) -> datetime:
+        """Get cutoff date; days=-1 means all time (epoch)."""
+        if days == -1:
+            import datetime as _dt
+            return datetime.min.replace(tzinfo=_dt.timezone.utc)
+        return timezone.now() - timedelta(days=days)
+
     def _get_week_start(self, dt: datetime) -> datetime:
         """Get the Monday of the week for a date."""
         days_since_monday = dt.weekday()
@@ -156,12 +165,14 @@ class StatsService:
         include_closed: bool = True
     ) -> list[PullRequestInfo]:
         """Get PRs for stats computation with caching."""
-        cache_key = f"prs_stats:{self.username}:{days}:{include_closed}"
+        repos_str = ",".join(f"{o}/{n}" for o, n in sorted(repos))
+        repos_hash = hashlib.md5(repos_str.encode()).hexdigest()[:16]
+        cache_key = f"prs_stats:{self.username}:{repos_hash}:{days}:{include_closed}"
         if cache_key in self._pr_cache:
             return self._pr_cache[cache_key]
 
         all_prs = []
-        cutoff_date = timezone.now() - timedelta(days=days)
+        cutoff_date = self._get_cutoff_date(days)
 
         # Get open PRs
         open_prs = self.client.get_all_user_prs(repos)
@@ -184,7 +195,7 @@ class StatsService:
             return cached
 
         prs = self.get_prs_for_stats(repos, days)
-        cutoff_date = timezone.now() - timedelta(days=days)
+        cutoff_date = self._get_cutoff_date(days)
 
         open_count = 0
         merged_count = 0
@@ -199,7 +210,7 @@ class StatsService:
                     merge_time = pr.merged_at - pr.created_at
                     total_merge_time += merge_time
                     merge_time_count += 1
-            elif pr.created_at >= cutoff_date:
+            else:
                 open_count += 1
 
         avg_merge_hours = 0.0
@@ -229,16 +240,18 @@ class StatsService:
         prs = self.get_prs_for_stats(repos, days)
         now = timezone.now()
 
-        if days == -1 and prs:
-            # Find the earliest date from all PRs
-            earliest_dates = [pr.created_at for pr in prs]
-            earliest_dates.extend(pr.merged_at for pr in prs if pr.merged_at)
-            cutoff_date = min(earliest_dates)
+        if days == -1:
+            if prs:
+                earliest_dates = [pr.created_at for pr in prs]
+                earliest_dates.extend(pr.merged_at for pr in prs if pr.merged_at)
+                cutoff_date = min(earliest_dates)
+            else:
+                cutoff_date = self._get_cutoff_date(days)
         else:
-            cutoff_date = now - timedelta(days=days)
+            cutoff_date = self._get_cutoff_date(days)
 
         # Use daily granularity for 7d and 14d, weekly for longer periods
-        use_daily = days <= 14
+        use_daily = 0 < days <= 14
         granularity = "day" if use_daily else "week"
 
         # Initialize time period buckets
@@ -344,14 +357,15 @@ class StatsService:
         cache.set(cache_key, stats, self.CACHE_TTL)
         return stats
 
-    def get_health_stats(self, repos: list[tuple[str, str]]) -> HealthStats:
+    def get_health_stats(self, repos: list[tuple[str, str]], days: int = -1) -> HealthStats:
         """Get PR health statistics."""
         cache_key = self._get_cache_key("health", repos, 0)
         cached = cache.get(cache_key)
         if cached:
             return cached
 
-        open_prs = self.client.get_all_user_prs(repos)
+        all_prs = self.get_prs_for_stats(repos, days)
+        open_prs = [pr for pr in all_prs if not pr.merged_at]
         now = timezone.now()
 
         aging_7: list[AgingPR] = []
@@ -385,7 +399,9 @@ class StatsService:
             aging_14_days=aging_14[:10],
             aging_30_days=aging_30[:10],
             failing_ci_prs=failing_ci_prs[:10],
-            failing_ci_count=len(failing_ci_prs)
+            failing_ci_count=len(failing_ci_prs),
+            aging_14_count=len(aging_14),
+            aging_30_count=len(aging_30),
         )
         cache.set(cache_key, stats, self.CACHE_TTL)
         return stats
@@ -399,7 +415,7 @@ class StatsService:
 
         prs = self.get_prs_for_stats(repos, days)
         now = timezone.now()
-        cutoff_date = now - timedelta(days=days)
+        cutoff_date = self._get_cutoff_date(days)
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
         repo_data: dict[tuple[str, str], RepoData] = {}
@@ -484,7 +500,7 @@ class StatsService:
                 executor.submit(self.get_quick_stats, repos, days): 'quick',
                 executor.submit(self.get_velocity_stats, repos, days): 'velocity',
                 executor.submit(self.get_review_stats, repos, days): 'reviews',
-                executor.submit(self.get_health_stats, repos): 'health',
+                executor.submit(self.get_health_stats, repos, days): 'health',
                 executor.submit(self.get_repo_stats, repos, days): 'repos',
                 executor.submit(self.get_collaboration_stats, repos, days): 'collaboration',
             }

@@ -597,10 +597,9 @@ class GitHubClient:
         if not pr_numbers:
             return []
 
-        limited_pr_numbers = pr_numbers[:100]
-        if len(limited_pr_numbers) > GRAPHQL_PR_BATCH_SIZE:
+        if len(pr_numbers) > GRAPHQL_PR_BATCH_SIZE:
             result = []
-            for pr_number_batch in self._iter_chunks(limited_pr_numbers, GRAPHQL_PR_BATCH_SIZE):
+            for pr_number_batch in self._iter_chunks(pr_numbers, GRAPHQL_PR_BATCH_SIZE):
                 result.extend(self._fetch_prs_batch_graphql(owner, name, pr_number_batch))
             return result
 
@@ -608,7 +607,7 @@ class GitHubClient:
             # Build GraphQL query to fetch all PR data at once
             # Keep batches bounded so GitHub does not time out on large repos.
             pr_queries = []
-            for i, pr_num in enumerate(limited_pr_numbers):
+            for i, pr_num in enumerate(pr_numbers):
                 pr_queries.append(f'''
                     pr{i}: pullRequest(number: {pr_num}) {{
                         number
@@ -713,7 +712,7 @@ class GitHubClient:
             if not repo_data:
                 return []
 
-            for i, pr_num in enumerate(limited_pr_numbers):
+            for i, pr_num in enumerate(pr_numbers):
                 pr_data = repo_data.get(f'pr{i}')
                 if not pr_data:
                     continue
@@ -740,7 +739,7 @@ class GitHubClient:
         # Flatten to list of (owner, name, pr_number) for batching
         all_prs: list[tuple[str, str, int]] = []
         for (owner, name), pr_numbers in pr_data.items():
-            for pr_num in pr_numbers[:100]:
+            for pr_num in pr_numbers:
                 all_prs.append((owner, name, pr_num))
 
         if not all_prs:
@@ -1117,48 +1116,68 @@ class GitHubClient:
     def _search_prs(
         self, query: str, owner: str, name: str, limit: Optional[int] = None
     ) -> list[int]:
-        """Search for PR numbers using REST API."""
+        """Search for PR numbers using REST API, paginating up to GitHub's 1000-result cap."""
         token = self._get_token()
         if not token:
             return []
 
-        # Hash the query to create memcached-safe cache keys
         headers = {
             'Authorization': f'Bearer {token}',
             'Accept': 'application/vnd.github+json',
             'X-GitHub-Api-Version': '2022-11-28',
         }
 
+        seen: set[int] = set()
+        pr_numbers: list[int] = []
+        page = 1
+
         try:
-            response = requests.get(
-                'https://api.github.com/search/issues',
-                params={
-                    'q': query,
-                    'sort': 'updated',
-                    'order': 'desc',
-                    'per_page': 100,
-                },
-                headers=headers,
-                timeout=30,
-            )
+            while True:
+                response = requests.get(
+                    'https://api.github.com/search/issues',
+                    params={
+                        'q': query,
+                        'sort': 'updated',
+                        'order': 'desc',
+                        'per_page': 100,
+                        'page': page,
+                    },
+                    headers=headers,
+                    timeout=30,
+                )
 
-            if response.status_code == 403:
-                if 'rate limit' in response.text.lower():
-                    self._rate_limited_repos.add(f"{owner}/{name}")
-                    return []
-                self._handle_api_error_from_response(response, owner, name)
-                return []
+                if response.status_code == 403:
+                    if 'rate limit' in response.text.lower():
+                        self._rate_limited_repos.add(f"{owner}/{name}")
+                    else:
+                        self._handle_api_error_from_response(response, owner, name)
+                    break
 
-            if response.status_code != 200:
-                self._handle_api_error_from_response(response, owner, name)
-                return []
+                if response.status_code != 200:
+                    self._handle_api_error_from_response(response, owner, name)
+                    break
 
-            data = response.json()
-            pr_numbers = [item['number'] for item in data.get('items', [])]
-            return pr_numbers[:limit] if limit else pr_numbers
+                data = response.json()
+                items = data.get('items', [])
+                for item in items:
+                    n = item['number']
+                    if n not in seen:
+                        seen.add(n)
+                        pr_numbers.append(n)
+
+                if limit and len(pr_numbers) >= limit:
+                    return pr_numbers[:limit]
+
+                # GitHub Search API caps at 1000 results; stop if this page wasn't full
+                if len(items) < 100:
+                    break
+
+                page += 1
 
         except requests.exceptions.RequestException:
-            return []
+            pass
+
+        return pr_numbers
 
     def _handle_api_error_from_response(
         self, response: requests.Response, owner: str, name: str
@@ -1305,7 +1324,7 @@ class GitHubClient:
 
             # Use GitHub Search API
             query = f"repo:{owner}/{name} is:pr is:merged author:{author}"
-            pr_numbers = self._search_prs(query, owner, name, limit=50)
+            pr_numbers = self._search_prs(query, owner, name)
 
             if not pr_numbers:
                 return []
@@ -1670,11 +1689,14 @@ class GitHubClient:
                 'top_reviewed_by': [],
             }
 
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
         from collections import defaultdict
 
-        cutoff = datetime.now() - timedelta(days=days)
-        cutoff_iso = cutoff.strftime('%Y-%m-%dT%H:%M:%SZ')
+        if days == -1:
+            cutoff_iso = '2000-01-01T00:00:00Z'
+        else:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+            cutoff_iso = cutoff.strftime('%Y-%m-%dT%H:%M:%SZ')
 
         reviews_given_to = defaultdict(lambda: {'count': 0, 'avatar': ''})  # username -> {count, avatar}
         reviews_received_from = defaultdict(lambda: {'count': 0, 'avatar': ''})  # username -> {count, avatar}
