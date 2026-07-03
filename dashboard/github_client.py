@@ -1670,24 +1670,19 @@ class GitHubClient:
         - top_reviewers: list of {username, avatar_url, count} for PRs user reviewed
         - top_reviewed_by: list of {username, avatar_url, count} for who reviews user's PRs
         """
+        empty_result = {
+            'reviews_given': 0,
+            'reviews_received': 0,
+            'avg_turnaround_hours': 0.0,
+            'top_reviewers': [],
+            'top_reviewed_by': [],
+        }
         if not repos or not username:
-            return {
-                'reviews_given': 0,
-                'reviews_received': 0,
-                'avg_turnaround_hours': 0.0,
-                'top_reviewers': [],
-                'top_reviewed_by': [],
-            }
+            return empty_result
 
         token = self._get_token()
         if not token:
-            return {
-                'reviews_given': 0,
-                'reviews_received': 0,
-                'avg_turnaround_hours': 0.0,
-                'top_reviewers': [],
-                'top_reviewed_by': [],
-            }
+            return empty_result
 
         from datetime import datetime, timedelta, timezone
         from collections import defaultdict
@@ -1705,162 +1700,188 @@ class GitHubClient:
         total_turnaround = 0.0
         turnaround_count = 0
 
-        for owner, name in repos:
-            # Query: PRs where user is author (to get reviews received)
-            query_received = f'''
-                query {{
-                    search(
-                        query: "repo:{owner}/{name} is:pr author:{username} updated:>{cutoff_iso[:10]}",
-                        type: ISSUE, first: 50
-                    ) {{
-                        nodes {{
-                            ... on PullRequest {{
-                                number
-                                createdAt
-                                reviews(first: 100) {{
-                                    nodes {{
-                                        author {{
-                                            login
-                                            avatarUrl
-                                        }}
-                                        state
-                                        submittedAt
-                                    }}
+        # GitHub Search API caps results at 1000; page through in batches of 100.
+        SEARCH_PAGE_SIZE = 100
+        MAX_SEARCH_RESULTS = 1000
+
+        def _paginate_search(
+            owner: str, name: str, search_query: str, node_fields: str, operation: str
+        ) -> list:
+            """Page through a GraphQL search, returning all PullRequest nodes."""
+            nodes: list = []
+            cursor = None
+            while len(nodes) < MAX_SEARCH_RESULTS:
+                after = f', after: "{cursor}"' if cursor else ''
+                query = f'''
+                    query {{
+                        search(
+                            query: "{search_query}",
+                            type: ISSUE, first: {SEARCH_PAGE_SIZE}{after}
+                        ) {{
+                            pageInfo {{ hasNextPage endCursor }}
+                            nodes {{
+                                ... on PullRequest {{
+                                    {node_fields}
                                 }}
                             }}
                         }}
                     }}
-                }}
-            '''
-
-            # Query: PRs where user reviewed (to get reviews given)
-            query_given = f'''
-                query {{
-                    search(
-                        query: "repo:{owner}/{name} is:pr reviewed-by:{username} updated:>{cutoff_iso[:10]}",
-                        type: ISSUE, first: 50
-                    ) {{
-                        nodes {{
-                            ... on PullRequest {{
-                                number
-                                author {{
-                                    login
-                                    avatarUrl
-                                }}
-                                reviews(first: 100) {{
-                                    nodes {{
-                                        author {{
-                                            login
-                                        }}
-                                        state
-                                        submittedAt
-                                    }}
-                                }}
-                            }}
-                        }}
-                    }}
-                }}
-            '''
-
-            try:
-                # Fetch PRs where user is author
-                data_received = self._post_graphql(
-                    query_received,
-                    owner=owner,
-                    name=name,
-                    operation='Review stats received GraphQL query',
-                    token=token,
+                '''
+                data = self._post_graphql(
+                    query, owner=owner, name=name, operation=operation, token=token,
                 )
-
-                if data_received is not None:
-                    prs = data_received.get('data', {}).get('search', {}).get('nodes', [])
-
-                    for pr in prs:
-                        if not pr:
-                            continue
-                        reviews = pr.get('reviews', {}).get('nodes', [])
-                        pr_created = pr.get('createdAt')
-
-                        seen_reviewers = set()
-                        first_review_time = None
-
-                        for review in reviews:
-                            if not review or not review.get('author'):
-                                continue
-                            reviewer = review['author']['login']
-                            avatar = review['author'].get('avatarUrl', '')
-                            submitted = review.get('submittedAt')
-
-                            if reviewer == username:
-                                continue  # Skip self-reviews
-
-                            if reviewer not in seen_reviewers:
-                                seen_reviewers.add(reviewer)
-                                reviews_received_from[reviewer]['count'] += 1
-                                if avatar:
-                                    reviews_received_from[reviewer]['avatar'] = avatar
-
-                            # Track first review time
-                            if submitted and (first_review_time is None or submitted < first_review_time):
-                                first_review_time = submitted
-
-                        reviews_received_count += len(seen_reviewers)
-
-                        # Calculate turnaround
-                        if pr_created and first_review_time:
-                            try:
-                                created_dt = datetime.fromisoformat(pr_created.replace('Z', '+00:00'))
-                                review_dt = datetime.fromisoformat(first_review_time.replace('Z', '+00:00'))
-                                turnaround_hours = (review_dt - created_dt).total_seconds() / 3600
-                                if turnaround_hours > 0:
-                                    total_turnaround += turnaround_hours
-                                    turnaround_count += 1
-                            except Exception:
-                                pass
-
-                # Fetch PRs where user reviewed
-                data_given = self._post_graphql(
-                    query_given,
-                    owner=owner,
-                    name=name,
-                    operation='Review stats given GraphQL query',
-                    token=token,
+                if data is None:
+                    break
+                search = data.get('data', {}).get('search', {})
+                nodes.extend(search.get('nodes', []))
+                page_info = search.get('pageInfo', {})
+                if not page_info.get('hasNextPage'):
+                    break
+                cursor = page_info.get('endCursor')
+                if not cursor:
+                    break
+            if len(nodes) >= MAX_SEARCH_RESULTS:
+                logger.warning(
+                    "%s hit the %d-result cap for %s/%s; review stats may be truncated",
+                    operation, MAX_SEARCH_RESULTS, owner, name,
                 )
+            return nodes
 
-                if data_given is not None:
-                    prs = data_given.get('data', {}).get('search', {}).get('nodes', [])
+        received_fields = '''
+            number
+            createdAt
+            reviews(first: 100) {
+                nodes {
+                    author { login avatarUrl }
+                    state
+                    submittedAt
+                }
+            }
+        '''
 
-                    for pr in prs:
-                        if not pr:
-                            continue
-                        author_data = pr.get('author')
-                        if not author_data:
-                            continue
-                        pr_author = author_data['login']
-                        pr_avatar = author_data.get('avatarUrl', '')
+        given_fields = '''
+            number
+            author { login avatarUrl }
+            reviews(first: 100) {
+                nodes {
+                    author { login }
+                    state
+                    submittedAt
+                }
+            }
+        '''
 
-                        if pr_author == username:
-                            continue  # Skip own PRs
+        def _fetch_received(owner: str, name: str) -> list:
+            return _paginate_search(
+                owner, name,
+                f"repo:{owner}/{name} is:pr author:{username} updated:>{cutoff_iso[:10]}",
+                received_fields,
+                'Review stats received GraphQL query',
+            )
 
-                        reviews = pr.get('reviews', {}).get('nodes', [])
-                        user_reviewed = False
+        def _fetch_given(owner: str, name: str) -> list:
+            return _paginate_search(
+                owner, name,
+                f"repo:{owner}/{name} is:pr reviewed-by:{username} updated:>{cutoff_iso[:10]}",
+                given_fields,
+                'Review stats given GraphQL query',
+            )
 
-                        for review in reviews:
-                            if not review or not review.get('author'):
-                                continue
-                            reviewer = review['author']['login']
-                            if reviewer == username:
-                                user_reviewed = True
-                                break
+        # Fetch both searches for every repo in parallel (network-bound); aggregate
+        # single-threaded below so the shared counters/dicts stay race-free.
+        received_by_repo: dict[tuple[str, str], list] = {}
+        given_by_repo: dict[tuple[str, str], list] = {}
+        with ThreadPoolExecutor(max_workers=min(10, len(repos) * 2)) as executor:
+            future_map = {}
+            for owner, name in repos:
+                future_map[executor.submit(_fetch_received, owner, name)] = ('received', owner, name)
+                future_map[executor.submit(_fetch_given, owner, name)] = ('given', owner, name)
+            for future in as_completed(future_map):
+                kind, owner, name = future_map[future]
+                try:
+                    result = future.result()
+                except Exception:
+                    result = []
+                if kind == 'received':
+                    received_by_repo[(owner, name)] = result
+                else:
+                    given_by_repo[(owner, name)] = result
 
-                        if user_reviewed:
-                            reviews_given_count += 1
-                            reviews_given_to[pr_author]['count'] += 1
-                            if pr_avatar:
-                                reviews_given_to[pr_author]['avatar'] = pr_avatar
+        # Aggregate reviews received (PRs the user authored)
+        for prs in received_by_repo.values():
+            for pr in prs:
+                if not pr:
+                    continue
+                reviews = pr.get('reviews', {}).get('nodes', [])
+                pr_created = pr.get('createdAt')
 
-            except Exception:
-                pass
+                seen_reviewers = set()
+                first_review_time = None
+
+                for review in reviews:
+                    if not review or not review.get('author'):
+                        continue
+                    reviewer = review['author']['login']
+                    avatar = review['author'].get('avatarUrl', '')
+                    submitted = review.get('submittedAt')
+
+                    if reviewer == username:
+                        continue  # Skip self-reviews
+
+                    if reviewer not in seen_reviewers:
+                        seen_reviewers.add(reviewer)
+                        reviews_received_from[reviewer]['count'] += 1
+                        if avatar:
+                            reviews_received_from[reviewer]['avatar'] = avatar
+
+                    # Track first review time
+                    if submitted and (first_review_time is None or submitted < first_review_time):
+                        first_review_time = submitted
+
+                reviews_received_count += len(seen_reviewers)
+
+                # Calculate turnaround
+                if pr_created and first_review_time:
+                    try:
+                        created_dt = datetime.fromisoformat(pr_created.replace('Z', '+00:00'))
+                        review_dt = datetime.fromisoformat(first_review_time.replace('Z', '+00:00'))
+                        turnaround_hours = (review_dt - created_dt).total_seconds() / 3600
+                        if turnaround_hours > 0:
+                            total_turnaround += turnaround_hours
+                            turnaround_count += 1
+                    except Exception:
+                        pass
+
+        # Aggregate reviews given (PRs the user reviewed)
+        for prs in given_by_repo.values():
+            for pr in prs:
+                if not pr:
+                    continue
+                author_data = pr.get('author')
+                if not author_data:
+                    continue
+                pr_author = author_data['login']
+                pr_avatar = author_data.get('avatarUrl', '')
+
+                if pr_author == username:
+                    continue  # Skip own PRs
+
+                reviews = pr.get('reviews', {}).get('nodes', [])
+                user_reviewed = False
+
+                for review in reviews:
+                    if not review or not review.get('author'):
+                        continue
+                    reviewer = review['author']['login']
+                    if reviewer == username:
+                        user_reviewed = True
+                        break
+
+                if user_reviewed:
+                    reviews_given_count += 1
+                    reviews_given_to[pr_author]['count'] += 1
+                    if pr_avatar:
+                        reviews_given_to[pr_author]['avatar'] = pr_avatar
 
         # Build top reviewers (authors of PRs that user reviewed)
         top_reviewers = [
