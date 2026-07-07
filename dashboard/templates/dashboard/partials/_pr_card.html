@@ -38,7 +38,7 @@
                 <span class="pr-repo">{{ pr.repo_full_name }}</span>
                 <span class="pr-number">#{{ pr.number }}</span>
                 {% if active_tab == 'review_requests' and pr.author %}
-                    <span class="pr-author">by {{ pr.author }}</span>
+                    <span class="pr-author">by <a href="https://github.com/{{ pr.author }}" target="_blank" rel="noopener">{{ pr.author }}</a></span>
                 {% endif %}
                 {% if pr.merged_at %}
                     <span class="pr-time pr-merged" data-timestamp="{{ pr.merged_at|date:'c' }}">merged {{ pr.merged_at|time_ago }}</span>
