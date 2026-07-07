@@ -759,10 +759,20 @@ a:hover {
 .pr-author a {
     color: inherit;
     text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
 }
 
 .pr-author a:hover {
     text-decoration: underline;
+}
+
+.pr-author-avatar {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    vertical-align: middle;
 }
 
 .pr-time {
