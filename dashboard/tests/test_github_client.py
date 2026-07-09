@@ -48,6 +48,74 @@ class GitHubClientCIStatusTests(TestCase):
         self.assertEqual(ci_status.passed_count, 98)
         self.assertEqual(ci_status.total_count, 174)
 
+    def _check_run(self, conclusion, workflow_name, run_number, status='COMPLETED'):
+        return {
+            'conclusion': conclusion,
+            'status': status,
+            'checkSuite': {
+                'workflowRun': {
+                    'runNumber': run_number,
+                    'workflow': {'name': workflow_name},
+                }
+            },
+        }
+
+    def test_superseded_workflow_run_is_ignored(self):
+        """A failed run superseded by a passing re-run should not fail the PR."""
+        contexts = {
+            'totalCount': 4,
+            'nodes': [
+                # Old run of "CI" (run #1) failed and was cancelled...
+                self._check_run('FAILURE', 'CI', 1),
+                self._check_run('CANCELLED', 'CI', 1),
+                # ...but the latest run (#2) of the same workflow passed.
+                self._check_run('SUCCESS', 'CI', 2),
+                self._check_run('SUCCESS', 'CI', 2),
+            ],
+        }
+
+        ci_status = self._client()._parse_ci_status_from_graphql(
+            # rollup.state is FAILURE because it aggregates the stale run
+            self._pr_data('FAILURE', contexts)
+        )
+
+        self.assertEqual(ci_status.state, 'success')
+        self.assertEqual(ci_status.passed_count, 2)
+        self.assertEqual(ci_status.total_count, 2)
+
+    def test_latest_workflow_run_failure_is_reported(self):
+        """A genuine failure in the latest run must still be reported."""
+        contexts = {
+            'totalCount': 3,
+            'nodes': [
+                self._check_run('SUCCESS', 'CI', 1),
+                self._check_run('SUCCESS', 'CI', 2),
+                self._check_run('FAILURE', 'CI', 2),
+            ],
+        }
+
+        ci_status = self._client()._parse_ci_status_from_graphql(
+            self._pr_data('FAILURE', contexts)
+        )
+
+        self.assertEqual(ci_status.state, 'failure')
+
+    def test_action_required_conclusion_is_a_failure(self):
+        """A latest-run check with a failing-but-uncommon conclusion fails the PR."""
+        contexts = {
+            'totalCount': 2,
+            'nodes': [
+                self._check_run('SUCCESS', 'CI', 1),
+                self._check_run('ACTION_REQUIRED', 'CI', 1),
+            ],
+        }
+
+        ci_status = self._client()._parse_ci_status_from_graphql(
+            self._pr_data('FAILURE', contexts)
+        )
+
+        self.assertEqual(ci_status.state, 'failure')
+
     def test_rollup_success_is_preserved(self):
         contexts = {
             'totalCount': 2,

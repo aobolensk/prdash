@@ -658,6 +658,14 @@ class GitHubClient:
                                                     name
                                                     status
                                                     conclusion
+                                                    checkSuite {{
+                                                        workflowRun {{
+                                                            runNumber
+                                                            workflow {{
+                                                                name
+                                                            }}
+                                                        }}
+                                                    }}
                                                 }}
                                                 ... on StatusContext {{
                                                     state
@@ -819,6 +827,14 @@ class GitHubClient:
                                                     name
                                                     status
                                                     conclusion
+                                                    checkSuite {{
+                                                        workflowRun {{
+                                                            runNumber
+                                                            workflow {{
+                                                                name
+                                                            }}
+                                                        }}
+                                                    }}
                                                 }}
                                                 ... on StatusContext {{
                                                     state
@@ -950,6 +966,45 @@ class GitHubClient:
         except Exception:
             return None
 
+    @staticmethod
+    def _drop_superseded_check_runs(contexts: list[dict]) -> list[dict]:
+        """Remove CheckRuns from workflow runs that have been superseded by a re-run.
+
+        When a workflow is re-run, GitHub keeps the CheckRuns from the old run
+        attached to the commit's statusCheckRollup, but its PR UI only shows the
+        latest run per workflow. Without this filtering a green PR whose earlier
+        run failed/was cancelled would incorrectly report a failing CI status.
+
+        Keeps StatusContexts untouched and CheckRuns lacking workflow metadata.
+        """
+        def workflow_key(ctx: dict) -> tuple[Optional[str], Optional[int]]:
+            workflow = (ctx.get('checkSuite') or {}).get('workflowRun') or {}
+            return (workflow.get('workflow') or {}).get('name'), workflow.get('runNumber')
+
+        latest_run: dict[str, int] = {}
+        for ctx in contexts:
+            if 'conclusion' not in ctx:
+                continue
+            name, run_number = workflow_key(ctx)
+            if name is None or run_number is None:
+                continue
+            if name not in latest_run or run_number > latest_run[name]:
+                latest_run[name] = run_number
+
+        if not latest_run:
+            return contexts
+
+        kept = []
+        for ctx in contexts:
+            if 'conclusion' not in ctx:
+                kept.append(ctx)
+                continue
+            name, run_number = workflow_key(ctx)
+            if name is not None and run_number is not None and run_number != latest_run[name]:
+                continue
+            kept.append(ctx)
+        return kept
+
     def _parse_ci_status_from_graphql(self, pr_data: dict) -> CIStatus:
         """Parse CI status from GraphQL response."""
         try:
@@ -962,8 +1017,12 @@ class GitHubClient:
                 return CIStatus(state='unknown')
 
             contexts_data = rollup.get('contexts', {})
-            total_count = contexts_data.get('totalCount', 0)
-            contexts = contexts_data.get('nodes', [])
+            raw_nodes = contexts_data.get('nodes', [])
+            # If GitHub truncated the contexts page, a failing check may be
+            # off-page; we can't recompute reliably, so trust rollup.state.
+            truncated = contexts_data.get('totalCount', 0) > len(raw_nodes)
+            contexts = self._drop_superseded_check_runs(raw_nodes)
+            total_count = len(contexts)
             rollup_state = {
                 'ERROR': 'error',
                 'EXPECTED': 'pending',
@@ -975,6 +1034,16 @@ class GitHubClient:
             if total_count == 0:
                 return CIStatus(state=rollup_state or 'unknown')
 
+            if truncated and rollup_state:
+                return CIStatus(
+                    state=rollup_state,
+                    passed_count=sum(
+                        1 for c in contexts
+                        if c.get('conclusion') == 'SUCCESS' or c.get('state') == 'SUCCESS'
+                    ),
+                    total_count=contexts_data.get('totalCount', total_count),
+                )
+
             success_count = 0
             failure_count = 0
             skipped_count = 0
@@ -984,16 +1053,18 @@ class GitHubClient:
                 # Check if it's a CheckRun or StatusContext
                 if 'conclusion' in context:  # CheckRun
                     conclusion = context.get('conclusion')
-                    status = context.get('status')
 
                     if conclusion == 'SUCCESS':
                         success_count += 1
-                    elif conclusion in ('FAILURE', 'CANCELLED', 'TIMED_OUT'):
+                    elif conclusion in (
+                        'FAILURE', 'CANCELLED', 'TIMED_OUT',
+                        'ACTION_REQUIRED', 'STARTUP_FAILURE',
+                    ):
                         failure_count += 1
                     elif conclusion in ('SKIPPED', 'NEUTRAL', 'STALE'):
                         skipped_count += 1
-                    elif conclusion is None and status in ('QUEUED', 'IN_PROGRESS'):
-                        # If no conclusion yet, check status
+                    elif conclusion is None:
+                        # No conclusion yet: the check is still queued/running.
                         pending_count += 1
 
                 elif 'state' in context:  # StatusContext
@@ -1002,12 +1073,15 @@ class GitHubClient:
                         success_count += 1
                     elif state_value in ('FAILURE', 'ERROR'):
                         failure_count += 1
-                    elif state_value == 'PENDING':
+                    elif state_value in ('PENDING', 'EXPECTED'):
                         pending_count += 1
 
-            if rollup_state:
-                state = rollup_state
-            elif failure_count > 0:
+            # Derive state from the deduped checks rather than trusting
+            # rollup.state: the rollup aggregates every workflow run, including
+            # superseded re-runs, so a green PR whose earlier run failed still
+            # reports FAILURE. GitHub's own PR UI only considers the latest run
+            # per workflow, which is what the dedup above reproduces.
+            if failure_count > 0:
                 state = 'failure'
             elif pending_count > 0:
                 state = 'pending'
@@ -1016,7 +1090,7 @@ class GitHubClient:
             elif skipped_count == total_count:
                 state = 'success'
             else:
-                state = 'unknown'
+                state = rollup_state or 'unknown'
 
             return CIStatus(
                 state=state,
