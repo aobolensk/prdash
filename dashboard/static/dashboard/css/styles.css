@@ -993,6 +993,13 @@ a:hover {
     }
 }
 
+/* Last updated indicator */
+.last-updated {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+}
+
 /* Auto-refresh indicator */
 .auto-refresh-indicator {
     display: flex;

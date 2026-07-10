@@ -82,6 +82,27 @@
             timeZoneName: 'short'
         };
 
+        function formatLastUpdated(root = document) {
+            root.querySelectorAll('.last-updated[data-updated]').forEach(el => {
+                const date = new Date(el.dataset.updated);
+                if (isNaN(date)) return;
+                const seconds = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+                let text;
+                if (seconds < 10) {
+                    text = 'just now';
+                } else if (seconds < 60) {
+                    text = `${seconds}s ago`;
+                } else if (seconds < 3600) {
+                    text = `${Math.floor(seconds / 60)}m ago`;
+                } else if (seconds < 86400) {
+                    text = `${Math.floor(seconds / 3600)}h ago`;
+                } else {
+                    text = `${Math.floor(seconds / 86400)}d ago`;
+                }
+                el.textContent = `Updated ${text}`;
+            });
+        }
+
         function formatTimestampTitles(root = document) {
             root.querySelectorAll('[data-timestamp]').forEach(el => {
                 if (el.title) return;
@@ -95,6 +116,8 @@
 
         document.addEventListener('DOMContentLoaded', function() {
             formatTimestampTitles();
+            formatLastUpdated();
+            setInterval(formatLastUpdated, 15000);
 
             const settingsLink = document.getElementById('settings-link');
             if (settingsLink && window.location.pathname === settingsLink.getAttribute('href')) {
@@ -127,6 +150,7 @@
                     evt.detail.target.innerHTML = evt.detail.xhr.responseText;
                 }
                 formatTimestampTitles(evt.detail.target);
+                formatLastUpdated(evt.detail.target);
             });
 
             document.body.addEventListener('showErrors', function(evt) {
