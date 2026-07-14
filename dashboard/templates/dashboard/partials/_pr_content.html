@@ -61,9 +61,10 @@
                 onclick="togglePrSearch()">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
         </button>
-        <button class="btn btn-secondary" id="pr-refresh-btn"
+        <button type="button" class="btn btn-secondary btn-icon-square" id="pr-refresh-btn"
+                title="Refresh" aria-label="Refresh"
                 onclick="htmx.trigger(document.body, 'manualRefresh')">
-            Refresh
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
         </button>
     </div>
 </div>
