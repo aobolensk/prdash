@@ -55,7 +55,13 @@
         </span>
         {% endif %}
         <span class="refresh-spinner htmx-indicator" id="refresh-spinner"></span>
-        <button class="btn btn-secondary"
+        <button type="button" class="btn btn-secondary btn-icon-square" id="pr-search-toggle"
+                title="Search PRs (`)" aria-label="Search PRs"
+                aria-controls="pr-search-bar" aria-expanded="false"
+                onclick="togglePrSearch()">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        </button>
+        <button class="btn btn-secondary" id="pr-refresh-btn"
                 onclick="htmx.trigger(document.body, 'manualRefresh')">
             Refresh
         </button>

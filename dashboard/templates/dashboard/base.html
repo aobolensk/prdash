@@ -65,6 +65,218 @@
             });
         }
 
+        // ---- Instant client-side fuzzy search over PRs on the current page ----
+        // Fields highlighted (and, per-field, where a matched window is drawn).
+        const PR_HL_SELECTOR = '.pr-title, .pr-repo, .pr-number, .pr-author, .pr-branch-name, .pr-linked-issues';
+
+        // Typo budget scales with token length: short tokens must match exactly.
+        function prMaxTypos(len) {
+            if (len < 4) return 0;
+            if (len <= 6) return 1;
+            if (len <= 10) return 2;
+            return 3;
+        }
+
+        // Sellers approximate-substring DP: find the lowest-edit-distance contiguous
+        // window of `text` matching `token`, tracking each column's origin so we can
+        // recover the matched span for highlighting. Returns {start, end, d} or null.
+        function prFuzzyWindow(text, token, maxD) {
+            const n = text.length, m = token.length;
+            if (m === 0) return null;
+            let prev = new Array(n + 1).fill(0);
+            let prevO = new Array(n + 1);
+            for (let j = 0; j <= n; j++) prevO[j] = j;
+            for (let i = 1; i <= m; i++) {
+                const cur = new Array(n + 1), curO = new Array(n + 1);
+                cur[0] = i; curO[0] = 0;
+                for (let j = 1; j <= n; j++) {
+                    const cost = token[i - 1] === text[j - 1] ? 0 : 1;
+                    let v = prev[j - 1] + cost, o = prevO[j - 1];
+                    const up = prev[j] + 1;
+                    if (up < v) { v = up; o = prevO[j]; }
+                    const left = cur[j - 1] + 1;
+                    if (left < v) { v = left; o = curO[j - 1]; }
+                    cur[j] = v; curO[j] = o;
+                }
+                prev = cur; prevO = curO;
+            }
+            let bestJ = -1, bestD = Infinity;
+            for (let j = 1; j <= n; j++) {
+                if (prev[j] < bestD) { bestD = prev[j]; bestJ = j; }
+            }
+            if (bestJ === -1 || bestD > maxD) return null;
+            return { start: prevO[bestJ], end: bestJ, d: bestD };
+        }
+
+        function prTokenMatches(token, haystack) {
+            if (haystack.indexOf(token) !== -1) return true;
+            const maxD = prMaxTypos(token.length);
+            return maxD > 0 && prFuzzyWindow(haystack, token, maxD) !== null;
+        }
+
+        function prQueryTokens(query) {
+            return query.split(/\s+/).filter(Boolean);
+        }
+
+        function prCardMatches(tokens, haystack) {
+            // Multi-token AND: each token must (fuzzily) match somewhere in the haystack.
+            for (const token of tokens) {
+                if (!prTokenMatches(token, haystack)) return false;
+            }
+            return true;
+        }
+
+        function prClearHighlights(root) {
+            root.querySelectorAll('mark.pr-hl').forEach(mark => {
+                const parent = mark.parentNode;
+                parent.replaceChild(document.createTextNode(mark.textContent), mark);
+                parent.normalize();
+            });
+        }
+
+        function prHighlightTextNode(node, tokens, fuzzyTokens) {
+            const text = node.nodeValue;
+            if (!text.trim()) return;
+            const lower = text.toLowerCase();
+            // Indices are computed against `lower`; if lowercasing changes the
+            // string length (locale-specific casing), positions no longer map
+            // back onto the original text, so skip highlighting this node.
+            if (lower.length !== text.length) return;
+            const intervals = [];
+            for (const token of tokens) {
+                let from = 0, idx, found = false;
+                while ((idx = lower.indexOf(token, from)) !== -1) {
+                    intervals.push([idx, idx + token.length]);
+                    from = idx + Math.max(1, token.length);
+                    found = true;
+                }
+                // Only fall back to a fuzzy highlight when the token has no exact
+                // match anywhere on the card; otherwise the exact field owns it
+                // and a fuzzy window here would mark unrelated text.
+                if (!found && fuzzyTokens.has(token)) {
+                    const maxD = prMaxTypos(token.length);
+                    if (maxD > 0) {
+                        const w = prFuzzyWindow(lower, token, maxD);
+                        if (w) intervals.push([w.start, w.end]);
+                    }
+                }
+            }
+            if (!intervals.length) return;
+            intervals.sort((a, b) => a[0] - b[0]);
+            const merged = [];
+            for (const iv of intervals) {
+                const last = merged[merged.length - 1];
+                if (last && iv[0] <= last[1]) last[1] = Math.max(last[1], iv[1]);
+                else merged.push(iv.slice());
+            }
+            const frag = document.createDocumentFragment();
+            let pos = 0;
+            for (const [s, e] of merged) {
+                if (s > pos) frag.appendChild(document.createTextNode(text.slice(pos, s)));
+                const mark = document.createElement('mark');
+                mark.className = 'pr-hl';
+                mark.textContent = text.slice(s, e);
+                frag.appendChild(mark);
+                pos = e;
+            }
+            if (pos < text.length) frag.appendChild(document.createTextNode(text.slice(pos)));
+            node.parentNode.replaceChild(frag, node);
+        }
+
+        function prHighlightCard(card, tokens) {
+            // A token gets a fuzzy highlight only if it has no exact substring
+            // match anywhere on the card; exact matches are highlighted in place.
+            const haystack = (card.dataset.search || '').toLowerCase();
+            const fuzzyTokens = new Set(tokens.filter(t => haystack.indexOf(t) === -1));
+            card.querySelectorAll(PR_HL_SELECTOR).forEach(el => {
+                const textNodes = [];
+                const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+                let n;
+                while ((n = walker.nextNode())) textNodes.push(n);
+                textNodes.forEach(node => prHighlightTextNode(node, tokens, fuzzyTokens));
+            });
+        }
+
+        function applyPrSearch() {
+            const bar = document.getElementById('pr-search-bar');
+            const input = document.getElementById('pr-search-input');
+            const countEl = document.getElementById('pr-search-count');
+            const content = document.getElementById('pr-content');
+            if (!bar || !input || !content) return;
+
+            const cards = content.querySelectorAll('.pr-card');
+            const active = !bar.hidden;
+            const query = active ? input.value.trim().toLowerCase() : '';
+
+            let existingEmpty = content.querySelector('.pr-search-empty');
+
+            // Always strip previous highlights before recomputing.
+            prClearHighlights(content);
+
+            if (!query) {
+                cards.forEach(card => { card.hidden = false; });
+                if (countEl) countEl.textContent = '';
+                if (existingEmpty) existingEmpty.remove();
+                return;
+            }
+
+            const tokens = prQueryTokens(query);
+            let matches = 0;
+            cards.forEach(card => {
+                const haystack = (card.dataset.search || '').toLowerCase();
+                const show = prCardMatches(tokens, haystack);
+                card.hidden = !show;
+                if (show) {
+                    matches++;
+                    prHighlightCard(card, tokens);
+                }
+            });
+
+            if (countEl) countEl.textContent = matches + ' of ' + cards.length;
+
+            if (matches === 0 && cards.length > 0) {
+                if (!existingEmpty) {
+                    const list = content.querySelector('.pr-list') || content;
+                    existingEmpty = document.createElement('div');
+                    existingEmpty.className = 'empty-state pr-search-empty';
+                    list.appendChild(existingEmpty);
+                }
+                existingEmpty.textContent = 'No PRs match “' + input.value.trim() + '”';
+            } else if (existingEmpty) {
+                existingEmpty.remove();
+            }
+        }
+
+        // Reconcile the toggle button's active state (it lives inside the swapped
+        // #pr-content) and re-apply the active filter to freshly rendered cards.
+        function syncPrSearchState() {
+            const bar = document.getElementById('pr-search-bar');
+            const toggle = document.getElementById('pr-search-toggle');
+            if (bar && toggle) {
+                toggle.classList.toggle('active', !bar.hidden);
+                toggle.setAttribute('aria-expanded', String(!bar.hidden));
+            }
+            applyPrSearch();
+        }
+
+        function togglePrSearch(forceOpen) {
+            const bar = document.getElementById('pr-search-bar');
+            const input = document.getElementById('pr-search-input');
+            const toggle = document.getElementById('pr-search-toggle');
+            if (!bar || !input) return;
+            const open = forceOpen === true ? true : (forceOpen === false ? false : bar.hidden);
+            bar.hidden = !open;
+            if (toggle) {
+                toggle.classList.toggle('active', open);
+                toggle.setAttribute('aria-expanded', String(open));
+            }
+            if (open) {
+                input.focus();
+                input.select();
+            }
+            applyPrSearch();
+        }
+
         function copyBranchName(branchName) {
             navigator.clipboard.writeText(branchName).then(() => {
                 showToast('Branch name copied!', 'success');
@@ -151,7 +363,36 @@
                 }
                 formatTimestampTitles(evt.detail.target);
                 formatLastUpdated(evt.detail.target);
+                // Only reconcile search state when #pr-content itself was swapped
+                // (its cards and toggle button were recreated); unrelated swaps
+                // like #repo-list must not trigger a full re-filter/re-highlight.
+                const target = evt.detail.target;
+                if (target && (target.id === 'pr-content' || target.closest('#pr-content'))) {
+                    syncPrSearchState();
+                }
             });
+
+            // Browser back/forward restores a cached #pr-content snapshot (with any
+            // baked-in highlights/hidden cards) without firing afterSwap, so
+            // reconcile the search state here too.
+            document.body.addEventListener('htmx:historyRestore', syncPrSearchState);
+
+            const searchInput = document.getElementById('pr-search-input');
+            if (searchInput) {
+                searchInput.addEventListener('input', applyPrSearch);
+                searchInput.addEventListener('keydown', function(evt) {
+                    if (evt.key === 'Escape') {
+                        evt.preventDefault();
+                        togglePrSearch(false);
+                    }
+                });
+            }
+            const searchClose = document.getElementById('pr-search-close');
+            if (searchClose) {
+                searchClose.addEventListener('click', function() {
+                    togglePrSearch(false);
+                });
+            }
 
             document.body.addEventListener('showErrors', function(evt) {
                 const errors = evt.detail.value || evt.detail;
@@ -206,7 +447,7 @@
             });
 
             document.body.addEventListener('repoToggled', function(evt) {
-                const refreshBtn = document.querySelector('.refresh-wrapper button');
+                const refreshBtn = document.getElementById('pr-refresh-btn');
                 if (refreshBtn) {
                     refreshBtn.click();
                 }
@@ -350,6 +591,16 @@
             });
 
             document.addEventListener('keydown', function(evt) {
+                // Backtick toggles search open/closed from anywhere except while
+                // typing in a field (there the character types normally).
+                if (evt.key === '`' && !evt.ctrlKey && !evt.metaKey && !evt.altKey) {
+                    const inField = evt.target.tagName === 'INPUT' || evt.target.tagName === 'TEXTAREA';
+                    if (!inField && document.getElementById('pr-search-bar')) {
+                        evt.preventDefault();
+                        togglePrSearch();
+                        return;
+                    }
+                }
                 if (evt.target.tagName === 'INPUT' || evt.target.tagName === 'TEXTAREA') {
                     return;
                 }
@@ -360,7 +611,7 @@
                     if (isRefreshInProgress) {
                         return;
                     }
-                    const refreshBtn = document.querySelector('.refresh-wrapper button');
+                    const refreshBtn = document.getElementById('pr-refresh-btn');
                     if (refreshBtn) {
                         refreshBtn.click();
                     }

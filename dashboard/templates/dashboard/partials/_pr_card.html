@@ -1,6 +1,6 @@
 {% load dashboard_tags %}
 
-<article class="pr-card">
+<article class="pr-card" data-search="{{ pr.title }} {{ pr.repo_full_name }} #{{ pr.number }} {% if pr.author %}{{ pr.author }} {% endif %}{% if pr.branch_name %}{{ pr.branch_name }} {% endif %}{% for label in pr.labels %}{{ label.name }} {% endfor %}{% for issue in pr.linked_issues %}#{{ issue.number }} {% endfor %}">
     <div class="pr-card-header">
         <div class="pr-ci-status pr-ci-{{ pr.ci_status.state }}" title="CI Status: {{ pr.ci_status.state }}">
             {% if pr.ci_status.state == 'success' %}
