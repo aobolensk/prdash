@@ -67,7 +67,7 @@
 
         // ---- Instant client-side fuzzy search over PRs on the current page ----
         // Fields highlighted (and, per-field, where a matched window is drawn).
-        const PR_HL_SELECTOR = '.pr-title, .pr-repo, .pr-number, .pr-author, .pr-branch-name, .pr-linked-issues';
+        const PR_HL_SELECTOR = '.pr-title, .pr-repo, .pr-number, .pr-author, .pr-branch-name, .pr-linked-issues, .pr-label';
 
         // Typo budget scales with token length: short tokens must match exactly.
         function prMaxTypos(len) {
@@ -102,7 +102,7 @@
             }
             let bestJ = -1, bestD = Infinity;
             for (let j = 1; j <= n; j++) {
-                if (prev[j] < bestD) { bestD = prev[j]; bestJ = j; }
+                if (prev[j] <= bestD) { bestD = prev[j]; bestJ = j; }
             }
             if (bestJ === -1 || bestD > maxD) return null;
             return { start: prevO[bestJ], end: bestJ, d: bestD };
@@ -127,11 +127,13 @@
         }
 
         function prClearHighlights(root) {
+            const parents = new Set();
             root.querySelectorAll('mark.pr-hl').forEach(mark => {
                 const parent = mark.parentNode;
                 parent.replaceChild(document.createTextNode(mark.textContent), mark);
-                parent.normalize();
+                parents.add(parent);
             });
+            parents.forEach(p => p.normalize());
         }
 
         function prHighlightTextNode(node, tokens, fuzzyTokens) {
@@ -367,7 +369,7 @@
                 // (its cards and toggle button were recreated); unrelated swaps
                 // like #repo-list must not trigger a full re-filter/re-highlight.
                 const target = evt.detail.target;
-                if (target && (target.id === 'pr-content' || target.closest('#pr-content'))) {
+                if (target && target.id === 'pr-content') {
                     syncPrSearchState();
                 }
             });
@@ -594,7 +596,7 @@
                 // Backtick toggles search open/closed from anywhere except while
                 // typing in a field (there the character types normally).
                 if (evt.key === '`' && !evt.ctrlKey && !evt.metaKey && !evt.altKey) {
-                    const inField = evt.target.tagName === 'INPUT' || evt.target.tagName === 'TEXTAREA';
+                    const inField = evt.target.tagName === 'INPUT' || evt.target.tagName === 'TEXTAREA' || evt.target.tagName === 'SELECT' || evt.target.isContentEditable;
                     if (!inField && document.getElementById('pr-search-bar')) {
                         evt.preventDefault();
                         togglePrSearch();
