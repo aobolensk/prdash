@@ -836,6 +836,11 @@ a:hover {
     color: #ffffff;
 }
 
+.pr-review-approved-partial {
+    background-color: var(--color-text-muted);
+    color: #ffffff;
+}
+
 .pr-review-changes_requested {
     background-color: var(--color-danger);
     color: #ffffff;

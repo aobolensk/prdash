@@ -55,13 +55,15 @@
                 {% if pr.review_status.comment_count > 0 %}
                     <span class="pr-comments">&#128172; {{ pr.review_status.comment_count }}</span>
                 {% endif %}
-                <span class="pr-review pr-review-{{ pr.review_status.state }}">
-                    {% if pr.review_status.state == 'approved' %}
-                        &#10003; Approved{% if pr.review_status.approval_count > 1 %} ({{ pr.review_status.approval_count }}){% endif %}
-                    {% elif pr.review_status.state == 'changes_requested' %}
-                        &#10007; Changes requested
+                {% if pr.review_status.state == 'approved' %}
+                    {% if pr.review_status.review_decision == 'REVIEW_REQUIRED' %}
+                        <span class="pr-review pr-review-approved-partial">&#10003; Approved{% if pr.review_status.approval_count > 1 %} ({{ pr.review_status.approval_count }}){% endif %}</span>
+                    {% else %}
+                        <span class="pr-review pr-review-approved">&#10003; Approved{% if pr.review_status.approval_count > 1 %} ({{ pr.review_status.approval_count }}){% endif %}</span>
                     {% endif %}
-                </span>
+                {% elif pr.review_status.state == 'changes_requested' %}
+                    <span class="pr-review pr-review-changes_requested">&#10007; Changes requested</span>
+                {% endif %}
                 {% if pr.draft %}
                     <span class="pr-draft">Draft</span>
                 {% endif %}

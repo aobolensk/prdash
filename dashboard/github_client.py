@@ -43,6 +43,7 @@ class ReviewStatus:
     state: str  # 'approved', 'changes_requested', 'not_reviewed'
     approval_count: int = 0
     comment_count: int = 0
+    review_decision: Optional[str] = None  # 'APPROVED', 'CHANGES_REQUESTED', 'REVIEW_REQUIRED', or None
 
 
 @dataclass(slots=True)
@@ -677,6 +678,7 @@ class GitHubClient:
                                 }}
                             }}
                         }}
+                        reviewDecision
                         reviews(first: 100) {{
                             nodes {{
                                 author {{
@@ -846,6 +848,7 @@ class GitHubClient:
                                 }}
                             }}
                         }}
+                        reviewDecision
                         reviews(first: 100) {{
                             nodes {{
                                 author {{
@@ -1106,6 +1109,7 @@ class GitHubClient:
             reviews = pr_data.get('reviews', {}).get('nodes', [])
             comment_count = pr_data.get('comments', {}).get('totalCount', 0)
             comment_count += pr_data.get('reviewThreads', {}).get('totalCount', 0)
+            review_decision = pr_data.get('reviewDecision')
 
             latest_review_by_user = self._compute_latest_review_states(reviews)
 
@@ -1122,7 +1126,8 @@ class GitHubClient:
             return ReviewStatus(
                 state=state,
                 approval_count=approval_count,
-                comment_count=comment_count
+                comment_count=comment_count,
+                review_decision=review_decision,
             )
         except Exception:
             return ReviewStatus(state='not_reviewed', approval_count=0, comment_count=0)

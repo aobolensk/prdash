@@ -360,7 +360,7 @@
 
             // HTMX swap fix: ensure content stays after swap
             document.body.addEventListener('htmx:afterSwap', function(evt) {
-                if (evt.detail.target.innerHTML.length === 0 && evt.detail.xhr) {
+                if (evt.detail.target.innerHTML.length === 0 && evt.detail.xhr && evt.detail.xhr.responseText.length > 0) {
                     evt.detail.target.innerHTML = evt.detail.xhr.responseText;
                 }
                 formatTimestampTitles(evt.detail.target);
