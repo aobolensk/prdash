@@ -118,10 +118,14 @@
             return query.split(/\s+/).filter(Boolean);
         }
 
-        function prCardMatches(tokens, haystack) {
+        function prCardMatches(tokens, haystack, excludeTokens) {
             // Multi-token AND: each token must (fuzzily) match somewhere in the haystack.
             for (const token of tokens) {
                 if (!prTokenMatches(token, haystack)) return false;
+            }
+            // Any exclude token matching rules the card out.
+            for (const token of excludeTokens) {
+                if (prTokenMatches(token, haystack)) return false;
             }
             return true;
         }
@@ -202,6 +206,7 @@
         function applyPrSearch() {
             const bar = document.getElementById('pr-search-bar');
             const input = document.getElementById('pr-search-input');
+            const excludeInput = document.getElementById('pr-search-exclude-input');
             const countEl = document.getElementById('pr-search-count');
             const content = document.getElementById('pr-content');
             if (!bar || !input || !content) return;
@@ -209,13 +214,14 @@
             const cards = content.querySelectorAll('.pr-card');
             const active = !bar.hidden;
             const query = active ? input.value.trim().toLowerCase() : '';
+            const excludeQuery = active && excludeInput ? excludeInput.value.trim().toLowerCase() : '';
 
             let existingEmpty = content.querySelector('.pr-search-empty');
 
             // Always strip previous highlights before recomputing.
             prClearHighlights(content);
 
-            if (!query) {
+            if (!query && !excludeQuery) {
                 cards.forEach(card => { card.hidden = false; });
                 if (countEl) countEl.textContent = '';
                 if (existingEmpty) existingEmpty.remove();
@@ -223,10 +229,11 @@
             }
 
             const tokens = prQueryTokens(query);
+            const excludeTokens = prQueryTokens(excludeQuery);
             let matches = 0;
             cards.forEach(card => {
                 const haystack = (card.dataset.search || '').toLowerCase();
-                const show = prCardMatches(tokens, haystack);
+                const show = prCardMatches(tokens, haystack, excludeTokens);
                 card.hidden = !show;
                 if (show) {
                     matches++;
@@ -243,7 +250,10 @@
                     existingEmpty.className = 'empty-state pr-search-empty';
                     list.appendChild(existingEmpty);
                 }
-                existingEmpty.textContent = 'No PRs match “' + input.value.trim() + '”';
+                const queryParts = [];
+                if (input.value.trim()) queryParts.push(input.value.trim());
+                if (excludeInput && excludeInput.value.trim()) queryParts.push('-' + excludeInput.value.trim());
+                existingEmpty.textContent = 'No PRs match “' + queryParts.join(' ') + '”';
             } else if (existingEmpty) {
                 existingEmpty.remove();
             }
@@ -384,15 +394,17 @@
             document.body.addEventListener('htmx:historyRestore', syncPrSearchState);
 
             const searchInput = document.getElementById('pr-search-input');
-            if (searchInput) {
-                searchInput.addEventListener('input', applyPrSearch);
-                searchInput.addEventListener('keydown', function(evt) {
+            const searchExcludeInput = document.getElementById('pr-search-exclude-input');
+            [searchInput, searchExcludeInput].forEach(function(el) {
+                if (!el) return;
+                el.addEventListener('input', applyPrSearch);
+                el.addEventListener('keydown', function(evt) {
                     if (evt.key === 'Escape') {
                         evt.preventDefault();
                         togglePrSearch(false);
                     }
                 });
-            }
+            });
             const searchClose = document.getElementById('pr-search-close');
             if (searchClose) {
                 searchClose.addEventListener('click', function() {

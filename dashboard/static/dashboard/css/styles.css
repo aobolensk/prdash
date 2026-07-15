@@ -1028,6 +1028,7 @@ a:hover {
 
 .pr-search-input.input {
     flex: 1;
+    min-width: 80px;
     border: none;
     background: transparent;
     padding: 4px 0;
@@ -1036,6 +1037,13 @@ a:hover {
 .pr-search-input.input:focus {
     outline: none;
     box-shadow: none;
+    background-color: var(--color-bg);
+}
+
+.pr-search-exclude-input.input {
+    flex: 0 1 140px;
+    padding-left: 10px;
+    border-left: 1px solid var(--color-border);
 }
 
 .pr-search-count {
@@ -2209,6 +2217,17 @@ mark.pr-hl {
 
     .author-filter-form {
         width: 100%;
+    }
+
+    .pr-search-bar {
+        flex-wrap: wrap;
+    }
+
+    .pr-search-exclude-input.input {
+        flex: 1;
+        min-width: calc(50% - 4px);
+        border-left: none;
+        padding-left: 0;
     }
 
     .filter-clear-all {
