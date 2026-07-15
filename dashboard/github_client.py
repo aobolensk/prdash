@@ -1086,7 +1086,7 @@ class GitHubClient:
             # per workflow, which is what the dedup above reproduces.
             if failure_count > 0:
                 state = 'failure'
-            elif pending_count > 0:
+            elif pending_count > 0 or rollup_state == 'pending':
                 state = 'pending'
             elif success_count > 0:
                 state = 'success'
