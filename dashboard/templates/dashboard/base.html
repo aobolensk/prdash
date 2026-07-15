@@ -306,6 +306,10 @@
                     text = 'just now';
                 } else if (seconds < 60) {
                     text = `${seconds}s ago`;
+                } else if (seconds < 300) {
+                    const mins = Math.floor(seconds / 60);
+                    const secs = seconds % 60;
+                    text = secs > 0 ? `${mins}m ${secs}s ago` : `${mins}m ago`;
                 } else if (seconds < 3600) {
                     text = `${Math.floor(seconds / 60)}m ago`;
                 } else if (seconds < 86400) {
