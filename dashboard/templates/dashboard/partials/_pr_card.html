@@ -35,7 +35,7 @@
                 </div>
             </div>
             <div class="pr-meta">
-                <span class="pr-repo">{{ pr.repo_full_name }}</span>
+                <a href="https://github.com/{{ pr.repo_full_name }}" target="_blank" rel="noopener" class="pr-repo">{{ pr.repo_full_name }}</a>
                 <span class="pr-number">#{{ pr.number }}</span>
                 {% if active_tab == 'review_requests' and pr.author %}
                     <span class="pr-author">

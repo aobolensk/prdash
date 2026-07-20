@@ -750,6 +750,11 @@ a:hover {
 
 .pr-repo {
     font-weight: 500;
+    color: inherit;
+}
+
+.pr-repo:hover {
+    color: var(--color-primary);
 }
 
 .pr-number {
