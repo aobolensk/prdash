@@ -11,6 +11,14 @@ from .github_client import GitHubClient
 from .stats_service import StatsService
 
 PR_COUNT_CACHE_TTL = 300  # 5 minutes
+PR_RESULTS_CACHE_TTL = 3600  # 1 hour, fallback for failed refreshes
+
+
+def _invalidate_pr_results_cache(user):
+    """Bump the PR results cache generation so stale fallback data is no longer served."""
+    key = f"pr_results_gen:{user.id}"
+    cache.add(key, 0)
+    cache.incr(key)
 
 
 def _get_user_preferences(user):
@@ -135,6 +143,21 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
         repo_tuples = [(r.owner, r.name) for r in enabled_repos]
         prs = fetch_prs(client, repo_tuples, author)
         repo_changed = ''
+
+    cache_gen = cache.get(f"pr_results_gen:{request.user.id}", 0)
+    results_cache_key = (
+        f"pr_results:{request.user.id}:{cache_gen}:{request.path}:{author or ''}:"
+        f"{request.GET.get('my_review', '')}"
+    )
+    fetch_had_issues = bool(client.errors or client.warnings)
+    if fetch_had_issues and not prs:
+        # Total failure with no data at all: fall back to the last clean fetch.
+        cached_prs = cache.get(results_cache_key)
+        if cached_prs is not None:
+            prs = cached_prs
+    elif not fetch_had_issues:
+        # Only a fully clean fetch is trustworthy enough to become the new fallback.
+        cache.set(results_cache_key, prs, PR_RESULTS_CACHE_TTL)
 
     if post_filter_factory:
         post_filter = post_filter_factory(client)
@@ -426,6 +449,7 @@ def remove_repo(request, repo_id):
     """Remove a tracked repository."""
     repo = get_object_or_404(TrackedRepository, id=repo_id, user=request.user)
     repo.delete()
+    _invalidate_pr_results_cache(request.user)
     return _render_repo_list(request)
 
 
@@ -436,6 +460,7 @@ def toggle_repo(request, repo_id):
     repo = get_object_or_404(TrackedRepository, id=repo_id, user=request.user)
     repo.enabled = not repo.enabled
     repo.save()
+    _invalidate_pr_results_cache(request.user)
     return _render_repo_list(request)
 
 
@@ -539,6 +564,7 @@ def save_pat(request):
             defaults={'token': token}
         )
 
+    _invalidate_pr_results_cache(request.user)
     context = {'pat': pat, 'success': True}
     return render(request, 'dashboard/partials/_pat_form.html', context)
 
@@ -548,6 +574,7 @@ def save_pat(request):
 def delete_pat(request):
     """Delete Personal Access Token."""
     PersonalAccessToken.objects.filter(user=request.user).delete()
+    _invalidate_pr_results_cache(request.user)
     context = {'pat': None, 'deleted': True}
     return render(request, 'dashboard/partials/_pat_form.html', context)
 
