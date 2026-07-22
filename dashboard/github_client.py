@@ -25,6 +25,92 @@ GRAPHQL_RETRY_BACKOFF_SECONDS = 0.5
 GRAPHQL_TIMEOUT_SECONDS = 20
 GRAPHQL_TRANSIENT_STATUS_CODES = {502, 503, 504}
 
+PR_GRAPHQL_FIELDS = '''
+    number
+    title
+    url
+    author {
+        login
+        avatarUrl
+    }
+    createdAt
+    updatedAt
+    mergedAt
+    isDraft
+    additions
+    deletions
+    mergeable
+    autoMergeRequest {
+        enabledAt
+    }
+    headRefName
+    headRepository {
+        owner {
+            login
+        }
+        name
+    }
+    closingIssuesReferences(first: 10) {
+        nodes {
+            number
+            url
+        }
+    }
+    labels(first: 20) {
+        nodes {
+            name
+            color
+        }
+    }
+    commits(last: 1) {
+        nodes {
+            commit {
+                statusCheckRollup {
+                    state
+                    contexts(first: 100) {
+                        totalCount
+                        nodes {
+                            ... on CheckRun {
+                                name
+                                status
+                                conclusion
+                                checkSuite {
+                                    workflowRun {
+                                        runNumber
+                                        workflow {
+                                            name
+                                        }
+                                    }
+                                }
+                            }
+                            ... on StatusContext {
+                                state
+                                context
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    reviewDecision
+    reviews(first: 100) {
+        nodes {
+            author {
+                login
+            }
+            state
+            submittedAt
+        }
+    }
+    comments {
+        totalCount
+    }
+    reviewThreads {
+        totalCount
+    }
+'''
+
 
 @dataclass(slots=True)
 class CIStatus:
@@ -238,25 +324,13 @@ class GitHubClient:
     def _get_review_status(self, pr) -> ReviewStatus:
         """Get the review status for a pull request."""
         try:
-            reviews = pr.get_reviews()
+            reviews = [
+                {'author': {'login': review.user.login}, 'state': review.state, 'submittedAt': review.submitted_at}
+                for review in pr.get_reviews()
+            ]
             comment_count = pr.comments + pr.review_comments
 
-            # Track latest review state per user (only count the most recent review from each user)
-            # Note: COMMENTED reviews don't override APPROVED/CHANGES_REQUESTED
-            latest_review_by_user = {}
-            for review in reviews:
-                if review.state in ('APPROVED', 'CHANGES_REQUESTED', 'COMMENTED'):
-                    user = review.user.login
-                    # Only update if:
-                    # 1. User hasn't reviewed yet, OR
-                    # 2. New review is later AND (new is APPROVED/CHANGES_REQUESTED, or old was just COMMENTED)
-                    if user not in latest_review_by_user:
-                        latest_review_by_user[user] = (review.state, review.submitted_at)
-                    elif review.submitted_at > latest_review_by_user[user][1]:
-                        old_state = latest_review_by_user[user][0]
-                        # Only override if new state is "stronger" or old state was just COMMENTED
-                        if review.state in ('APPROVED', 'CHANGES_REQUESTED') or old_state == 'COMMENTED':
-                            latest_review_by_user[user] = (review.state, review.submitted_at)
+            latest_review_by_user = self._compute_latest_review_states(reviews)
 
             approval_count = sum(1 for state, _ in latest_review_by_user.values() if state == 'APPROVED')
             changes_requested = any(state == 'CHANGES_REQUESTED' for state, _ in latest_review_by_user.values())
@@ -611,89 +685,7 @@ class GitHubClient:
             for i, pr_num in enumerate(pr_numbers):
                 pr_queries.append(f'''
                     pr{i}: pullRequest(number: {pr_num}) {{
-                        number
-                        title
-                        url
-                        author {{
-                            login
-                            avatarUrl
-                        }}
-                        createdAt
-                        updatedAt
-                        mergedAt
-                        isDraft
-                        additions
-                        deletions
-                        mergeable
-                        autoMergeRequest {{
-                            enabledAt
-                        }}
-                        headRefName
-                        headRepository {{
-                            owner {{
-                                login
-                            }}
-                            name
-                        }}
-                        closingIssuesReferences(first: 10) {{
-                            nodes {{
-                                number
-                                url
-                            }}
-                        }}
-                        labels(first: 20) {{
-                            nodes {{
-                                name
-                                color
-                            }}
-                        }}
-                        commits(last: 1) {{
-                            nodes {{
-                                commit {{
-                                    statusCheckRollup {{
-                                        state
-                                        contexts(first: 100) {{
-                                            totalCount
-                                            nodes {{
-                                                ... on CheckRun {{
-                                                    name
-                                                    status
-                                                    conclusion
-                                                    checkSuite {{
-                                                        workflowRun {{
-                                                            runNumber
-                                                            workflow {{
-                                                                name
-                                                            }}
-                                                        }}
-                                                    }}
-                                                }}
-                                                ... on StatusContext {{
-                                                    state
-                                                    context
-                                                }}
-                                            }}
-                                        }}
-                                    }}
-                                }}
-                            }}
-                        }}
-                        reviewDecision
-                        reviews(first: 100) {{
-                            nodes {{
-                                author {{
-                                    login
-                                }}
-                                state
-                                submittedAt
-                            }}
-                        }}
-                        comments {{
-                            totalCount
-                        }}
-                        reviewThreads {{
-                            totalCount
-                        }}
+                        {PR_GRAPHQL_FIELDS}
                     }}
                 ''')
 
@@ -781,89 +773,7 @@ class GitHubClient:
             pr_queries.append(f'''
                 {alias}: repository(owner: "{owner}", name: "{name}") {{
                     pullRequest(number: {pr_num}) {{
-                        number
-                        title
-                        url
-                        author {{
-                            login
-                            avatarUrl
-                        }}
-                        createdAt
-                        updatedAt
-                        mergedAt
-                        isDraft
-                        additions
-                        deletions
-                        mergeable
-                        autoMergeRequest {{
-                            enabledAt
-                        }}
-                        headRefName
-                        headRepository {{
-                            owner {{
-                                login
-                            }}
-                            name
-                        }}
-                        closingIssuesReferences(first: 10) {{
-                            nodes {{
-                                number
-                                url
-                            }}
-                        }}
-                        labels(first: 20) {{
-                            nodes {{
-                                name
-                                color
-                            }}
-                        }}
-                        commits(last: 1) {{
-                            nodes {{
-                                commit {{
-                                    statusCheckRollup {{
-                                        state
-                                        contexts(first: 100) {{
-                                            totalCount
-                                            nodes {{
-                                                ... on CheckRun {{
-                                                    name
-                                                    status
-                                                    conclusion
-                                                    checkSuite {{
-                                                        workflowRun {{
-                                                            runNumber
-                                                            workflow {{
-                                                                name
-                                                            }}
-                                                        }}
-                                                    }}
-                                                }}
-                                                ... on StatusContext {{
-                                                    state
-                                                    context
-                                                }}
-                                            }}
-                                        }}
-                                    }}
-                                }}
-                            }}
-                        }}
-                        reviewDecision
-                        reviews(first: 100) {{
-                            nodes {{
-                                author {{
-                                    login
-                                }}
-                                state
-                                submittedAt
-                            }}
-                        }}
-                        comments {{
-                            totalCount
-                        }}
-                        reviewThreads {{
-                            totalCount
-                        }}
+                        {PR_GRAPHQL_FIELDS}
                     }}
                 }}
             ''')
@@ -1416,30 +1326,36 @@ class GitHubClient:
             self._handle_api_error(e, owner, name)
             return []
 
+    def _fetch_per_repo_parallel(
+        self, repos: list[tuple[str, str]], fetch_fn: callable
+    ) -> list[PullRequestInfo]:
+        """Run fetch_fn(owner, name) for each repo in parallel and flatten the results."""
+        all_prs = []
+
+        with ThreadPoolExecutor(max_workers=min(10, len(repos))) as executor:
+            future_to_repo = {
+                executor.submit(fetch_fn, owner, name): (owner, name)
+                for owner, name in repos
+            }
+
+            for future in as_completed(future_to_repo):
+                owner, name = future_to_repo[future]
+                try:
+                    all_prs.extend(future.result())
+                except Exception as e:
+                    self._handle_api_error(e, owner, name)
+
+        self.finalize_warnings()
+        return all_prs
+
     def get_all_merged_prs(self, repos: list[tuple[str, str]], author: Optional[str] = None) -> list[PullRequestInfo]:
         """Get all recently merged PRs authored by the specified user (or current user) across multiple repositories."""
         if not repos:
             return []
 
-        all_prs = []
-
-        # Fetch PRs from all repos in parallel
-        with ThreadPoolExecutor(max_workers=min(10, len(repos))) as executor:
-            future_to_repo = {
-                executor.submit(self.get_merged_prs_for_repo, owner, name, author): (owner, name)
-                for owner, name in repos
-            }
-
-            for future in as_completed(future_to_repo):
-                repo = future_to_repo[future]
-                try:
-                    prs = future.result()
-                    all_prs.extend(prs)
-                except Exception as e:
-                    owner, name = repo
-                    self._handle_api_error(e, owner, name)
-
-        self.finalize_warnings()
+        all_prs = self._fetch_per_repo_parallel(
+            repos, lambda owner, name: self.get_merged_prs_for_repo(owner, name, author)
+        )
         all_prs.sort(key=lambda pr: (pr.merged_at or pr.updated_at, pr.number), reverse=True)
         return all_prs
 
@@ -1530,29 +1446,14 @@ class GitHubClient:
         if not repos:
             return []
 
-        all_prs = []
         username = self.get_username()
 
-        # Fetch PRs from all repos in parallel
-        with ThreadPoolExecutor(max_workers=min(10, len(repos))) as executor:
-            future_to_repo = {
-                executor.submit(
-                    self.get_review_requests_for_repo, owner, name,
-                    approved_by_me, reviewed_by_me, include_all, author
-                ): (owner, name)
-                for owner, name in repos
-            }
-
-            for future in as_completed(future_to_repo):
-                repo = future_to_repo[future]
-                try:
-                    prs = future.result()
-                    all_prs.extend(prs)
-                except Exception as e:
-                    owner, name = repo
-                    self._handle_api_error(e, owner, name)
-
-        self.finalize_warnings()
+        all_prs = self._fetch_per_repo_parallel(
+            repos,
+            lambda owner, name: self.get_review_requests_for_repo(
+                owner, name, approved_by_me, reviewed_by_me, include_all, author
+            ),
+        )
 
         # If approved_by_me, we need to filter PRs where we actually approved
         if not include_all and approved_by_me and username:
@@ -1607,25 +1508,9 @@ class GitHubClient:
         if not repos:
             return []
 
-        all_prs = []
-
-        # Fetch PRs from all repos in parallel
-        with ThreadPoolExecutor(max_workers=min(10, len(repos))) as executor:
-            future_to_repo = {
-                executor.submit(self.get_assigned_prs_for_repo, owner, name, author): (owner, name)
-                for owner, name in repos
-            }
-
-            for future in as_completed(future_to_repo):
-                repo = future_to_repo[future]
-                try:
-                    prs = future.result()
-                    all_prs.extend(prs)
-                except Exception as e:
-                    owner, name = repo
-                    self._handle_api_error(e, owner, name)
-
-        self.finalize_warnings()
+        all_prs = self._fetch_per_repo_parallel(
+            repos, lambda owner, name: self.get_assigned_prs_for_repo(owner, name, author)
+        )
         all_prs.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
         return all_prs
 
