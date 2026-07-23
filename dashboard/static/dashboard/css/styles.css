@@ -683,6 +683,12 @@ a:hover {
     font-size: 12px;
     font-weight: bold;
     flex-shrink: 0;
+    text-decoration: none;
+}
+
+.pr-ci-status:hover {
+    text-decoration: none;
+    opacity: 0.85;
 }
 
 .pr-ci-success {

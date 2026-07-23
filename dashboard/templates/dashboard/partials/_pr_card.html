@@ -2,7 +2,7 @@
 
 <article class="pr-card" data-search="{{ pr.title }} {{ pr.repo_full_name }} #{{ pr.number }} {% if pr.author %}{{ pr.author }} {% endif %}{% if pr.branch_name %}{{ pr.branch_name }} {% endif %}{% for label in pr.labels %}{{ label.name }} {% endfor %}{% for issue in pr.linked_issues %}#{{ issue.number }} {% endfor %}">
     <div class="pr-card-header">
-        <div class="pr-ci-status pr-ci-{{ pr.ci_status.state }}" title="CI Status: {{ pr.ci_status.state }}">
+        <a href="{{ pr.url }}/checks" target="_blank" rel="noopener" class="pr-ci-status pr-ci-{{ pr.ci_status.state }}" title="CI Status: {{ pr.ci_status.state }}" aria-label="CI Status: {{ pr.ci_status.state }}">
             {% if pr.ci_status.state == 'success' %}
                 &#10003;
             {% elif pr.ci_status.state == 'failure' or pr.ci_status.state == 'error' %}
@@ -12,7 +12,7 @@
             {% else %}
                 &#8211;
             {% endif %}
-        </div>
+        </a>
         <div class="pr-info">
             <div class="pr-title-row">
                 <div class="pr-title-section">
