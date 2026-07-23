@@ -54,7 +54,7 @@
                 {% if active_tab == 'review_requests' and pr.author %}
                     <span class="pr-author">
                         <a href="https://github.com/{{ pr.author }}" target="_blank" rel="noopener">
-                            {% if pr.author_avatar %}<img src="{{ pr.author_avatar }}" alt="{{ pr.author }}" class="pr-author-avatar">{% endif %}{{ pr.author }}
+                            {% if pr.author_avatar %}<img src="{{ pr.author_avatar }}" alt="{{ pr.author }}" class="pr-author-avatar" loading="lazy">{% endif %}{{ pr.author }}
                         </a>
                     </span>
                 {% endif %}
