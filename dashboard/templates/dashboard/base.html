@@ -393,6 +393,15 @@
             // reconcile the search state here too.
             document.body.addEventListener('htmx:historyRestore', syncPrSearchState);
 
+            // A poll can confirm data is current without a swap (skipped render on
+            // a cache hit), so the "Updated X ago" timestamp needs its own signal.
+            document.body.addEventListener('refreshedAt', function(evt) {
+                const el = document.querySelector('.last-updated');
+                if (!el) return;
+                el.dataset.updated = evt.detail.value;
+                formatLastUpdated();
+            });
+
             const searchInput = document.getElementById('pr-search-input');
             const searchExcludeInput = document.getElementById('pr-search-exclude-input');
             [searchInput, searchExcludeInput].forEach(function(el) {

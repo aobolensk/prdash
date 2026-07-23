@@ -1,7 +1,11 @@
 from django.shortcuts import render, redirect, get_object_or_404
+from django.http import HttpResponse
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
 from django.core.cache import cache
+from django.utils import timezone
+from dataclasses import asdict
+import hashlib
 import json
 import re
 import requests
@@ -12,6 +16,27 @@ from .stats_service import StatsService
 
 PR_COUNT_CACHE_TTL = 300  # 5 minutes
 PR_RESULTS_CACHE_TTL = 3600  # 1 hour, fallback for failed refreshes
+PR_RENDER_HASH_CACHE_TTL = 3600  # covers the longest auto-refresh interval with margin
+
+
+def _compute_pr_render_hash(prs, *, auto_refresh_enabled, auto_refresh_interval, current_username):
+    """Hash the data that determines the rendered _pr_content.html output for a poll.
+
+    pr_counts/errors/warnings are excluded: _pr_content.html doesn't render
+    them (counts are sidebar-only, errors/warnings only surface as toasts on
+    a full page load), so they can't affect the swapped partial's HTML.
+    """
+    payload = json.dumps(
+        {
+            'prs': [asdict(pr) for pr in prs],
+            'auto_refresh_enabled': auto_refresh_enabled,
+            'auto_refresh_interval': auto_refresh_interval,
+            'current_username': current_username,
+        },
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 def _invalidate_pr_results_cache(user):
@@ -66,8 +91,8 @@ def _apply_filters_and_sort(prs, filters):
         prs = [p for p in prs if p.mergeable == 'MERGEABLE']
 
     sort_keys = {
-        'updated': lambda p: (p.updated_at, p.number),
-        'created': lambda p: (p.created_at, p.number),
+        'updated': lambda p: (p.updated_at, p.repo_owner, p.repo_name, p.number),
+        'created': lambda p: (p.created_at, p.repo_owner, p.repo_name, p.number),
     }
     sort_field = sort.replace('_desc', '').replace('_asc', '')
     sort_key = sort_keys.get(sort_field, sort_keys['updated'])
@@ -208,9 +233,37 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
         context['review_tab'] = review_tab
 
     if request.headers.get('HX-Request') == 'true':
-        response = render(request, 'dashboard/partials/_pr_content.html', context)
-        triggers = {'tabChanged': tab_changed, 'repoChanged': repo_changed, 'reviewTabChanged': review_tab}
+        triggers = {
+            'tabChanged': tab_changed,
+            'repoChanged': repo_changed,
+            'reviewTabChanged': review_tab,
+            'refreshedAt': timezone.now().isoformat(),
+        }
         triggers.update(client.get_notification_triggers())
+
+        # Only auto-refresh polls (identified by the triggering element's id) are
+        # eligible for the render-skip: they always re-request the URL the DOM
+        # already shows, unlike tab/filter navigation which targets a new URL.
+        is_auto_refresh_poll = request.headers.get('HX-Trigger') == 'auto-refresh-container'
+        if is_auto_refresh_poll:
+            render_hash = _compute_pr_render_hash(
+                prs,
+                auto_refresh_enabled=context['auto_refresh_enabled'],
+                auto_refresh_interval=context['auto_refresh_interval'],
+                current_username=current_username,
+            )
+            hash_cache_key = f"pr_render_hash:{request.user.id}:{request.get_full_path()}"
+            if cache.get(hash_cache_key) == render_hash:
+                # Nothing changed since the last poll of this URL: skip re-rendering
+                # and tell htmx to leave the existing DOM untouched.
+                response = HttpResponse(status=204)
+                response['HX-Reswap'] = 'none'
+                response['HX-Trigger'] = json.dumps(triggers)
+                return response
+
+        response = render(request, 'dashboard/partials/_pr_content.html', context)
+        if is_auto_refresh_poll:
+            cache.set(hash_cache_key, render_hash, PR_RENDER_HASH_CACHE_TTL)
         response['HX-Trigger'] = json.dumps(triggers)
         return response
 

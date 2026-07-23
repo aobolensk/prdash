@@ -2,6 +2,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth.models import User
+from django.core.cache import cache
 from django.test import Client, TestCase
 from django.urls import reverse
 
@@ -244,6 +245,7 @@ class HTMXResponseTests(TestCase):
         self.client = Client()
         self.user = User.objects.create_user(username='testuser', password='testpass')
         self.client.login(username='testuser', password='testpass')
+        cache.clear()
 
     @patch('dashboard.views.GitHubClient')
     def test_pr_list_htmx_returns_partial(self, mock_github_client):
@@ -298,6 +300,93 @@ class HTMXResponseTests(TestCase):
         self.assertIn('HX-Trigger', response.headers)
         triggers = json.loads(response['HX-Trigger'])
         self.assertIn('tabChanged', triggers)
+
+    @patch('dashboard.views.GitHubClient')
+    def test_pr_list_htmx_repeat_poll_with_no_changes_skips_render(self, mock_github_client):
+        """A second poll with unchanged PRs should return 204 instead of re-rendering."""
+        mock_client = MagicMock()
+        mock_client.get_all_user_prs.return_value = []
+        mock_client.get_username.return_value = 'testuser'
+        mock_client.errors = []
+        mock_client.warnings = []
+        mock_client.get_notification_triggers.return_value = {}
+        mock_github_client.return_value = mock_client
+
+        first = self.client.get(
+            reverse('dashboard:pr_list'), HTTP_HX_REQUEST='true', HTTP_HX_TRIGGER='auto-refresh-container'
+        )
+        self.assertEqual(first.status_code, 200)
+
+        second = self.client.get(
+            reverse('dashboard:pr_list'), HTTP_HX_REQUEST='true', HTTP_HX_TRIGGER='auto-refresh-container'
+        )
+        self.assertEqual(second.status_code, 204)
+        self.assertEqual(second['HX-Reswap'], 'none')
+
+    @patch('dashboard.views.GitHubClient')
+    def test_pr_list_htmx_repeat_navigation_with_no_changes_still_renders(self, mock_github_client):
+        """Tab/filter navigation (not an auto-refresh poll) must never be skipped, even
+        if it happens to revisit a URL an auto-refresh poll already rendered."""
+        mock_client = MagicMock()
+        mock_client.get_all_user_prs.return_value = []
+        mock_client.get_username.return_value = 'testuser'
+        mock_client.errors = []
+        mock_client.warnings = []
+        mock_client.get_notification_triggers.return_value = {}
+        mock_github_client.return_value = mock_client
+
+        first = self.client.get(
+            reverse('dashboard:pr_list'), HTTP_HX_REQUEST='true', HTTP_HX_TRIGGER='auto-refresh-container'
+        )
+        self.assertEqual(first.status_code, 200)
+
+        second = self.client.get(reverse('dashboard:pr_list'), HTTP_HX_REQUEST='true')
+        self.assertEqual(second.status_code, 200)
+        self.assertTemplateUsed(second, 'dashboard/partials/_pr_content.html')
+
+    @patch('dashboard.views.GitHubClient')
+    def test_pr_list_htmx_repeat_poll_with_changes_rerenders(self, mock_github_client):
+        """A second poll with changed PR data should still return the full partial."""
+        mock_client = MagicMock()
+        mock_client.get_username.return_value = 'testuser'
+        mock_client.errors = []
+        mock_client.warnings = []
+        mock_client.get_notification_triggers.return_value = {}
+        mock_github_client.return_value = mock_client
+
+        mock_client.get_all_user_prs.return_value = []
+        first = self.client.get(
+            reverse('dashboard:pr_list'), HTTP_HX_REQUEST='true', HTTP_HX_TRIGGER='auto-refresh-container'
+        )
+        self.assertEqual(first.status_code, 200)
+
+        from dashboard.github_client import PullRequestInfo, CIStatus, ReviewStatus
+        from datetime import datetime, timezone
+
+        mock_client.get_all_user_prs.return_value = [
+            PullRequestInfo(
+                number=1,
+                title='Test PR',
+                url='https://github.com/o/r/pull/1',
+                repo_owner='o',
+                repo_name='r',
+                author='someone',
+                author_avatar='',
+                created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                labels=[],
+                ci_status=CIStatus(state='success'),
+                review_status=ReviewStatus(state='not_reviewed'),
+                draft=False,
+                additions=1,
+                deletions=1,
+            )
+        ]
+        second = self.client.get(
+            reverse('dashboard:pr_list'), HTTP_HX_REQUEST='true', HTTP_HX_TRIGGER='auto-refresh-container'
+        )
+        self.assertEqual(second.status_code, 200)
+        self.assertTemplateUsed(second, 'dashboard/partials/_pr_content.html')
 
 
 class PATManagementTests(TestCase):
