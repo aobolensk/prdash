@@ -52,7 +52,10 @@ class UserPreferences(models.Model):
     auto_refresh_assigned = models.BooleanField(default=False)
     auto_refresh_interval = models.PositiveIntegerField(
         default=5,
-        choices=[(1, '1 minute'), (2, '2 minutes'), (5, '5 minutes'), (10, '10 minutes')]
+        choices=[
+            (1, '1 minute'), (2, '2 minutes'), (5, '5 minutes'), (10, '10 minutes'),
+            (15, '15 minutes'), (30, '30 minutes'), (60, '1 hour'),
+        ]
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
