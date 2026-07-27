@@ -355,6 +355,14 @@
                 });
             }
 
+            const backToDashboardLink = document.getElementById('back-to-dashboard-link');
+            if (backToDashboardLink && document.referrer && new URL(document.referrer).origin === window.location.origin) {
+                backToDashboardLink.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    history.back();
+                });
+            }
+
             // Theme toggle functionality
             const html = document.documentElement;
             const themeToggle = document.getElementById('theme-toggle');
