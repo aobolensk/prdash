@@ -659,6 +659,25 @@ a:hover {
     gap: 12px;
 }
 
+/* Pagination */
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.pagination-status {
+    color: var(--color-text-secondary);
+    font-size: 0.875rem;
+}
+
+.btn-disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
 /* PR card */
 .pr-card {
     background-color: var(--color-bg-secondary);

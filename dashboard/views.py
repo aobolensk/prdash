@@ -3,6 +3,7 @@ from django.http import HttpResponse
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
 from django.core.cache import cache
+from django.core.paginator import Paginator
 from django.utils import timezone
 from dataclasses import asdict
 import hashlib
@@ -19,7 +20,7 @@ PR_RESULTS_CACHE_TTL = 3600  # 1 hour, fallback for failed refreshes
 PR_RENDER_HASH_CACHE_TTL = 3600  # covers the longest auto-refresh interval with margin
 
 
-def _compute_pr_render_hash(prs, *, auto_refresh_enabled, auto_refresh_interval, current_username):
+def _compute_pr_render_hash(prs, *, auto_refresh_enabled, auto_refresh_interval, current_username, page_number):
     """Hash the data that determines the rendered _pr_content.html output for a poll.
 
     pr_counts/errors/warnings are excluded: _pr_content.html doesn't render
@@ -32,6 +33,7 @@ def _compute_pr_render_hash(prs, *, auto_refresh_enabled, auto_refresh_interval,
             'auto_refresh_enabled': auto_refresh_enabled,
             'auto_refresh_interval': auto_refresh_interval,
             'current_username': current_username,
+            'page_number': page_number,
         },
         sort_keys=True,
         default=str,
@@ -207,6 +209,18 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
         count_cache_key = f"pr_count:{request.user.id}:{cache_key_suffix}"
         cache.set(count_cache_key, len(prs), PR_COUNT_CACHE_TTL)
 
+    page_obj = None
+    page_size = user_prefs.pr_list_page_size
+    if page_size:
+        paginator = Paginator(prs, page_size)
+        try:
+            page_number = int(request.GET.get('page', 1))
+        except (ValueError, TypeError):
+            page_number = 1
+        page_number = max(1, min(page_number, paginator.num_pages))
+        page_obj = paginator.page(page_number)
+        prs = page_obj.object_list
+
     # Retrieve all cached counts for sidebar display
     pr_counts = {
         'my_prs': cache.get(f"pr_count:{request.user.id}:my_prs"),
@@ -228,6 +242,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
         'auto_refresh_interval': user_prefs.get_auto_refresh_interval_seconds_for_tab(active_tab),
         'auto_refresh_interval_mins': user_prefs.get_auto_refresh_interval_for_tab(active_tab),
         'pr_counts': pr_counts,
+        'page_obj': page_obj,
     }
     if review_tab != 'pending':
         context['review_tab'] = review_tab
@@ -251,6 +266,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
                 auto_refresh_enabled=context['auto_refresh_enabled'],
                 auto_refresh_interval=context['auto_refresh_interval'],
                 current_username=current_username,
+                page_number=page_obj.number if page_obj else None,
             )
             hash_cache_key = f"pr_render_hash:{request.user.id}:{request.get_full_path()}"
             if cache.get(hash_cache_key) == render_hash:
@@ -637,6 +653,7 @@ def delete_pat(request):
 def save_preferences(request):
     """Save user preferences."""
     valid_intervals = [choice[0] for choice in UserPreferences._meta.get_field('auto_refresh_interval_my_prs').choices]
+    valid_page_sizes = [choice[0] for choice in UserPreferences._meta.get_field('pr_list_page_size').choices]
 
     def parse_interval(field_name):
         try:
@@ -645,7 +662,14 @@ def save_preferences(request):
             return 5
         return interval if interval in valid_intervals else 5
 
-    defaults = {}
+    def parse_page_size():
+        try:
+            page_size = int(request.POST.get('pr_list_page_size', 25))
+        except (ValueError, TypeError):
+            return 25
+        return page_size if page_size in valid_page_sizes else 25
+
+    defaults = {'pr_list_page_size': parse_page_size()}
     for category, _ in AUTO_REFRESH_CATEGORIES:
         defaults[f'auto_refresh_{category}'] = request.POST.get(f'auto_refresh_{category}') == 'on'
         defaults[f'auto_refresh_interval_{category}'] = parse_interval(f'auto_refresh_interval_{category}')

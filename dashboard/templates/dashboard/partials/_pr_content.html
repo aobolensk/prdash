@@ -24,7 +24,7 @@
 
 <div id="auto-refresh-container"
      hx-get="{{ current_url }}"
-     hx-include=".filter-toolbar"
+     hx-include=".filter-toolbar, #page-input"
      hx-trigger="{% if auto_refresh_enabled %}every {{ auto_refresh_interval }}s, {% endif %}manualRefresh from:body"
      hx-target="#pr-content"
      hx-swap="innerHTML"
@@ -216,6 +216,6 @@
     {% endif %}
 </div>
 
-{% include 'dashboard/partials/_pr_list.html' %}
+{% include 'dashboard/partials/_pr_list.html' with current_url=current_url %}
 
 </div>

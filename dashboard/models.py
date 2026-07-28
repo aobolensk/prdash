@@ -55,6 +55,10 @@ AUTO_REFRESH_CATEGORIES = [
     ('assigned', 'Assigned'),
 ]
 
+PR_LIST_PAGE_SIZE_CHOICES = [
+    (25, '25'), (50, '50'), (100, '100'), (0, 'All'),
+]
+
 
 class UserPreferences(models.Model):
     """User preferences for dashboard behavior."""
@@ -70,6 +74,9 @@ class UserPreferences(models.Model):
     )
     auto_refresh_interval_assigned = models.PositiveIntegerField(
         default=5, choices=AUTO_REFRESH_INTERVAL_CHOICES
+    )
+    pr_list_page_size = models.PositiveIntegerField(
+        default=25, choices=PR_LIST_PAGE_SIZE_CHOICES
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
