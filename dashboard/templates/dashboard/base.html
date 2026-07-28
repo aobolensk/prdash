@@ -328,6 +328,7 @@
                     text = `${Math.floor(seconds / 86400)}d ago`;
                 }
                 el.textContent = `Updated ${text}`;
+                el.title = `Last updated ${date.toLocaleString(undefined, TIMESTAMP_FORMAT)}`;
             });
         }
 
