@@ -2286,6 +2286,23 @@ mark.pr-hl {
     padding-left: 26px;
 }
 
+.interval-subfield {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-left: 26px;
+    margin: -2px 0 6px;
+}
+
+.interval-subfield[hidden] {
+    display: none;
+}
+
+.interval-subfield label {
+    font-size: 13px;
+    color: var(--color-text-secondary);
+}
+
 .select-input {
     max-width: 200px;
 }

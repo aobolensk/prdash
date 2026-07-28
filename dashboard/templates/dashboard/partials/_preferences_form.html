@@ -11,44 +11,27 @@
 
         <div class="form-group">
             <label>Auto-refresh tabs</label>
-            <p class="form-help">Select which tabs should automatically refresh at regular intervals.</p>
+            <p class="form-help">Select which tabs should automatically refresh, and how often.</p>
             <div class="checkbox-group">
-                <label class="checkbox-label">
-                    <input type="checkbox"
-                           name="auto_refresh_my_prs"
-                           {% if prefs.auto_refresh_my_prs %}checked{% endif %}>
-                    <span>My PRs</span>
-                </label>
-                <label class="checkbox-label">
-                    <input type="checkbox"
-                           name="auto_refresh_review_requests"
-                           {% if prefs.auto_refresh_review_requests %}checked{% endif %}>
-                    <span>Review Requests</span>
-                </label>
-                <label class="checkbox-label">
-                    <input type="checkbox"
-                           name="auto_refresh_assigned"
-                           {% if prefs.auto_refresh_assigned %}checked{% endif %}>
-                    <span>Assigned</span>
-                </label>
+                {% for row in prefs.get_auto_refresh_rows %}
+                {% include 'dashboard/partials/_auto_refresh_row.html' with row=row %}
+                {% endfor %}
             </div>
-        </div>
-
-        <div class="form-group">
-            <label for="auto_refresh_interval">Refresh interval</label>
-            <select name="auto_refresh_interval"
-                    id="auto_refresh_interval"
-                    class="input select-input">
-                <option value="1" {% if prefs.auto_refresh_interval == 1 %}selected{% endif %}>1 minute</option>
-                <option value="2" {% if prefs.auto_refresh_interval == 2 %}selected{% endif %}>2 minutes</option>
-                <option value="5" {% if prefs.auto_refresh_interval == 5 %}selected{% endif %}>5 minutes</option>
-                <option value="10" {% if prefs.auto_refresh_interval == 10 %}selected{% endif %}>10 minutes</option>
-                <option value="15" {% if prefs.auto_refresh_interval == 15 %}selected{% endif %}>15 minutes</option>
-                <option value="30" {% if prefs.auto_refresh_interval == 30 %}selected{% endif %}>30 minutes</option>
-                <option value="60" {% if prefs.auto_refresh_interval == 60 %}selected{% endif %}>1 hour</option>
-            </select>
         </div>
 
         <button type="submit" class="btn btn-primary">Save Preferences</button>
     </form>
 </div>
+
+<script>
+(function() {
+    document.querySelectorAll('.preferences-form [data-interval-toggle]').forEach(function(checkbox) {
+        checkbox.addEventListener('change', function() {
+            var target = document.querySelector('.interval-subfield[data-interval-for="' + this.getAttribute('data-interval-toggle') + '"]');
+            if (target) {
+                target.hidden = !this.checked;
+            }
+        });
+    });
+})();
+</script>

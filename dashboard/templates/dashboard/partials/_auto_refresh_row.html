@@ -1,0 +1,17 @@
+<label class="checkbox-label">
+    <input type="checkbox"
+           name="auto_refresh_{{ row.category }}"
+           data-interval-toggle="{{ row.category }}"
+           {% if row.enabled %}checked{% endif %}>
+    <span>{{ row.label }}</span>
+</label>
+<div class="interval-subfield" data-interval-for="{{ row.category }}" {% if not row.enabled %}hidden{% endif %}>
+    <label for="auto_refresh_interval_{{ row.category }}">Refresh every</label>
+    <select name="auto_refresh_interval_{{ row.category }}"
+            id="auto_refresh_interval_{{ row.category }}"
+            class="input select-input">
+        {% for value, text in row.interval_choices %}
+        <option value="{{ value }}" {% if row.interval == value %}selected{% endif %}>{{ text }}</option>
+        {% endfor %}
+    </select>
+</div>
