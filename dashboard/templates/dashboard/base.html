@@ -628,6 +628,14 @@
             });
 
             document.addEventListener('keydown', function(evt) {
+                if (evt.key === 'Escape') {
+                    const bar = document.getElementById('pr-search-bar');
+                    if (bar && !bar.hidden) {
+                        evt.preventDefault();
+                        togglePrSearch(false);
+                        return;
+                    }
+                }
                 // Backtick toggles search open/closed from anywhere except while
                 // typing in a field (there the character types normally).
                 if (evt.key === '`' && !evt.ctrlKey && !evt.metaKey && !evt.altKey) {
