@@ -20,6 +20,10 @@
                     <span class="theme-icon-dark">&#9790;</span>
                 </button>
                 {% if user.is_authenticated %}
+                    <span id="github-status-container"
+                          hx-get="{% url 'dashboard:github_status' %}"
+                          hx-trigger="load, every 60s"
+                          hx-swap="innerHTML"></span>
                     <span class="user-info">{{ user.username }}</span>
                     {% block header_action %}
                     <a href="{% url 'dashboard:stats' %}" class="btn btn-icon" title="Stats">

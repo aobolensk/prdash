@@ -78,6 +78,7 @@ class UserPreferences(models.Model):
     pr_list_page_size = models.PositiveIntegerField(
         default=25, choices=PR_LIST_PAGE_SIZE_CHOICES
     )
+    show_github_status = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -110,6 +111,10 @@ class UserPreferences(models.Model):
 
     def get_auto_refresh_interval_seconds_for_tab(self, tab):
         return self.get_auto_refresh_interval_for_tab(tab) * 60
+
+    def is_github_status_enabled(self):
+        """Check if the GitHub API status indicator should be shown."""
+        return self.show_github_status
 
     def get_auto_refresh_rows(self):
         """Return per-tab-category auto-refresh settings for rendering in the preferences form."""

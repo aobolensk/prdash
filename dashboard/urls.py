@@ -5,6 +5,7 @@ app_name = 'dashboard'
 
 urlpatterns = [
     path('', views.home, name='home'),
+    path('github-status/', views.github_status, name='github_status'),
     path('prs/', views.pr_list, name='pr_list'),
     path('prs/merged/', views.merged_pr_list, name='merged_pr_list'),
     path('prs/review-requests/', views.review_requests_list, name='review_requests_list'),

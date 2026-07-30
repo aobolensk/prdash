@@ -13,6 +13,7 @@ import requests
 
 from .models import TrackedRepository, PersonalAccessToken, UserPreferences, AUTO_REFRESH_CATEGORIES
 from .github_client import GitHubClient
+from .github_status import get_github_status
 from .stats_service import StatsService
 
 PR_COUNT_CACHE_TTL = 300  # 5 minutes
@@ -136,6 +137,16 @@ def home(request):
     if request.user.is_authenticated:
         return redirect('dashboard:pr_list')
     return render(request, 'dashboard/home.html')
+
+
+@login_required
+def github_status(request):
+    """GitHub API health indicator for the header, refreshed via HTMX polling."""
+    prefs = _get_user_preferences(request.user)
+    if not prefs.is_github_status_enabled():
+        return HttpResponse('')
+    context = {'status': get_github_status()}
+    return render(request, 'dashboard/partials/_github_status.html', context)
 
 
 def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pending',
@@ -669,7 +680,10 @@ def save_preferences(request):
             return 25
         return page_size if page_size in valid_page_sizes else 25
 
-    defaults = {'pr_list_page_size': parse_page_size()}
+    defaults = {
+        'pr_list_page_size': parse_page_size(),
+        'show_github_status': request.POST.get('show_github_status') == 'on',
+    }
     for category, _ in AUTO_REFRESH_CATEGORIES:
         defaults[f'auto_refresh_{category}'] = request.POST.get(f'auto_refresh_{category}') == 'on'
         defaults[f'auto_refresh_interval_{category}'] = parse_interval(f'auto_refresh_interval_{category}')
