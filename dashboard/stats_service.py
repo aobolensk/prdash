@@ -137,12 +137,16 @@ class StatsService:
         self.client = client
         self.username = client.get_username()
         self._pr_cache: dict[str, list[PullRequestInfo]] = {}
+        self._reviews_cache: dict[str, dict] = {}
+
+    def _repos_hash(self, repos: list[tuple[str, str]]) -> str:
+        """Hash a repo list for use in cache keys."""
+        repos_str = ",".join(f"{o}/{n}" for o, n in sorted(repos))
+        return hashlib.md5(repos_str.encode()).hexdigest()[:16]
 
     def _get_cache_key(self, prefix: str, repos: list[tuple[str, str]], days: int) -> str:
         """Generate cache key for stats."""
-        repos_str = ",".join(f"{o}/{n}" for o, n in sorted(repos))
-        repos_hash = hashlib.md5(repos_str.encode()).hexdigest()[:16]
-        return f"stats:{prefix}:{self.username}:{repos_hash}:{days}"
+        return f"stats:{prefix}:{self.username}:{self._repos_hash(repos)}:{days}"
 
     def _get_cutoff_date(self, days: int) -> datetime:
         """Get cutoff date; days=-1 means all time (epoch)."""
@@ -165,9 +169,7 @@ class StatsService:
         include_closed: bool = True
     ) -> list[PullRequestInfo]:
         """Get PRs for stats computation with caching."""
-        repos_str = ",".join(f"{o}/{n}" for o, n in sorted(repos))
-        repos_hash = hashlib.md5(repos_str.encode()).hexdigest()[:16]
-        cache_key = f"prs_stats:{self.username}:{repos_hash}:{days}:{include_closed}"
+        cache_key = f"prs_stats:{self.username}:{self._repos_hash(repos)}:{days}:{include_closed}"
         if cache_key in self._pr_cache:
             return self._pr_cache[cache_key]
 
@@ -186,6 +188,16 @@ class StatsService:
 
         self._pr_cache[cache_key] = all_prs
         return all_prs
+
+    def get_reviews_data(self, repos: list[tuple[str, str]], days: int) -> dict:
+        """Get raw reviews data for a user across repos, with caching."""
+        cache_key = f"reviews_data:{self.username}:{self._repos_hash(repos)}:{days}"
+        if cache_key in self._reviews_cache:
+            return self._reviews_cache[cache_key]
+
+        reviews_data = self.client.get_reviews_for_stats(repos, self.username, days)
+        self._reviews_cache[cache_key] = reviews_data
+        return reviews_data
 
     def get_quick_stats(self, repos: list[tuple[str, str]], days: int = 30) -> QuickStats:
         """Get quick summary statistics."""
@@ -322,8 +334,7 @@ class StatsService:
         if cached:
             return cached
 
-        # Get reviews data from GitHub
-        reviews_data = self.client.get_reviews_for_stats(repos, self.username, days)
+        reviews_data = self.get_reviews_data(repos, days)
 
         reviews_given = reviews_data.get('reviews_given', 0)
         reviews_received = reviews_data.get('reviews_received', 0)
@@ -462,7 +473,7 @@ class StatsService:
         if cached:
             return cached
 
-        reviews_data = self.client.get_reviews_for_stats(repos, self.username, days)
+        reviews_data = self.get_reviews_data(repos, days)
 
         who_reviews_you = [
             CollaboratorData(
@@ -493,6 +504,10 @@ class StatsService:
         """Get all stats in one call, using parallel execution for independent methods."""
         results = {}
         self.get_prs_for_stats(repos, days)
+        try:
+            self.get_reviews_data(repos, days)
+        except Exception:
+            pass
 
         with ThreadPoolExecutor(max_workers=6) as executor:
             # Submit all stat collection tasks
