@@ -669,8 +669,18 @@ a:hover {
 }
 
 .pagination-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     color: var(--color-text-secondary);
     font-size: 0.875rem;
+}
+
+.pagination-page-input.input {
+    width: 56px;
+    padding: 4px 6px;
+    font-size: 0.875rem;
+    text-align: center;
 }
 
 .btn-disabled {

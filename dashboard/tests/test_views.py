@@ -6,7 +6,7 @@ from django.core.cache import cache
 from django.test import Client, TestCase
 from django.urls import reverse
 
-from dashboard.models import PersonalAccessToken, TrackedRepository
+from dashboard.models import PersonalAccessToken, TrackedRepository, UserPreferences
 from dashboard.views import _parse_days_param, _parse_repo_input
 
 
@@ -280,6 +280,37 @@ class HTMXResponseTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'dashboard/pr_list.html')
+
+    @patch('dashboard.views.GitHubClient')
+    def test_pr_list_pagination_has_single_direct_page_input(self, mock_github_client):
+        """Verify the current page is an editable page-number input."""
+        UserPreferences.objects.create(user=self.user, pr_list_page_size=25)
+        mock_client = MagicMock()
+        mock_client.get_all_user_prs.return_value = [
+            {
+                'number': number,
+                'title': f'PR {number}',
+                'url': f'https://github.com/owner/repo/pull/{number}',
+                'repo_full_name': 'owner/repo',
+            }
+            for number in range(1, 27)
+        ]
+        mock_client.get_username.return_value = 'testuser'
+        mock_client.errors = []
+        mock_client.warnings = []
+        mock_github_client.return_value = mock_client
+
+        response = self.client.get(reverse('dashboard:pr_list'), {'page': 2})
+        content = response.content.decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['page_obj'].number, 2)
+        self.assertIn(f'<form action="{reverse("dashboard:pr_list")}"', content)
+        self.assertEqual(content.count('id="page-input"'), 1)
+        self.assertIn('type="number"', content)
+        self.assertIn('value="2"', content)
+        self.assertIn('max="2"', content)
+        self.assertIn('aria-label="Page number"', content)
 
     @patch('dashboard.views.GitHubClient')
     def test_htmx_trigger_headers(self, mock_github_client):

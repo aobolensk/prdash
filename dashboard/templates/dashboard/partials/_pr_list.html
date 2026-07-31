@@ -7,14 +7,21 @@
         {% endfor %}
     </div>
     {% if page_obj %}
-        <input type="hidden" id="page-input" name="page" value="{{ page_obj.number }}">
         {% if page_obj.paginator.num_pages > 1 %}
-        <div class="pagination">
+        <form action="{{ current_url }}"
+              method="get"
+              class="pagination"
+              hx-get="{{ current_url }}"
+              hx-include=".filter-toolbar"
+              hx-target="#pr-content"
+              hx-swap="innerHTML"
+              hx-push-url="true"
+              hx-indicator="#refresh-spinner">
             {% if page_obj.has_previous %}
             <a href="{{ current_url }}?page={{ page_obj.previous_page_number }}"
                class="btn btn-secondary btn-small"
                hx-get="{{ current_url }}?page={{ page_obj.previous_page_number }}"
-               hx-include=".filter-toolbar, #page-input"
+               hx-include=".filter-toolbar"
                hx-target="#pr-content"
                hx-swap="innerHTML"
                hx-push-url="true"
@@ -23,13 +30,27 @@
             <span class="btn btn-secondary btn-small btn-disabled">Previous</span>
             {% endif %}
 
-            <span class="pagination-status">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+            <span class="pagination-status">
+                <label for="page-input">Page</label>
+                <input type="number"
+                       id="page-input"
+                       name="page"
+                       value="{{ page_obj.number }}"
+                       min="1"
+                       max="{{ page_obj.paginator.num_pages }}"
+                       class="input pagination-page-input"
+                       aria-label="Page number"
+                       autocomplete="off"
+                       enterkeyhint="go"
+                       required>
+                <span>of {{ page_obj.paginator.num_pages }}</span>
+            </span>
 
             {% if page_obj.has_next %}
             <a href="{{ current_url }}?page={{ page_obj.next_page_number }}"
                class="btn btn-secondary btn-small"
                hx-get="{{ current_url }}?page={{ page_obj.next_page_number }}"
-               hx-include=".filter-toolbar, #page-input"
+               hx-include=".filter-toolbar"
                hx-target="#pr-content"
                hx-swap="innerHTML"
                hx-push-url="true"
@@ -37,7 +58,9 @@
             {% else %}
             <span class="btn btn-secondary btn-small btn-disabled">Next</span>
             {% endif %}
-        </div>
+        </form>
+        {% else %}
+        <input type="hidden" id="page-input" name="page" value="{{ page_obj.number }}">
         {% endif %}
     {% endif %}
 {% else %}
