@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock, patch
 
+import requests
 from django.contrib.auth.models import User
 from django.test import TestCase
 
@@ -203,6 +204,22 @@ class GitHubClientErrorHandlingTests(TestCase):
         error.data = {'message': 'API rate limit exceeded'}
 
         self.assertTrue(self.client._is_rate_limit_error(error))
+
+    @patch('dashboard.github_client.time.sleep')
+    @patch('dashboard.github_client.requests.post')
+    def test_post_graphql_retries_truncated_response(self, mock_post, mock_sleep):
+        response = MagicMock(status_code=200)
+        response.json.return_value = {'data': {'viewer': {'login': 'testuser'}}}
+        mock_post.side_effect = [
+            requests.exceptions.ChunkedEncodingError('Response ended prematurely'),
+            response,
+        ]
+
+        data = self.client._post_graphql('query { viewer { login } }', token='token')
+
+        self.assertEqual(data, {'data': {'viewer': {'login': 'testuser'}}})
+        self.assertEqual(mock_post.call_count, 2)
+        mock_sleep.assert_called_once_with(0.5)
 
 
 class GitHubClientCIStatusParsingTests(TestCase):

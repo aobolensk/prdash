@@ -529,17 +529,22 @@ class GitHubClient:
                     headers=headers,
                     timeout=GRAPHQL_TIMEOUT_SECONDS,
                 )
-            except requests.exceptions.Timeout:
-                if attempt < max_attempts:
+            except requests.exceptions.RequestException as error:
+                retryable = isinstance(error, (
+                    requests.exceptions.Timeout,
+                    requests.exceptions.ConnectionError,
+                    requests.exceptions.ChunkedEncodingError,
+                ))
+                if retryable and attempt < max_attempts:
                     time.sleep(GRAPHQL_RETRY_BACKOFF_SECONDS * attempt)
                     continue
 
-                logger.warning("%s timed out for %s", operation, repo_name)
-                self._add_warning("GitHub timed out. Try refreshing", repo_name)
-                return None
-            except requests.exceptions.RequestException:
-                logger.warning("%s request failed for %s", operation, repo_name, exc_info=True)
-                self._add_warning("GitHub request failed. Try refreshing", repo_name)
+                if isinstance(error, requests.exceptions.Timeout):
+                    logger.warning("%s timed out for %s", operation, repo_name)
+                    self._add_warning("GitHub timed out. Try refreshing", repo_name)
+                else:
+                    logger.warning("%s request failed for %s", operation, repo_name, exc_info=True)
+                    self._add_warning("GitHub request failed. Try refreshing", repo_name)
                 return None
 
             if response.status_code == 200:
