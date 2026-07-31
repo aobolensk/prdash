@@ -161,11 +161,13 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
         f"{query_cache_vary}"
     )
     fetch_had_issues = bool(client.errors or client.warnings)
+    stale_data = False
     if fetch_had_issues and not prs:
         # Total failure with no data at all: fall back to the last clean fetch.
         cached_prs = cache.get(results_cache_key)
         if cached_prs is not None:
             prs = cached_prs
+            stale_data = True
     elif not fetch_had_issues:
         # Only a fully clean fetch is trustworthy enough to become the new fallback.
         cache.set(results_cache_key, prs, PR_RESULTS_CACHE_TTL)
@@ -233,6 +235,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
         'auto_refresh_interval_mins': user_prefs.get_auto_refresh_interval_for_tab(active_tab),
         'pr_counts': pr_counts,
         'page_obj': page_obj,
+        'stale_data': stale_data,
     }
     if review_tab != 'pending':
         context['review_tab'] = review_tab
@@ -242,8 +245,10 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
             'tabChanged': tab_changed,
             'repoChanged': repo_changed,
             'reviewTabChanged': review_tab,
-            'refreshedAt': timezone.now().isoformat(),
+            'staleData': stale_data,
         }
+        if not stale_data:
+            triggers['refreshedAt'] = timezone.now().isoformat()
         triggers.update(client.get_notification_triggers())
 
         # Only auto-refresh polls (identified by the triggering element's id) are

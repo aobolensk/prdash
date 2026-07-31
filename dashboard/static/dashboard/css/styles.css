@@ -1127,6 +1127,22 @@ mark.pr-hl {
     white-space: nowrap;
 }
 
+/* Stale data indicator */
+.stale-indicator {
+    display: flex;
+    align-items: center;
+    color: var(--color-warning);
+}
+
+.stale-indicator[hidden] {
+    display: none;
+}
+
+.stale-indicator svg {
+    width: 14px;
+    height: 14px;
+}
+
 /* Auto-refresh indicator */
 .auto-refresh-indicator {
     display: flex;

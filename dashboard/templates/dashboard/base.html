@@ -413,6 +413,12 @@
                 formatLastUpdated();
             });
 
+            document.body.addEventListener('staleData', function(evt) {
+                const el = document.getElementById('stale-indicator');
+                if (!el) return;
+                el.hidden = !(evt.detail.value ?? evt.detail);
+            });
+
             const searchInput = document.getElementById('pr-search-input');
             const searchExcludeInput = document.getElementById('pr-search-exclude-input');
             [searchInput, searchExcludeInput].forEach(function(el) {
