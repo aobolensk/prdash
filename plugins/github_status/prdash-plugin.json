@@ -1,0 +1,9 @@
+{
+  "id": "github-status",
+  "name": "GitHub Status",
+  "version": "1.0.0",
+  "api_version": "1.0",
+  "description": "Track GitHub API and pull request service availability.",
+  "entrypoint": "prdash_github_status.plugin:plugin",
+  "python_path": "src"
+}

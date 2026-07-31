@@ -1,0 +1,4 @@
+<span id="github-status-container"
+      hx-get="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='status' %}"
+      hx-trigger="load, every 60s"
+      hx-swap="innerHTML"></span>

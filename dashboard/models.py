@@ -44,6 +44,28 @@ class TrackedRepository(models.Model):
         return f"{self.owner}/{self.name}"
 
 
+class PluginConfiguration(models.Model):
+    """Per-user activation and settings for a discovered plugin."""
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='plugin_configurations')
+    plugin_id = models.CharField(max_length=128)
+    enabled = models.BooleanField(default=False)
+    config = models.JSONField(default=dict, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'plugin_id'],
+                name='unique_user_plugin_configuration',
+            ),
+        ]
+        ordering = ['plugin_id']
+
+    def __str__(self):
+        return f"{self.plugin_id} for {self.user.username}"
+
+
 AUTO_REFRESH_INTERVAL_CHOICES = [
     (1, '1 minute'), (2, '2 minutes'), (5, '5 minutes'), (10, '10 minutes'),
     (15, '15 minutes'), (30, '30 minutes'), (60, '1 hour'),
@@ -78,7 +100,6 @@ class UserPreferences(models.Model):
     pr_list_page_size = models.PositiveIntegerField(
         default=25, choices=PR_LIST_PAGE_SIZE_CHOICES
     )
-    show_github_status = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -111,10 +132,6 @@ class UserPreferences(models.Model):
 
     def get_auto_refresh_interval_seconds_for_tab(self, tab):
         return self.get_auto_refresh_interval_for_tab(tab) * 60
-
-    def is_github_status_enabled(self):
-        """Check if the GitHub API status indicator should be shown."""
-        return self.show_github_status
 
     def get_auto_refresh_rows(self):
         """Return per-tab-category auto-refresh settings for rendering in the preferences form."""

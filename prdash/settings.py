@@ -181,3 +181,10 @@ SOCIALACCOUNT_PROVIDERS = {
         }
     }
 }
+
+# Plugins are discovered without importing their implementation. Each user
+# explicitly enables discovered plugins from the dashboard settings page.
+PRDASH_PLUGIN_PATHS = [
+    BASE_DIR / 'plugins',
+]
+PRDASH_PLUGIN_CONFIG = {}

@@ -5,7 +5,11 @@ app_name = 'dashboard'
 
 urlpatterns = [
     path('', views.home, name='home'),
-    path('github-status/', views.github_status, name='github_status'),
+    path(
+        'plugins/<slug:plugin_id>/<slug:route>/',
+        views.plugin_route,
+        name='plugin_route',
+    ),
     path('prs/', views.pr_list, name='pr_list'),
     path('prs/merged/', views.merged_pr_list, name='merged_pr_list'),
     path('prs/review-requests/', views.review_requests_list, name='review_requests_list'),
@@ -30,4 +34,5 @@ urlpatterns = [
     path('settings/pat/save/', views.save_pat, name='save_pat'),
     path('settings/pat/delete/', views.delete_pat, name='delete_pat'),
     path('settings/preferences/save/', views.save_preferences, name='save_preferences'),
+    path('settings/plugins/save/', views.save_plugins, name='save_plugins'),
 ]

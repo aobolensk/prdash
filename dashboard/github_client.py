@@ -1457,10 +1457,10 @@ class GitHubClient:
 
         # If approved_by_me, we need to filter PRs where we actually approved
         if not include_all and approved_by_me and username:
-            all_prs = self._filter_prs_approved_by_user(all_prs, username)
+            all_prs = self.filter_prs_approved_by_user(all_prs, username)
         # If reviewed_by_me, filter to PRs where user has reviewed but NOT approved
         elif not include_all and reviewed_by_me and username:
-            all_prs = self._filter_prs_reviewed_not_approved_by_user(all_prs, username)
+            all_prs = self.filter_prs_reviewed_not_approved_by_user(all_prs, username)
 
         all_prs.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
         return all_prs
@@ -1610,13 +1610,15 @@ class GitHubClient:
 
         return matching_prs
 
-    def _filter_prs_approved_by_user(self, prs: list[PullRequestInfo], username: str) -> list[PullRequestInfo]:
+    def filter_prs_approved_by_user(
+        self, prs: list[PullRequestInfo], username: str
+    ) -> list[PullRequestInfo]:
         """Filter PRs to only include those approved by the given user."""
         return self._filter_prs_by_user_review_state(
             prs, username, lambda state: state == 'APPROVED'
         )
 
-    def _filter_prs_reviewed_not_approved_by_user(
+    def filter_prs_reviewed_not_approved_by_user(
         self, prs: list[PullRequestInfo], username: str
     ) -> list[PullRequestInfo]:
         """Filter PRs to only include those reviewed (but not approved) by the given user."""

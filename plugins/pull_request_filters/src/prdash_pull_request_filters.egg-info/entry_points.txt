@@ -1,0 +1,2 @@
+[prdash.plugins]
+pull-request-filters = prdash_pull_request_filters.plugin:plugin

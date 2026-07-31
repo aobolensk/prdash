@@ -4,6 +4,7 @@ from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
 from django.core.cache import cache
 from django.core.paginator import Paginator
+from django.urls import reverse
 from django.utils import timezone
 from dataclasses import asdict
 import hashlib
@@ -13,8 +14,14 @@ import requests
 
 from .models import TrackedRepository, PersonalAccessToken, UserPreferences, AUTO_REFRESH_CATEGORIES
 from .github_client import GitHubClient
-from .github_status import get_github_status
+from .plugin_manager import plugin_manager
 from .stats_service import StatsService
+from prdash.plugin_api import (
+    PR_LIST_PROCESS_HOOK,
+    PR_LIST_QUERY_HOOK,
+    PullRequestListContext,
+    PullRequestQuery,
+)
 
 PR_COUNT_CACHE_TTL = 300  # 5 minutes
 PR_RESULTS_CACHE_TTL = 3600  # 1 hour, fallback for failed refreshes
@@ -55,54 +62,9 @@ def _get_user_preferences(user):
     return prefs
 
 
-def _get_filter_params(request):
-    """Extract filter and sort parameters from request."""
-    return {
-        'ci': request.GET.get('ci', ''),
-        'review': request.GET.get('review', ''),
-        'my_review': request.GET.get('my_review', ''),
-        'draft': request.GET.get('draft', ''),
-        'conflicts': request.GET.get('conflicts', ''),
-        'sort': request.GET.get('sort', 'updated_desc'),
-    }
-
-
 def _exclude_own_prs(prs, username):
     """Filter out PRs authored by the given user."""
     return [pr for pr in prs if pr.author != username]
-
-
-def _apply_filters_and_sort(prs, filters):
-    """Apply filters and sorting to PR list."""
-    ci = filters.get('ci')
-    review = filters.get('review')
-    draft = filters.get('draft')
-    conflicts = filters.get('conflicts')
-    sort = filters.get('sort', 'updated_desc')
-
-    if ci:
-        prs = [p for p in prs if p.ci_status.state == ci]
-    if review:
-        prs = [p for p in prs if p.review_status.state == review]
-    if draft == 'ready':
-        prs = [p for p in prs if not p.draft]
-    elif draft == 'draft':
-        prs = [p for p in prs if p.draft]
-    if conflicts == 'has':
-        prs = [p for p in prs if p.mergeable == 'CONFLICTING']
-    elif conflicts == 'none':
-        prs = [p for p in prs if p.mergeable == 'MERGEABLE']
-
-    sort_keys = {
-        'updated': lambda p: (p.updated_at, p.repo_owner, p.repo_name, p.number),
-        'created': lambda p: (p.created_at, p.repo_owner, p.repo_name, p.number),
-    }
-    sort_field = sort.replace('_desc', '').replace('_asc', '')
-    sort_key = sort_keys.get(sort_field, sort_keys['updated'])
-    reverse = sort.endswith('_desc') or not sort.endswith('_asc')
-    prs = sorted(prs, key=sort_key, reverse=reverse)
-
-    return prs
 
 
 def _parse_repo_input(repo_input):
@@ -139,23 +101,14 @@ def home(request):
     return render(request, 'dashboard/home.html')
 
 
-@login_required
-def github_status(request):
-    """GitHub API health indicator for the header, refreshed via HTMX polling."""
-    prefs = _get_user_preferences(request.user)
-    if not prefs.is_github_status_enabled():
-        return HttpResponse('')
-    context = {'status': get_github_status()}
-    return render(request, 'dashboard/partials/_github_status.html', context)
-
-
 def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pending',
-                  owner=None, repo=None, post_filter=None, post_filter_factory=None):
+                  owner=None, repo=None, post_filter=None, post_filter_factory=None,
+                  base_fetch_options=None, query_defaults=None):
     """
     Generic PR list view helper.
 
     Args:
-        fetch_prs: Callable(client, repo_tuples_or_owner_repo, author) -> list of PRs
+        fetch_prs: Callable(client, repo_tuples_or_owner_repo, fetch_options) -> list of PRs
         active_tab: Value for context['active_tab']
         tab_changed: Value for HX-Trigger tabChanged
         review_tab: Value for context['review_tab'] and reviewTabChanged trigger
@@ -165,27 +118,47 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
     """
     repos = TrackedRepository.objects.filter(user=request.user)
     client = GitHubClient(request.user)
-    author = request.GET.get('author', '').strip() or None
     current_username = client.get_username()
-    filters = _get_filter_params(request)
+    plugin_context = PullRequestListContext(
+        request=request,
+        client=client,
+        active_tab=active_tab,
+        current_username=current_username,
+        current_repo=(owner, repo) if owner and repo else None,
+        query_defaults=query_defaults or {},
+    )
+    query = plugin_manager.run_hook(
+        PR_LIST_QUERY_HOOK,
+        PullRequestQuery(),
+        plugin_context,
+        request.user,
+        request,
+    )
+    plugin_context.query = query
+    author = query.parameters.get('author') or None
+    fetch_options = dict(base_fetch_options or {})
+    fetch_options.update(query.fetch_options)
 
     if owner and repo:
         current_repo = get_object_or_404(
             TrackedRepository, user=request.user, owner=owner, name=repo
         )
-        prs = fetch_prs(client, owner, repo, author)
+        prs = fetch_prs(client, owner, repo, fetch_options)
         repo_changed = f'{owner}/{repo}'
     else:
         current_repo = None
         enabled_repos = repos.filter(enabled=True)
         repo_tuples = [(r.owner, r.name) for r in enabled_repos]
-        prs = fetch_prs(client, repo_tuples, author)
+        prs = fetch_prs(client, repo_tuples, fetch_options)
         repo_changed = ''
 
     cache_gen = cache.get(f"pr_results_gen:{request.user.id}", 0)
+    query_cache_vary = hashlib.sha256(
+        json.dumps(query.cache_vary, sort_keys=True).encode()
+    ).hexdigest()
     results_cache_key = (
-        f"pr_results:{request.user.id}:{cache_gen}:{request.path}:{author or ''}:"
-        f"{request.GET.get('my_review', '')}"
+        f"pr_results:{request.user.id}:{cache_gen}:{request.path}:"
+        f"{query_cache_vary}"
     )
     fetch_had_issues = bool(client.errors or client.warnings)
     if fetch_had_issues and not prs:
@@ -202,7 +175,13 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
     if post_filter and current_username:
         prs = post_filter(prs, current_username)
 
-    prs = _apply_filters_and_sort(prs, filters)
+    prs = plugin_manager.run_hook(
+        PR_LIST_PROCESS_HOOK,
+        prs,
+        plugin_context,
+        request.user,
+        request,
+    )
 
     user_prefs = _get_user_preferences(request.user)
 
@@ -214,8 +193,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
         'assigned': 'assigned',
     }
     cache_key_suffix = tab_to_cache_key.get(active_tab)
-    has_filters = any(filters.get(k) for k in ('ci', 'review', 'my_review', 'draft', 'conflicts'))
-    if cache_key_suffix and not author and not current_repo and not has_filters:
+    if cache_key_suffix and not current_repo and not query.affects_count:
         # Only cache when viewing all repos with no filters
         count_cache_key = f"pr_count:{request.user.id}:{cache_key_suffix}"
         cache.set(count_cache_key, len(prs), PR_COUNT_CACHE_TTL)
@@ -246,7 +224,8 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
         'active_tab': active_tab,
         'author': author,
         'current_username': current_username,
-        'filters': filters,
+        'filters': query.parameters,
+        'has_active_filters': query.affects_count,
         'errors': client.errors,
         'warnings': client.warnings,
         'auto_refresh_enabled': user_prefs.is_auto_refresh_enabled_for_tab(active_tab),
@@ -301,7 +280,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
 def pr_list(request):
     return _pr_list_view(
         request,
-        fetch_prs=lambda c, repos, author: c.get_all_user_prs(repos, author=author),
+        fetch_prs=lambda c, repos, options: c.get_all_user_prs(repos, **options),
         active_tab='open',
         tab_changed='my_prs',
     )
@@ -311,7 +290,7 @@ def pr_list(request):
 def merged_pr_list(request):
     return _pr_list_view(
         request,
-        fetch_prs=lambda c, repos, author: c.get_all_merged_prs(repos, author=author),
+        fetch_prs=lambda c, repos, options: c.get_all_merged_prs(repos, **options),
         active_tab='merged',
         tab_changed='merged',
     )
@@ -321,7 +300,7 @@ def merged_pr_list(request):
 def repo_pr_list(request, owner, repo):
     return _pr_list_view(
         request,
-        fetch_prs=lambda c, o, r, author: c.get_user_prs_for_repo(o, r, author=author),
+        fetch_prs=lambda c, o, r, options: c.get_user_prs_for_repo(o, r, **options),
         active_tab='open',
         tab_changed='my_prs',
         owner=owner,
@@ -333,7 +312,7 @@ def repo_pr_list(request, owner, repo):
 def repo_merged_pr_list(request, owner, repo):
     return _pr_list_view(
         request,
-        fetch_prs=lambda c, o, r, author: c.get_merged_prs_for_repo(o, r, author=author),
+        fetch_prs=lambda c, o, r, options: c.get_merged_prs_for_repo(o, r, **options),
         active_tab='merged',
         tab_changed='merged',
         owner=owner,
@@ -341,64 +320,35 @@ def repo_merged_pr_list(request, owner, repo):
     )
 
 
-def _get_review_fetch_params(my_review):
-    """Get fetch parameters based on my_review filter value."""
-    if my_review == 'approved':
-        return {'approved_by_me': True, 'reviewed_by_me': False}
-    elif my_review == 'reviewed':
-        return {'approved_by_me': False, 'reviewed_by_me': True}
-    elif my_review == 'pending':
-        return {'approved_by_me': False, 'reviewed_by_me': False}
-    else:
-        # Default: show all review requests (pending + reviewed + approved)
-        return {'include_all': True}
-
-
 @login_required
 def review_requests_list(request):
-    my_review = request.GET.get('my_review', '')
-    fetch_params = _get_review_fetch_params(my_review)
-
     return _pr_list_view(
         request,
-        fetch_prs=lambda c, repos, author: c.get_all_review_requests(
-            repos, author=author, **fetch_params
+        fetch_prs=lambda c, repos, options: c.get_all_review_requests(
+            repos, **options
         ),
         active_tab='review_requests',
         tab_changed='review_requests',
         post_filter=_exclude_own_prs,
+        base_fetch_options={'include_all': True},
     )
 
 
 @login_required
 def review_approved_list(request):
-    return _pr_list_view(
-        request,
-        fetch_prs=lambda c, repos, author: c.get_all_review_requests(repos, approved_by_me=True, author=author),
-        active_tab='review_requests',
-        tab_changed='review_approved',
-        review_tab='approved',
-        post_filter=_exclude_own_prs,
-    )
+    return redirect(f"{reverse('dashboard:review_requests_list')}?my_review=approved")
 
 
 @login_required
 def review_reviewed_list(request):
-    return _pr_list_view(
-        request,
-        fetch_prs=lambda c, repos, author: c.get_all_review_requests(repos, reviewed_by_me=True, author=author),
-        active_tab='review_requests',
-        tab_changed='review_reviewed',
-        review_tab='reviewed',
-        post_filter=_exclude_own_prs,
-    )
+    return redirect(f"{reverse('dashboard:review_requests_list')}?my_review=reviewed")
 
 
 @login_required
 def assigned_list(request):
     return _pr_list_view(
         request,
-        fetch_prs=lambda c, repos, author: c.get_all_assigned_prs(repos, author=author),
+        fetch_prs=lambda c, repos, options: c.get_all_assigned_prs(repos, **options),
         active_tab='assigned',
         tab_changed='assigned',
     )
@@ -406,79 +356,43 @@ def assigned_list(request):
 
 @login_required
 def repo_review_requests_list(request, owner, repo):
-    my_review = request.GET.get('my_review', '')
-    fetch_params = _get_review_fetch_params(my_review)
-
-    def make_post_filter(client):
-        def post_filter(prs, username):
-            if my_review == 'approved':
-                filtered = client._filter_prs_approved_by_user(prs, username)
-            elif my_review == 'reviewed':
-                filtered = client._filter_prs_reviewed_not_approved_by_user(prs, username)
-            else:
-                filtered = prs
-            # Always exclude own PRs from review requests
-            return [pr for pr in filtered if pr.author != username]
-        return post_filter
-
     return _pr_list_view(
         request,
-        fetch_prs=lambda c, o, r, author: c.get_review_requests_for_repo(
-            o, r, author=author, **fetch_params
+        fetch_prs=lambda c, o, r, options: c.get_review_requests_for_repo(
+            o, r, **options
         ),
         active_tab='review_requests',
         tab_changed='review_requests',
         owner=owner,
         repo=repo,
-        post_filter_factory=make_post_filter,
+        post_filter=_exclude_own_prs,
+        base_fetch_options={'include_all': True},
     )
 
 
 @login_required
 def repo_review_approved_list(request, owner, repo):
-    def make_post_filter(client):
-        def filter_approved_not_own(prs, username):
-            filtered = client._filter_prs_approved_by_user(prs, username)
-            return [pr for pr in filtered if pr.author != username]
-        return filter_approved_not_own
-
-    return _pr_list_view(
-        request,
-        fetch_prs=lambda c, o, r, author: c.get_review_requests_for_repo(o, r, approved_by_me=True, author=author),
-        active_tab='review_requests',
-        tab_changed='review_approved',
-        review_tab='approved',
-        owner=owner,
-        repo=repo,
-        post_filter_factory=make_post_filter,
+    url = reverse(
+        'dashboard:repo_review_requests_list',
+        kwargs={'owner': owner, 'repo': repo},
     )
+    return redirect(f'{url}?my_review=approved')
 
 
 @login_required
 def repo_review_reviewed_list(request, owner, repo):
-    def make_post_filter(client):
-        def filter_reviewed_not_own(prs, username):
-            filtered = client._filter_prs_reviewed_not_approved_by_user(prs, username)
-            return [pr for pr in filtered if pr.author != username]
-        return filter_reviewed_not_own
-
-    return _pr_list_view(
-        request,
-        fetch_prs=lambda c, o, r, author: c.get_review_requests_for_repo(o, r, reviewed_by_me=True, author=author),
-        active_tab='review_requests',
-        tab_changed='review_reviewed',
-        review_tab='reviewed',
-        owner=owner,
-        repo=repo,
-        post_filter_factory=make_post_filter,
+    url = reverse(
+        'dashboard:repo_review_requests_list',
+        kwargs={'owner': owner, 'repo': repo},
     )
+    return redirect(f'{url}?my_review=reviewed')
 
 
 @login_required
 def repo_assigned_list(request, owner, repo):
     return _pr_list_view(
         request,
-        fetch_prs=lambda c, o, r, author: c.get_assigned_prs_for_repo(o, r, author=author),
+        fetch_prs=lambda c, o, r, options: c.get_assigned_prs_for_repo(o, r, **options),
         active_tab='assigned',
         tab_changed='assigned',
         owner=owner,
@@ -608,6 +522,8 @@ def settings(request):
     context = {
         'pat': pat,
         'prefs': prefs,
+        'plugins': plugin_manager.plugin_statuses(request.user, request),
+        'plugin_discovery_errors': plugin_manager.discovery_errors,
     }
     return render(request, 'dashboard/settings.html', context)
 
@@ -682,7 +598,6 @@ def save_preferences(request):
 
     defaults = {
         'pr_list_page_size': parse_page_size(),
-        'show_github_status': request.POST.get('show_github_status') == 'on',
     }
     for category, _ in AUTO_REFRESH_CATEGORIES:
         defaults[f'auto_refresh_{category}'] = request.POST.get(f'auto_refresh_{category}') == 'on'
@@ -695,3 +610,25 @@ def save_preferences(request):
 
     context = {'prefs': prefs, 'success': True}
     return render(request, 'dashboard/partials/_preferences_form.html', context)
+
+
+@login_required
+@require_POST
+def save_plugins(request):
+    """Save the explicit set of plugins enabled for the current user."""
+    plugin_manager.configure_user(
+        request.user,
+        request.POST.getlist('enabled_plugins'),
+    )
+    context = {
+        'plugins': plugin_manager.plugin_statuses(request.user),
+        'plugin_discovery_errors': plugin_manager.discovery_errors,
+        'success': True,
+    }
+    return render(request, 'dashboard/partials/_plugin_settings.html', context)
+
+
+@login_required
+def plugin_route(request, plugin_id, route):
+    """Dispatch a request to a route registered by an enabled plugin."""
+    return plugin_manager.dispatch(request, plugin_id, route)

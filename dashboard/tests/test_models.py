@@ -2,7 +2,7 @@ from django.contrib.auth.models import User
 from django.db import IntegrityError
 from django.test import TestCase
 
-from dashboard.models import PersonalAccessToken, TrackedRepository
+from dashboard.models import PersonalAccessToken, PluginConfiguration, TrackedRepository
 
 
 class PersonalAccessTokenModelTests(TestCase):
@@ -65,3 +65,22 @@ class TrackedRepositoryModelTests(TestCase):
         self.assertEqual(repos[0].full_name, 'aorg/alpha')
         self.assertEqual(repos[1].full_name, 'aorg/beta')
         self.assertEqual(repos[2].full_name, 'zorg/alpha')
+
+
+class PluginConfigurationModelTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='testuser', password='testpass')
+
+    def test_plugin_configuration_is_unique_per_user_and_plugin(self):
+        PluginConfiguration.objects.create(
+            user=self.user,
+            plugin_id='example',
+            enabled=True,
+        )
+
+        with self.assertRaises(IntegrityError):
+            PluginConfiguration.objects.create(
+                user=self.user,
+                plugin_id='example',
+                enabled=False,
+            )

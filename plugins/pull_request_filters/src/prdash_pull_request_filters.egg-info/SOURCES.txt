@@ -1,0 +1,9 @@
+pyproject.toml
+src/prdash_pull_request_filters/__init__.py
+src/prdash_pull_request_filters/plugin.py
+src/prdash_pull_request_filters.egg-info/PKG-INFO
+src/prdash_pull_request_filters.egg-info/SOURCES.txt
+src/prdash_pull_request_filters.egg-info/dependency_links.txt
+src/prdash_pull_request_filters.egg-info/entry_points.txt
+src/prdash_pull_request_filters.egg-info/top_level.txt
+src/prdash_pull_request_filters/templates/filters.html

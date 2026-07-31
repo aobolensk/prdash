@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prdash-pull-request-filters"
+version = "1.0.0"
+description = "Pull request filter plugin for prdash"
+requires-python = ">=3.12"
+
+[project.entry-points."prdash.plugins"]
+pull-request-filters = "prdash_pull_request_filters.plugin:plugin"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+prdash_pull_request_filters = ["templates/*.html"]

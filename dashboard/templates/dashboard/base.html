@@ -1,13 +1,13 @@
+{% load static socialaccount plugin_tags %}
 <!DOCTYPE html>
 <html lang="en" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}PR Dashboard{% endblock %}</title>
-    {% load static %}
-    {% load socialaccount %}
     <link rel="icon" href="{% static 'favicon.ico' %}" type="image/x-icon">
     <link rel="stylesheet" href="{% static 'dashboard/css/styles.css' %}">
+    {% plugin_slot 'head' %}
     <script src="{% static 'dashboard/js/htmx.min.js' %}" defer></script>
 </head>
 <body>
@@ -20,10 +20,7 @@
                     <span class="theme-icon-dark">&#9790;</span>
                 </button>
                 {% if user.is_authenticated %}
-                    <span id="github-status-container"
-                          hx-get="{% url 'dashboard:github_status' %}"
-                          hx-trigger="load, every 60s"
-                          hx-swap="innerHTML"></span>
+                    {% plugin_slot 'header.status' %}
                     <span class="user-info">{{ user.username }}</span>
                     {% block header_action %}
                     <a href="{% url 'dashboard:stats' %}" class="btn btn-icon" title="Stats">

@@ -1,9 +1,16 @@
+from importlib import import_module
 from unittest.mock import MagicMock, patch
 
 import requests
 from django.test import TestCase
 
-from dashboard.github_status import GitHubStatus, get_github_status
+from dashboard.plugin_manager import plugin_manager
+
+plugin_manager.load('github-status', {'github-status'})
+
+status_module = import_module('prdash_github_status.status')
+GitHubStatus = status_module.GitHubStatus
+get_github_status = status_module.get_github_status
 
 
 class GetGitHubStatusTests(TestCase):
@@ -15,8 +22,8 @@ class GetGitHubStatusTests(TestCase):
         response.json.return_value = {'components': components}
         return response
 
-    @patch('dashboard.github_status.cache')
-    @patch('dashboard.github_status.requests.get')
+    @patch('prdash_github_status.status.cache')
+    @patch('prdash_github_status.status.requests.get')
     def test_all_tracked_components_operational(self, mock_get, mock_cache):
         mock_cache.get.return_value = None
         mock_get.return_value = self._components_response([
@@ -31,8 +38,8 @@ class GetGitHubStatusTests(TestCase):
         self.assertEqual(status.degraded_components, [])
         self.assertTrue(status.known)
 
-    @patch('dashboard.github_status.cache')
-    @patch('dashboard.github_status.requests.get')
+    @patch('prdash_github_status.status.cache')
+    @patch('prdash_github_status.status.requests.get')
     def test_tracked_component_degraded(self, mock_get, mock_cache):
         mock_cache.get.return_value = None
         mock_get.return_value = self._components_response([
@@ -45,8 +52,8 @@ class GetGitHubStatusTests(TestCase):
         self.assertFalse(status.healthy)
         self.assertEqual(status.degraded_components, ['Pull Requests'])
 
-    @patch('dashboard.github_status.cache')
-    @patch('dashboard.github_status.requests.get')
+    @patch('prdash_github_status.status.cache')
+    @patch('prdash_github_status.status.requests.get')
     def test_request_failure_returns_unknown(self, mock_get, mock_cache):
         mock_cache.get.return_value = None
         mock_cache.add.return_value = True
@@ -57,8 +64,8 @@ class GetGitHubStatusTests(TestCase):
         self.assertFalse(status.known)
         self.assertTrue(status.healthy)
 
-    @patch('dashboard.github_status.cache')
-    @patch('dashboard.github_status.requests.get')
+    @patch('prdash_github_status.status.cache')
+    @patch('prdash_github_status.status.requests.get')
     def test_malformed_response_returns_unknown(self, mock_get, mock_cache):
         mock_cache.get.return_value = None
         mock_cache.add.return_value = True
@@ -68,7 +75,7 @@ class GetGitHubStatusTests(TestCase):
 
         self.assertFalse(status.known)
 
-    @patch('dashboard.github_status.cache')
+    @patch('prdash_github_status.status.cache')
     def test_uses_cache_when_present(self, mock_cache):
         cached_status = GitHubStatus(degraded_components=['API Requests'])
         mock_cache.get.return_value = cached_status
@@ -77,8 +84,8 @@ class GetGitHubStatusTests(TestCase):
 
         self.assertIs(status, cached_status)
 
-    @patch('dashboard.github_status.cache')
-    @patch('dashboard.github_status.requests.get')
+    @patch('prdash_github_status.status.cache')
+    @patch('prdash_github_status.status.requests.get')
     def test_concurrent_miss_does_not_fetch(self, mock_get, mock_cache):
         mock_cache.get.return_value = None
         mock_cache.add.return_value = False

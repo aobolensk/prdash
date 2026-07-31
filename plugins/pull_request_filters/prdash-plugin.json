@@ -1,0 +1,9 @@
+{
+  "id": "pull-request-filters",
+  "name": "Pull Request Filters",
+  "version": "1.0.0",
+  "api_version": "1.0",
+  "description": "Filter and sort pull requests by author, review, CI, draft, and merge state.",
+  "entrypoint": "prdash_pull_request_filters.plugin:plugin",
+  "python_path": "src"
+}

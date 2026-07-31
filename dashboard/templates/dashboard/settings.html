@@ -50,6 +50,17 @@
                 {% include 'dashboard/partials/_preferences_form.html' %}
             </div>
         </div>
+
+        <div class="settings-section">
+            <h2>Plugins</h2>
+            <p class="settings-description">
+                Discovered plugins stay inactive until you enable them.
+            </p>
+
+            <div id="plugin-settings-container">
+                {% include 'dashboard/partials/_plugin_settings.html' %}
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}
