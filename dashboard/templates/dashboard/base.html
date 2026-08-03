@@ -70,6 +70,13 @@
         // Fields highlighted (and, per-field, where a matched window is drawn).
         const PR_HL_SELECTOR = '.pr-title, .pr-repo, .pr-number, .pr-author, .pr-branch-name, .pr-linked-issues, .pr-label';
 
+        // Pill-field controllers for the include/exclude search inputs, set up in
+        // DOMContentLoaded. Tokens are {kind: 'text'|'repo'|'label', value} objects;
+        // repo/label tokens come from committed suggestion pills and match exactly,
+        // while text tokens are the free-typed words and match fuzzily as before.
+        let prIncludeField = null;
+        let prExcludeField = null;
+
         // Typo budget scales with token length: short tokens must match exactly.
         function prMaxTypos(len) {
             if (len < 4) return 0;
@@ -115,20 +122,47 @@
             return maxD > 0 && prFuzzyWindow(haystack, token, maxD) !== null;
         }
 
-        function prQueryTokens(query) {
-            return query.split(/\s+/).filter(Boolean);
+        // A pill token (kind 'repo'/'label') must match its dedicated field exactly;
+        // a free-typed 'text' token keeps the original fuzzy substring match. Exact
+        // matching for pills avoids a multi-word label like "good first issue" being
+        // split into unrelated words by the fuzzy matcher.
+        function prTokenMatchesCard(token, card, haystack) {
+            if (token.kind === 'repo') {
+                return (card.dataset.repo || '').toLowerCase() === token.value;
+            }
+            if (token.kind === 'label') {
+                const labels = (card.dataset.labels || '').toLowerCase().split('|').filter(Boolean);
+                return labels.indexOf(token.value) !== -1;
+            }
+            return prTokenMatches(token.value, haystack);
         }
 
-        function prCardMatches(tokens, haystack, excludeTokens) {
-            // Multi-token AND: each token must (fuzzily) match somewhere in the haystack.
+        function prCardMatches(tokens, card, haystack, excludeTokens) {
+            // Multi-token AND: each token must match somewhere on the card.
             for (const token of tokens) {
-                if (!prTokenMatches(token, haystack)) return false;
+                if (!prTokenMatchesCard(token, card, haystack)) return false;
             }
             // Any exclude token matching rules the card out.
             for (const token of excludeTokens) {
-                if (prTokenMatches(token, haystack)) return false;
+                if (prTokenMatchesCard(token, card, haystack)) return false;
             }
             return true;
+        }
+
+        // Committed pills plus the still-being-typed free-text words, as tokens for
+        // matching (lowercased) and display parts for the "no results" message.
+        function prFieldTokens(field) {
+            if (!field) return { tokens: [], displayParts: [] };
+            const tokens = field.pills.map(p => ({ kind: p.kind, value: p.value.toLowerCase() }));
+            const displayParts = field.pills.map(p => p.value);
+            const freeText = field.inputEl.value.trim();
+            if (freeText) {
+                displayParts.push(freeText);
+                freeText.toLowerCase().split(/\s+/).filter(Boolean).forEach(word => {
+                    tokens.push({ kind: 'text', value: word });
+                });
+            }
+            return { tokens, displayParts };
         }
 
         function prClearHighlights(root) {
@@ -190,55 +224,251 @@
             node.parentNode.replaceChild(frag, node);
         }
 
-        function prHighlightCard(card, tokens) {
+        function prHighlightCard(card, tokenValues) {
             // A token gets a fuzzy highlight only if it has no exact substring
             // match anywhere on the card; exact matches are highlighted in place.
+            // Repo/label pill values are plain strings that appear verbatim in
+            // data-search, so they highlight the same way as free-typed words.
             const haystack = (card.dataset.search || '').toLowerCase();
-            const fuzzyTokens = new Set(tokens.filter(t => haystack.indexOf(t) === -1));
+            const fuzzyTokens = new Set(tokenValues.filter(t => haystack.indexOf(t) === -1));
             card.querySelectorAll(PR_HL_SELECTOR).forEach(el => {
                 const textNodes = [];
                 const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
                 let n;
                 while ((n = walker.nextNode())) textNodes.push(n);
-                textNodes.forEach(node => prHighlightTextNode(node, tokens, fuzzyTokens));
+                textNodes.forEach(node => prHighlightTextNode(node, tokenValues, fuzzyTokens));
             });
+        }
+
+        // ---- Autosuggest pills (repo / label) for the search inputs ----
+        // A suggestion only appears once the word being typed has reached this
+        // length; below it, there's not enough signal to guess what the user means.
+        const PR_SUGGEST_MIN_CHARS = 3;
+        const PR_SUGGEST_MAX_ITEMS = 8;
+
+        // Repo names come from the tracked repos baked into data-repos; label
+        // names are read live off whatever PR cards are currently rendered, so
+        // suggestions always reflect what's actually on the page.
+        function prSuggestCandidates() {
+            const bar = document.getElementById('pr-search-bar');
+            const content = document.getElementById('pr-content');
+            const candidates = [];
+            if (bar) {
+                (bar.dataset.repos || '').split('|').filter(Boolean).forEach(function(name) {
+                    candidates.push({ kind: 'repo', value: name });
+                });
+            }
+            const seenLabels = new Set();
+            if (content) {
+                content.querySelectorAll('.pr-label').forEach(function(el) {
+                    const name = el.textContent.trim();
+                    const key = name.toLowerCase();
+                    if (name && !seenLabels.has(key)) {
+                        seenLabels.add(key);
+                        candidates.push({ kind: 'label', value: name });
+                    }
+                });
+            }
+            return candidates;
+        }
+
+        function prCreatePillElement(field, pill) {
+            const el = document.createElement('span');
+            el.className = 'pr-search-pill' + (field.isExclude ? ' pr-search-pill-exclude' : '');
+            const typeEl = document.createElement('span');
+            typeEl.className = 'pr-search-pill-type';
+            typeEl.textContent = pill.kind;
+            const valueEl = document.createElement('span');
+            valueEl.textContent = pill.value;
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'pr-search-pill-remove';
+            removeBtn.setAttribute('aria-label', 'Remove ' + pill.value);
+            removeBtn.textContent = '×';
+            removeBtn.addEventListener('click', function(evt) {
+                evt.stopPropagation();
+                prRemovePill(field, pill);
+                field.inputEl.focus();
+            });
+            el.appendChild(typeEl);
+            el.appendChild(valueEl);
+            el.appendChild(removeBtn);
+            return el;
+        }
+
+        function prAddPill(field, kind, value) {
+            const pill = { kind: kind, value: value };
+            pill.el = prCreatePillElement(field, pill);
+            field.pills.push(pill);
+            field.fieldEl.insertBefore(pill.el, field.inputEl);
+            applyPrSearch();
+        }
+
+        // Removes the whole pill as one unit rather than character by character,
+        // whether triggered by its "x" button or by Backspace at an empty input.
+        function prRemovePill(field, pill) {
+            const idx = field.pills.indexOf(pill);
+            if (idx === -1) return;
+            field.pills.splice(idx, 1);
+            pill.el.remove();
+            applyPrSearch();
+        }
+
+        function prHideSuggestions(field) {
+            field.suggestions = [];
+            field.activeIndex = -1;
+            field.suggestEl.hidden = true;
+            field.suggestEl.innerHTML = '';
+        }
+
+        function prRenderSuggestions(field) {
+            field.suggestEl.innerHTML = '';
+            field.suggestions.forEach(function(candidate, idx) {
+                const item = document.createElement('div');
+                item.className = 'pr-search-suggest-item' + (idx === field.activeIndex ? ' active' : '');
+                const typeEl = document.createElement('span');
+                typeEl.className = 'pr-suggest-type';
+                typeEl.textContent = candidate.kind;
+                const valueEl = document.createElement('span');
+                valueEl.textContent = candidate.value;
+                item.appendChild(typeEl);
+                item.appendChild(valueEl);
+                // mousedown (not click) fires before the input would lose focus,
+                // and preventDefault keeps focus in the input entirely.
+                item.addEventListener('mousedown', function(evt) {
+                    evt.preventDefault();
+                    prCommitSuggestion(field, candidate);
+                });
+                field.suggestEl.appendChild(item);
+            });
+            field.suggestEl.hidden = false;
+        }
+
+        function prTrailingWord(value) {
+            const match = value.match(/(\S+)$/);
+            return match ? match[1] : '';
+        }
+
+        function prUpdateSuggestions(field) {
+            const word = prTrailingWord(field.inputEl.value);
+            if (word.length < PR_SUGGEST_MIN_CHARS) {
+                prHideSuggestions(field);
+                return;
+            }
+            const wordLower = word.toLowerCase();
+            const taken = new Set(field.pills.map(p => p.kind + ':' + p.value.toLowerCase()));
+            const matches = prSuggestCandidates().filter(function(c) {
+                return c.value.toLowerCase().indexOf(wordLower) !== -1 &&
+                    !taken.has(c.kind + ':' + c.value.toLowerCase());
+            }).slice(0, PR_SUGGEST_MAX_ITEMS);
+            if (!matches.length) {
+                prHideSuggestions(field);
+                return;
+            }
+            field.suggestions = matches;
+            field.activeIndex = 0;
+            prRenderSuggestions(field);
+        }
+
+        function prCommitSuggestion(field, candidate) {
+            // Drop the word currently being typed; it's replaced by the pill.
+            field.inputEl.value = field.inputEl.value.replace(/\S+$/, '').replace(/\s+$/, '');
+            prAddPill(field, candidate.kind, candidate.value);
+            prHideSuggestions(field);
+            field.inputEl.focus();
+        }
+
+        function prHandleFieldKeydown(field, evt) {
+            const suggestOpen = field.suggestions.length > 0 && !field.suggestEl.hidden;
+            if (evt.key === 'Escape') {
+                evt.preventDefault();
+                if (suggestOpen) {
+                    prHideSuggestions(field);
+                } else {
+                    togglePrSearch(false);
+                }
+                return;
+            }
+            if (suggestOpen) {
+                if (evt.key === 'ArrowDown') {
+                    evt.preventDefault();
+                    field.activeIndex = (field.activeIndex + 1) % field.suggestions.length;
+                    prRenderSuggestions(field);
+                    return;
+                }
+                if (evt.key === 'ArrowUp') {
+                    evt.preventDefault();
+                    field.activeIndex = (field.activeIndex - 1 + field.suggestions.length) % field.suggestions.length;
+                    prRenderSuggestions(field);
+                    return;
+                }
+                if ((evt.key === 'Enter' || evt.key === 'Tab') && field.activeIndex >= 0) {
+                    evt.preventDefault();
+                    prCommitSuggestion(field, field.suggestions[field.activeIndex]);
+                    return;
+                }
+            }
+            // Backspace on an empty input removes the trailing pill as a whole,
+            // rather than requiring the pill to be broken apart first.
+            if (evt.key === 'Backspace' && field.inputEl.value === '' && field.pills.length) {
+                evt.preventDefault();
+                prRemovePill(field, field.pills[field.pills.length - 1]);
+            }
+        }
+
+        function initPillField(fieldEl, inputEl, suggestEl, isExclude) {
+            if (!fieldEl || !inputEl || !suggestEl) return null;
+            const field = {
+                fieldEl: fieldEl,
+                inputEl: inputEl,
+                suggestEl: suggestEl,
+                isExclude: !!isExclude,
+                pills: [],
+                suggestions: [],
+                activeIndex: -1
+            };
+            inputEl.addEventListener('input', function() {
+                prUpdateSuggestions(field);
+                applyPrSearch();
+            });
+            inputEl.addEventListener('keydown', function(evt) {
+                prHandleFieldKeydown(field, evt);
+            });
+            return field;
         }
 
         function applyPrSearch() {
             const bar = document.getElementById('pr-search-bar');
             const input = document.getElementById('pr-search-input');
-            const excludeInput = document.getElementById('pr-search-exclude-input');
             const countEl = document.getElementById('pr-search-count');
             const content = document.getElementById('pr-content');
             if (!bar || !input || !content) return;
 
             const cards = content.querySelectorAll('.pr-card');
             const active = !bar.hidden;
-            const query = active ? input.value.trim().toLowerCase() : '';
-            const excludeQuery = active && excludeInput ? excludeInput.value.trim().toLowerCase() : '';
+            const include = active ? prFieldTokens(prIncludeField) : { tokens: [], displayParts: [] };
+            const exclude = active ? prFieldTokens(prExcludeField) : { tokens: [], displayParts: [] };
 
             let existingEmpty = content.querySelector('.pr-search-empty');
 
             // Always strip previous highlights before recomputing.
             prClearHighlights(content);
 
-            if (!query && !excludeQuery) {
+            if (!include.tokens.length && !exclude.tokens.length) {
                 cards.forEach(card => { card.hidden = false; });
                 if (countEl) countEl.textContent = '';
                 if (existingEmpty) existingEmpty.remove();
                 return;
             }
 
-            const tokens = prQueryTokens(query);
-            const excludeTokens = prQueryTokens(excludeQuery);
             let matches = 0;
             cards.forEach(card => {
                 const haystack = (card.dataset.search || '').toLowerCase();
-                const show = prCardMatches(tokens, haystack, excludeTokens);
+                const show = prCardMatches(include.tokens, card, haystack, exclude.tokens);
                 card.hidden = !show;
                 if (show) {
                     matches++;
-                    prHighlightCard(card, tokens);
+                    prHighlightCard(card, include.tokens.map(t => t.value));
                 }
             });
 
@@ -252,8 +482,8 @@
                     list.appendChild(existingEmpty);
                 }
                 const queryParts = [];
-                if (input.value.trim()) queryParts.push(input.value.trim());
-                if (excludeInput && excludeInput.value.trim()) queryParts.push('-' + excludeInput.value.trim());
+                if (include.displayParts.length) queryParts.push(include.displayParts.join(' '));
+                if (exclude.displayParts.length) queryParts.push('-' + exclude.displayParts.join(' -'));
                 existingEmpty.textContent = 'No PRs match “' + queryParts.join(' ') + '”';
             } else if (existingEmpty) {
                 existingEmpty.remove();
@@ -286,6 +516,9 @@
             if (open) {
                 input.focus();
                 input.select();
+            } else {
+                if (prIncludeField) prHideSuggestions(prIncludeField);
+                if (prExcludeField) prHideSuggestions(prExcludeField);
             }
             applyPrSearch();
         }
@@ -419,15 +652,22 @@
                 el.hidden = !(evt.detail.value ?? evt.detail);
             });
 
-            const searchInput = document.getElementById('pr-search-input');
-            const searchExcludeInput = document.getElementById('pr-search-exclude-input');
-            [searchInput, searchExcludeInput].forEach(function(el) {
-                if (!el) return;
-                el.addEventListener('input', applyPrSearch);
-                el.addEventListener('keydown', function(evt) {
-                    if (evt.key === 'Escape') {
-                        evt.preventDefault();
-                        togglePrSearch(false);
+            prIncludeField = initPillField(
+                document.getElementById('pr-search-field'),
+                document.getElementById('pr-search-input'),
+                document.getElementById('pr-search-suggest'),
+                false
+            );
+            prExcludeField = initPillField(
+                document.getElementById('pr-search-exclude-field'),
+                document.getElementById('pr-search-exclude-input'),
+                document.getElementById('pr-search-exclude-suggest'),
+                true
+            );
+            document.addEventListener('click', function(evt) {
+                [prIncludeField, prExcludeField].forEach(function(field) {
+                    if (field && !field.fieldEl.contains(evt.target)) {
+                        prHideSuggestions(field);
                     }
                 });
             });
