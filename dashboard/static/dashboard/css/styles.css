@@ -836,12 +836,19 @@ a:hover {
 }
 
 .pr-auto-merge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     background-color: #ae89f9;
     color: #1c1c1c;
     padding: 2px 8px;
     border-radius: 12px;
     font-size: 11px;
     font-weight: 500;
+}
+
+.pr-auto-merge-icon {
+    animation: pulse 2s ease-in-out infinite;
 }
 
 .pr-conflicts {
