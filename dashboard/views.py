@@ -584,7 +584,7 @@ def delete_pat(request):
 @require_POST
 def save_preferences(request):
     """Save user preferences."""
-    valid_intervals = [choice[0] for choice in UserPreferences._meta.get_field('auto_refresh_interval_my_prs').choices]
+    valid_intervals = [choice[0] for choice in UserPreferences._meta.get_field('auto_refresh_interval_open').choices]
     valid_page_sizes = [choice[0] for choice in UserPreferences._meta.get_field('pr_list_page_size').choices]
 
     def parse_interval(field_name):

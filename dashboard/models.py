@@ -72,7 +72,8 @@ AUTO_REFRESH_INTERVAL_CHOICES = [
 ]
 
 AUTO_REFRESH_CATEGORIES = [
-    ('my_prs', 'My PRs'),
+    ('open', 'Open'),
+    ('merged', 'Merged'),
     ('review_requests', 'Review Requests'),
     ('assigned', 'Assigned'),
 ]
@@ -85,10 +86,14 @@ PR_LIST_PAGE_SIZE_CHOICES = [
 class UserPreferences(models.Model):
     """User preferences for dashboard behavior."""
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='preferences')
-    auto_refresh_my_prs = models.BooleanField(default=False)
+    auto_refresh_open = models.BooleanField(default=False)
+    auto_refresh_merged = models.BooleanField(default=False)
     auto_refresh_review_requests = models.BooleanField(default=False)
     auto_refresh_assigned = models.BooleanField(default=False)
-    auto_refresh_interval_my_prs = models.PositiveIntegerField(
+    auto_refresh_interval_open = models.PositiveIntegerField(
+        default=5, choices=AUTO_REFRESH_INTERVAL_CHOICES
+    )
+    auto_refresh_interval_merged = models.PositiveIntegerField(
         default=5, choices=AUTO_REFRESH_INTERVAL_CHOICES
     )
     auto_refresh_interval_review_requests = models.PositiveIntegerField(
@@ -110,8 +115,8 @@ class UserPreferences(models.Model):
         return f"Preferences for {self.user.username}"
 
     TAB_CATEGORIES = {
-        'open': 'my_prs',
-        'merged': 'my_prs',
+        'open': 'open',
+        'merged': 'merged',
         'review_requests': 'review_requests',
         'assigned': 'assigned',
     }
