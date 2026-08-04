@@ -349,6 +349,16 @@
             return match ? match[1] : '';
         }
 
+        // Match distance for ranking suggestions: 0 for an exact substring match,
+        // otherwise the fuzzy edit distance (reusing the same typo budget as the
+        // main search), or null if the candidate doesn't match at all.
+        function prSuggestMatchDistance(wordLower, maxD, candidateLower) {
+            if (candidateLower.indexOf(wordLower) !== -1) return 0;
+            if (maxD === 0) return null;
+            const w = prFuzzyWindow(candidateLower, wordLower, maxD);
+            return w ? w.d : null;
+        }
+
         function prUpdateSuggestions(field) {
             const word = prTrailingWord(field.inputEl.value);
             if (word.length < PR_SUGGEST_MIN_CHARS) {
@@ -356,11 +366,18 @@
                 return;
             }
             const wordLower = word.toLowerCase();
+            const maxD = prMaxTypos(wordLower.length);
             const taken = new Set(field.pills.map(p => p.kind + ':' + p.value.toLowerCase()));
-            const matches = prSuggestCandidates().filter(function(c) {
-                return c.value.toLowerCase().indexOf(wordLower) !== -1 &&
-                    !taken.has(c.kind + ':' + c.value.toLowerCase());
-            }).slice(0, PR_SUGGEST_MAX_ITEMS);
+            const matches = prSuggestCandidates()
+                .filter(function(c) { return !taken.has(c.kind + ':' + c.value.toLowerCase()); })
+                .map(function(c) {
+                    const d = prSuggestMatchDistance(wordLower, maxD, c.value.toLowerCase());
+                    return d === null ? null : { candidate: c, d: d };
+                })
+                .filter(Boolean)
+                .sort(function(a, b) { return a.d - b.d; })
+                .slice(0, PR_SUGGEST_MAX_ITEMS)
+                .map(function(m) { return m.candidate; });
             if (!matches.length) {
                 prHideSuggestions(field);
                 return;
