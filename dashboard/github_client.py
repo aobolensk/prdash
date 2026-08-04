@@ -2,7 +2,7 @@
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
@@ -42,6 +42,9 @@ PR_GRAPHQL_FIELDS = '''
     mergeable
     autoMergeRequest {
         enabledAt
+    }
+    mergeQueueEntry {
+        id
     }
     headRefName
     headRepository {
@@ -163,7 +166,9 @@ class PullRequestInfo:
     mergeable: Optional[str] = None
     merged_at: Optional[datetime] = None
     auto_merge_enabled: bool = False
+    is_queued: bool = False
     linked_issues: list[LinkedIssue] = None
+    plugin_data: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if self.linked_issues is None:
@@ -850,6 +855,7 @@ class GitHubClient:
 
             auto_merge_request = pr_data.get('autoMergeRequest')
             auto_merge_enabled = auto_merge_request is not None and auto_merge_request.get('enabledAt') is not None
+            is_queued = pr_data.get('mergeQueueEntry') is not None
 
             linked_issues = [
                 LinkedIssue(number=issue['number'], url=issue['url'])
@@ -879,6 +885,7 @@ class GitHubClient:
                 mergeable=mergeable,
                 merged_at=merged_at,
                 auto_merge_enabled=auto_merge_enabled,
+                is_queued=is_queued,
                 linked_issues=linked_issues,
             )
         except Exception:

@@ -851,6 +851,22 @@ a:hover {
     animation: pulse 2s ease-in-out infinite;
 }
 
+.pr-queued {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background-color: #f0b429;
+    color: #1c1c1c;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.pr-queued-icon {
+    animation: pulse 2s ease-in-out infinite;
+}
+
 .pr-conflicts {
     background-color: var(--color-danger);
     color: #ffffff;
