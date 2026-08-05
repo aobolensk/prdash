@@ -110,8 +110,12 @@ PR_GRAPHQL_FIELDS = '''
     comments {
         totalCount
     }
-    reviewThreads {
-        totalCount
+    reviewThreads(first: 100) {
+        nodes {
+            comments {
+                totalCount
+            }
+        }
     }
 '''
 
@@ -1048,7 +1052,10 @@ class GitHubClient:
         try:
             reviews = pr_data.get('reviews', {}).get('nodes', [])
             comment_count = pr_data.get('comments', {}).get('totalCount', 0)
-            comment_count += pr_data.get('reviewThreads', {}).get('totalCount', 0)
+            comment_count += sum(
+                thread.get('comments', {}).get('totalCount', 0)
+                for thread in pr_data.get('reviewThreads', {}).get('nodes', [])
+            )
             review_decision = pr_data.get('reviewDecision')
 
             latest_review_by_user = self._compute_latest_review_states(reviews)
