@@ -409,3 +409,107 @@ class GitHubClientResponseSummarizationTests(TestCase):
         summary = self.client._summarize_response(response)
 
         self.assertEqual(summary, 'empty response body')
+
+
+class GitHubClientConsolidatedSearchTests(TestCase):
+    """Verify multi-repo fetchers issue one search call per query, not one per repo."""
+
+    def setUp(self):
+        self.client = GitHubClient(user=None)
+        self.repos = [('org', 'repo1'), ('org', 'repo2'), ('org', 'repo3')]
+        self.client._get_token = MagicMock(return_value='token')
+        self.client.get_username = MagicMock(return_value='testuser')
+
+    @staticmethod
+    def _empty_search_response():
+        response = MagicMock(status_code=200)
+        response.json.return_value = {'items': []}
+        return response
+
+    @patch('dashboard.github_client.requests.get')
+    def test_get_all_merged_prs_issues_one_search_call(self, mock_get):
+        mock_get.return_value = self._empty_search_response()
+
+        result = self.client.get_all_merged_prs(self.repos, author='testuser')
+
+        self.assertEqual(result, [])
+        self.assertEqual(mock_get.call_count, 1)
+
+    @patch('dashboard.github_client.requests.get')
+    def test_get_all_assigned_prs_issues_one_search_call(self, mock_get):
+        mock_get.return_value = self._empty_search_response()
+
+        result = self.client.get_all_assigned_prs(self.repos)
+
+        self.assertEqual(result, [])
+        self.assertEqual(mock_get.call_count, 1)
+
+    @patch('dashboard.github_client.requests.get')
+    def test_get_all_review_requests_issues_one_search_call(self, mock_get):
+        mock_get.return_value = self._empty_search_response()
+
+        result = self.client.get_all_review_requests(self.repos)
+
+        self.assertEqual(result, [])
+        self.assertEqual(mock_get.call_count, 1)
+
+    @patch('dashboard.github_client.requests.get')
+    def test_get_all_review_requests_include_all_issues_two_search_calls(self, mock_get):
+        mock_get.return_value = self._empty_search_response()
+
+        result = self.client.get_all_review_requests(self.repos, include_all=True)
+
+        self.assertEqual(result, [])
+        self.assertEqual(mock_get.call_count, 2)
+
+    @patch('dashboard.github_client.requests.get')
+    def test_get_all_review_requests_include_all_unions_pending_and_reviewed(self, mock_get):
+        def fake_get(url, params=None, headers=None, timeout=None):
+            response = MagicMock(status_code=200)
+            if 'review-requested' in params['q']:
+                items = [{'number': 1, 'repository_url': 'https://api.github.com/repos/org/repo1'}]
+            else:
+                items = [{'number': 2, 'repository_url': 'https://api.github.com/repos/org/repo1'}]
+            response.json.return_value = {'items': items}
+            return response
+
+        mock_get.side_effect = fake_get
+        self.client._fetch_prs_multi_repo_graphql = MagicMock(return_value=[])
+
+        self.client.get_all_review_requests(self.repos, include_all=True)
+
+        self.client._fetch_prs_multi_repo_graphql.assert_called_once_with(
+            {('org', 'repo1'): [1, 2]}
+        )
+
+    @patch('dashboard.github_client.requests.get')
+    def test_search_prs_consolidated_paginates_past_first_page(self, mock_get):
+        """A full first page must not silently truncate results at 100."""
+        full_page = MagicMock(status_code=200)
+        full_page.json.return_value = {
+            'items': [
+                {'number': i, 'repository_url': 'https://api.github.com/repos/org/repo1'}
+                for i in range(100)
+            ]
+        }
+        second_page = MagicMock(status_code=200)
+        second_page.json.return_value = {
+            'items': [{'number': 100, 'repository_url': 'https://api.github.com/repos/org/repo1'}]
+        }
+        mock_get.side_effect = [full_page, second_page]
+
+        result = self.client._search_prs_consolidated('is:pr is:open author:testuser', self.repos)
+
+        self.assertEqual(mock_get.call_count, 2)
+        self.assertEqual(result[('org', 'repo1')], list(range(101)))
+
+    @patch('dashboard.github_client.requests.get')
+    def test_search_prs_consolidated_non_rate_limit_403_reports_error(self, mock_get):
+        response = MagicMock(status_code=403, text='SAML SSO enforcement required')
+        response.json.side_effect = ValueError
+        mock_get.return_value = response
+
+        result = self.client._search_prs_consolidated('is:pr is:open author:testuser', self.repos)
+
+        self.assertEqual(result, {})
+        self.assertTrue(self.client.errors)

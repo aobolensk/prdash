@@ -1,5 +1,6 @@
 """GitHub API client for fetching PR information."""
 import logging
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -223,6 +224,10 @@ class GitHubClient:
         self._grouped_errors = {}  # {(error_type, detail): [repo1, repo2, ...]}
         self._grouped_warnings = {}  # {(warning_type, detail): [repo1, repo2, ...]}
         self._rate_limited_repos = set()
+        # Guards the collections above: multiple searches can run concurrently
+        # (e.g. get_all_review_requests' include_all branch) and each may report
+        # errors/warnings from its own thread.
+        self._message_lock = threading.Lock()
 
     @property
     def client(self):
@@ -358,12 +363,13 @@ class GitHubClient:
     def _add_grouped_message(
         self, collection: dict, msg_type: str, repo_name: str, detail: str
     ) -> None:
-        """Add a message to a grouped collection."""
-        key = (msg_type, detail)
-        if key not in collection:
-            collection[key] = []
-        if repo_name and repo_name not in collection[key]:
-            collection[key].append(repo_name)
+        """Add a message to a grouped collection. Thread-safe: callers may run in parallel."""
+        with self._message_lock:
+            key = (msg_type, detail)
+            if key not in collection:
+                collection[key] = []
+            if repo_name and repo_name not in collection[key]:
+                collection[key].append(repo_name)
 
     def _add_error(self, error_type: str, repo_name: str = '', detail: str = '') -> None:
         """Add a structured error, grouped by type and detail."""
@@ -1231,23 +1237,35 @@ class GitHubClient:
         query = f"is:pr is:open author:{author}"
         pr_data = self._search_prs_consolidated(query, repos)
 
+        all_prs = self._fetch_multi_repo_prs(pr_data)
+        all_prs.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
+        return all_prs
+
+    def _fetch_multi_repo_prs(
+        self, pr_data: dict[tuple[str, str], list[int]]
+    ) -> list[PullRequestInfo]:
+        """Shared tail for the get_all_* multi-repo fetchers.
+
+        Guards the empty-result case, runs the batched GraphQL fetch, and
+        finalizes rate-limit warnings either way. Callers apply their own
+        sort key (and, for review requests, extra filtering) afterwards.
+        """
         if not pr_data:
             self.finalize_warnings()
             return []
 
-        # Fetch all PRs across repos in batched multi-repo GraphQL queries
         all_prs = self._fetch_prs_multi_repo_graphql(pr_data)
-
         self.finalize_warnings()
-        all_prs.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
         return all_prs
 
     def _search_prs_consolidated(
         self, query: str, repos: list[tuple[str, str]]
     ) -> dict[tuple[str, str], list[int]]:
-        """Search for PRs across all repos with a single API call, filter by tracked repos.
+        """Search for PRs across all repos with one query, paginating like _search_prs.
 
-        Returns dict mapping (owner, name) -> [pr_numbers] for matching repos.
+        Filters results down to tracked repos. Returns dict mapping
+        (owner, name) -> [pr_numbers] for matching repos. Any results already
+        gathered from earlier pages are kept even if a later page errors out.
         """
         token = self._get_token()
         if not token:
@@ -1259,57 +1277,73 @@ class GitHubClient:
             'X-GitHub-Api-Version': '2022-11-28',
         }
 
+        tracked_repos = {(owner.lower(), name.lower()) for owner, name in repos}
+        result: dict[tuple[str, str], list[int]] = {}
+        page = 1
+
         try:
-            response = requests.get(
-                'https://api.github.com/search/issues',
-                params={
-                    'q': query,
-                    'sort': 'updated',
-                    'order': 'desc',
-                    'per_page': 100,
-                },
-                headers=headers,
-                timeout=30,
-            )
-
-            if response.status_code == 403:
-                if 'rate limit' in response.text.lower():
-                    self._add_warning("Rate limit hit. Some PRs may not be loaded.")
-                return {}
-
-            if response.status_code != 200:
-                self._handle_error(
-                    '', '', status_code=response.status_code,
-                    message=self._summarize_response(response),
-                    operation='PR search',
+            while True:
+                response = requests.get(
+                    'https://api.github.com/search/issues',
+                    params={
+                        'q': query,
+                        'sort': 'updated',
+                        'order': 'desc',
+                        'per_page': 100,
+                        'page': page,
+                    },
+                    headers=headers,
+                    timeout=30,
                 )
-                return {}
 
-            data = response.json()
-            items = data.get('items', [])
+                if response.status_code == 403:
+                    if 'rate limit' in response.text.lower():
+                        self._add_warning("Rate limit hit. Some PRs may not be loaded.")
+                    else:
+                        self._add_error("Access denied", detail=self._summarize_response(response))
+                    return result
 
-            tracked_repos = {(owner.lower(), name.lower()) for owner, name in repos}
+                if response.status_code != 200:
+                    self._add_warning(
+                        f"GitHub returned HTTP {response.status_code}. Some PRs may not be loaded."
+                    )
+                    return result
 
-            result: dict[tuple[str, str], list[int]] = {}
-            for item in items:
-                repo_url = item.get('repository_url', '')
-                parts = repo_url.rstrip('/').split('/')
-                if len(parts) >= 2:
-                    owner, name = parts[-2], parts[-1]
-                    if (owner.lower(), name.lower()) in tracked_repos:
-                        key = (owner, name)
-                        if key not in result:
-                            result[key] = []
-                        result[key].append(item['number'])
+                data = response.json()
+                items = data.get('items', [])
+
+                for item in items:
+                    repo_url = item.get('repository_url', '')
+                    parts = repo_url.rstrip('/').split('/')
+                    if len(parts) >= 2:
+                        owner, name = parts[-2], parts[-1]
+                        if (owner.lower(), name.lower()) in tracked_repos:
+                            result.setdefault((owner, name), []).append(item['number'])
+
+                # GitHub Search API caps at 1000 results; stop if this page wasn't full
+                if len(items) < 100:
+                    break
+                page += 1
 
             return result
 
         except requests.exceptions.Timeout:
             self._add_warning("GitHub search timed out. Try refreshing.")
-            return {}
+            return result
         except requests.exceptions.RequestException:
             self._add_warning("GitHub search failed. Try refreshing.")
-            return {}
+            return result
+
+    @staticmethod
+    def _union_pr_data(
+        *pr_data_dicts: dict[tuple[str, str], list[int]]
+    ) -> dict[tuple[str, str], list[int]]:
+        """Merge multiple (owner, name) -> [pr_numbers] dicts, deduplicating PR numbers."""
+        result: dict[tuple[str, str], set[int]] = {}
+        for pr_data in pr_data_dicts:
+            for key, pr_numbers in pr_data.items():
+                result.setdefault(key, set()).update(pr_numbers)
+        return {key: list(pr_numbers) for key, pr_numbers in result.items()}
 
     def get_merged_prs_for_repo(self, owner: str, name: str, author: Optional[str] = None) -> list[PullRequestInfo]:
         """Get recently merged PRs authored by the specified user (or current user) for a specific repository."""
@@ -1338,36 +1372,23 @@ class GitHubClient:
             self._handle_api_error(e, owner, name)
             return []
 
-    def _fetch_per_repo_parallel(
-        self, repos: list[tuple[str, str]], fetch_fn: callable
-    ) -> list[PullRequestInfo]:
-        """Run fetch_fn(owner, name) for each repo in parallel and flatten the results."""
-        all_prs = []
-
-        with ThreadPoolExecutor(max_workers=min(10, len(repos))) as executor:
-            future_to_repo = {
-                executor.submit(fetch_fn, owner, name): (owner, name)
-                for owner, name in repos
-            }
-
-            for future in as_completed(future_to_repo):
-                owner, name = future_to_repo[future]
-                try:
-                    all_prs.extend(future.result())
-                except Exception as e:
-                    self._handle_api_error(e, owner, name)
-
-        self.finalize_warnings()
-        return all_prs
-
     def get_all_merged_prs(self, repos: list[tuple[str, str]], author: Optional[str] = None) -> list[PullRequestInfo]:
-        """Get all recently merged PRs authored by the specified user (or current user) across multiple repositories."""
+        """Get all recently merged PRs authored by the specified user (or current user) across multiple repositories.
+
+        Uses a single consolidated search query instead of one per repo to reduce API calls.
+        """
         if not repos:
             return []
 
-        all_prs = self._fetch_per_repo_parallel(
-            repos, lambda owner, name: self.get_merged_prs_for_repo(owner, name, author)
-        )
+        if author is None:
+            author = self.get_username()
+            if not author:
+                return []
+
+        query = f"is:pr is:merged author:{author}"
+        pr_data = self._search_prs_consolidated(query, repos)
+
+        all_prs = self._fetch_multi_repo_prs(pr_data)
         all_prs.sort(key=lambda pr: (pr.merged_at or pr.updated_at, pr.number), reverse=True)
         return all_prs
 
@@ -1459,19 +1480,40 @@ class GitHubClient:
             return []
 
         username = self.get_username()
+        if not username:
+            return []
 
-        all_prs = self._fetch_per_repo_parallel(
-            repos,
-            lambda owner, name: self.get_review_requests_for_repo(
-                owner, name, approved_by_me, reviewed_by_me, include_all, author
-            ),
-        )
+        if include_all:
+            pending_query = f"is:pr is:open review-requested:{username}"
+            reviewed_query = f"is:pr is:open reviewed-by:{username}"
+            if author:
+                pending_query += f" author:{author}"
+                reviewed_query += f" author:{author}"
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                pending_future = executor.submit(self._search_prs_consolidated, pending_query, repos)
+                reviewed_future = executor.submit(self._search_prs_consolidated, reviewed_query, repos)
+                pending_data = pending_future.result()
+                reviewed_data = reviewed_future.result()
+
+            pr_data = self._union_pr_data(pending_data, reviewed_data)
+        else:
+            if approved_by_me or reviewed_by_me:
+                query = f"is:pr is:open reviewed-by:{username}"
+            else:
+                query = f"is:pr is:open review-requested:{username}"
+            if author:
+                query += f" author:{author}"
+
+            pr_data = self._search_prs_consolidated(query, repos)
+
+        all_prs = self._fetch_multi_repo_prs(pr_data)
 
         # If approved_by_me, we need to filter PRs where we actually approved
-        if not include_all and approved_by_me and username:
+        if not include_all and approved_by_me:
             all_prs = self.filter_prs_approved_by_user(all_prs, username)
         # If reviewed_by_me, filter to PRs where user has reviewed but NOT approved
-        elif not include_all and reviewed_by_me and username:
+        elif not include_all and reviewed_by_me:
             all_prs = self.filter_prs_reviewed_not_approved_by_user(all_prs, username)
 
         all_prs.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
@@ -1514,15 +1556,25 @@ class GitHubClient:
     def get_all_assigned_prs(self, repos: list[tuple[str, str]], author: Optional[str] = None) -> list[PullRequestInfo]:
         """Get all open PRs where the current user is assigned across multiple repositories.
 
+        Uses a single consolidated search query instead of one per repo to reduce API calls.
+
         Args:
             author: If provided, filter PRs to only include those authored by this user.
         """
         if not repos:
             return []
 
-        all_prs = self._fetch_per_repo_parallel(
-            repos, lambda owner, name: self.get_assigned_prs_for_repo(owner, name, author)
-        )
+        username = self.get_username()
+        if not username:
+            return []
+
+        query = f"is:pr is:open assignee:{username}"
+        if author:
+            query += f" author:{author}"
+
+        pr_data = self._search_prs_consolidated(query, repos)
+
+        all_prs = self._fetch_multi_repo_prs(pr_data)
         all_prs.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
         return all_prs
 
