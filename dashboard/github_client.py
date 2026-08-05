@@ -684,14 +684,23 @@ class GitHubClient:
             return False, f"Error accessing {owner}/{name}: {str(e)}"
 
     def _fetch_prs_batch_graphql(self, owner: str, name: str, pr_numbers: list[int]) -> list[PullRequestInfo]:
-        """Fetch multiple PRs using GraphQL to minimize API calls."""
+        """Fetch multiple PRs using GraphQL to minimize API calls.
+
+        Batches are independent network calls, so they are fetched in parallel.
+        """
         if not pr_numbers:
             return []
 
         if len(pr_numbers) > GRAPHQL_PR_BATCH_SIZE:
+            batches = list(self._iter_chunks(pr_numbers, GRAPHQL_PR_BATCH_SIZE))
             result = []
-            for pr_number_batch in self._iter_chunks(pr_numbers, GRAPHQL_PR_BATCH_SIZE):
-                result.extend(self._fetch_prs_batch_graphql(owner, name, pr_number_batch))
+            with ThreadPoolExecutor(max_workers=min(10, len(batches))) as executor:
+                futures = [
+                    executor.submit(self._fetch_prs_batch_graphql, owner, name, batch)
+                    for batch in batches
+                ]
+                for future in as_completed(futures):
+                    result.extend(future.result())
             return result
 
         try:
@@ -750,6 +759,7 @@ class GitHubClient:
         """Fetch PRs from multiple repos in a single GraphQL query.
 
         This reduces API calls from N (one per repo) to ceil(total_prs / batch_size).
+        Batches are independent network calls, so they are fetched in parallel.
         """
         if not pr_data:
             return []
@@ -763,12 +773,14 @@ class GitHubClient:
         if not all_prs:
             return []
 
-        result = []
         batch_size = 50
+        batches = list(self._iter_chunks(all_prs, batch_size))
 
-        for batch in self._iter_chunks(all_prs, batch_size):
-            batch_result = self._fetch_pr_batch_multi_repo(batch)
-            result.extend(batch_result)
+        result = []
+        with ThreadPoolExecutor(max_workers=min(10, len(batches))) as executor:
+            futures = [executor.submit(self._fetch_pr_batch_multi_repo, batch) for batch in batches]
+            for future in as_completed(futures):
+                result.extend(future.result())
 
         return result
 

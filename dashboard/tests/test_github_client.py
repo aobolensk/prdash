@@ -1,10 +1,11 @@
+import time
 from unittest.mock import MagicMock, patch
 
 import requests
 from django.contrib.auth.models import User
 from django.test import TestCase
 
-from dashboard.github_client import GitHubClient
+from dashboard.github_client import GRAPHQL_PR_BATCH_SIZE, GitHubClient
 from dashboard.models import PersonalAccessToken
 
 
@@ -513,3 +514,48 @@ class GitHubClientConsolidatedSearchTests(TestCase):
 
         self.assertEqual(result, {})
         self.assertTrue(self.client.errors)
+
+
+class GitHubClientBatchFetchConcurrencyTests(TestCase):
+    """Verify PR-detail batches are fetched in parallel, not one after another."""
+
+    SLEEP_SECONDS = 0.2
+
+    def setUp(self):
+        self.client = GitHubClient(user=None)
+
+    def test_fetch_prs_multi_repo_graphql_runs_batches_concurrently(self):
+        pr_data = {('org', 'repo1'): list(range(150))}  # 3 batches of 50
+        sleep_seconds = self.SLEEP_SECONDS
+
+        def slow_batch(prs):
+            time.sleep(sleep_seconds)
+            return []
+
+        self.client._fetch_pr_batch_multi_repo = MagicMock(side_effect=slow_batch)
+
+        start = time.monotonic()
+        self.client._fetch_prs_multi_repo_graphql(pr_data)
+        elapsed = time.monotonic() - start
+
+        self.assertEqual(self.client._fetch_pr_batch_multi_repo.call_count, 3)
+        self.assertLess(elapsed, sleep_seconds * 2)
+
+    def test_fetch_prs_batch_graphql_runs_batches_concurrently(self):
+        pr_numbers = list(range(GRAPHQL_PR_BATCH_SIZE * 3))  # 3 batches
+        sleep_seconds = self.SLEEP_SECONDS
+
+        original = GitHubClient._fetch_prs_batch_graphql
+
+        def slow_fetch(client_self, owner, name, numbers):
+            if len(numbers) > GRAPHQL_PR_BATCH_SIZE:
+                return original(client_self, owner, name, numbers)
+            time.sleep(sleep_seconds)
+            return []
+
+        with patch.object(GitHubClient, '_fetch_prs_batch_graphql', slow_fetch):
+            start = time.monotonic()
+            self.client._fetch_prs_batch_graphql('org', 'repo1', pr_numbers)
+            elapsed = time.monotonic() - start
+
+        self.assertLess(elapsed, sleep_seconds * 2)
