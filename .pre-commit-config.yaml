@@ -7,3 +7,15 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+      - id: eslint
+        name: eslint
+        entry: eslint --no-warn-ignored
+        language: node
+        additional_dependencies:
+          - eslint@^9
+          - eslint-plugin-html@^8
+          - globals@^15
+          - "@eslint/js@^9"
+        types_or: [html]
+        exclude: '\.min\.js$'
+        pass_filenames: true

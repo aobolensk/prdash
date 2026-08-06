@@ -99,14 +99,22 @@
     </section>
 </div>
 {% if errors or warnings %}
+{{ errors|json_script:"pr-list-errors" }}
+{{ warnings|json_script:"pr-list-warnings" }}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    {% for error in errors %}
-    showToast("{{ error|escapejs }}", 'error');
-    {% endfor %}
-    {% for warning in warnings %}
-    showToast("{{ warning|escapejs }}", 'warning');
-    {% endfor %}
+    var errorsEl = document.getElementById('pr-list-errors');
+    var warningsEl = document.getElementById('pr-list-warnings');
+    if (errorsEl) {
+        JSON.parse(errorsEl.textContent).forEach(function(message) {
+            showToast(message, 'error');
+        });
+    }
+    if (warningsEl) {
+        JSON.parse(warningsEl.textContent).forEach(function(message) {
+            showToast(message, 'warning');
+        });
+    }
 });
 </script>
 {% endif %}
