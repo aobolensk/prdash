@@ -369,7 +369,9 @@
             const wordLower = word.toLowerCase();
             const maxD = prMaxTypos(wordLower.length);
             const taken = new Set(field.pills.map(p => p.kind + ':' + p.value.toLowerCase()));
+            const hasRepoPill = !field.isExclude && field.pills.some(function(p) { return p.kind === 'repo'; });
             const matches = prSuggestCandidates()
+                .filter(function(c) { return !(hasRepoPill && c.kind === 'repo'); })
                 .filter(function(c) { return !taken.has(c.kind + ':' + c.value.toLowerCase()); })
                 .map(function(c) {
                     const d = prSuggestMatchDistance(wordLower, maxD, c.value.toLowerCase());
