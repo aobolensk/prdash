@@ -558,11 +558,23 @@
             timeZoneName: 'short'
         };
 
+        // Server and client clocks can drift, which would otherwise make the
+        // "Updated X ago" text freeze at "just now" (client clock behind server's)
+        // or skip ahead (client clock ahead). Track the offset so elapsed time is
+        // computed against the client's own clock instead of assuming they match.
+        let clockOffsetMs = 0;
+
+        function syncClockOffset(el) {
+            const date = new Date(el.dataset.updated);
+            if (isNaN(date)) return;
+            clockOffsetMs = date.getTime() - Date.now();
+        }
+
         function formatLastUpdated(root = document) {
             root.querySelectorAll('.last-updated[data-updated]').forEach(el => {
                 const date = new Date(el.dataset.updated);
                 if (isNaN(date)) return;
-                const seconds = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+                const seconds = Math.max(0, Math.round((Date.now() + clockOffsetMs - date.getTime()) / 1000));
                 let text;
                 if (seconds < 10) {
                     text = 'just now';
@@ -597,6 +609,8 @@
 
         document.addEventListener('DOMContentLoaded', function() {
             formatTimestampTitles();
+            const initialLastUpdated = document.querySelector('.last-updated[data-updated]');
+            if (initialLastUpdated) syncClockOffset(initialLastUpdated);
             formatLastUpdated();
             setInterval(formatLastUpdated, 15000);
 
@@ -639,6 +653,10 @@
                     evt.detail.target.innerHTML = evt.detail.xhr.responseText;
                 }
                 formatTimestampTitles(evt.detail.target);
+                const swappedLastUpdated = evt.detail.target.querySelector
+                    ? evt.detail.target.querySelector('.last-updated[data-updated]')
+                    : null;
+                if (swappedLastUpdated) syncClockOffset(swappedLastUpdated);
                 formatLastUpdated(evt.detail.target);
                 // Only reconcile search state when #pr-content itself was swapped
                 // (its cards and toggle button were recreated); unrelated swaps
@@ -660,6 +678,7 @@
                 const el = document.querySelector('.last-updated');
                 if (!el) return;
                 el.dataset.updated = evt.detail.value;
+                syncClockOffset(el);
                 formatLastUpdated();
             });
 
