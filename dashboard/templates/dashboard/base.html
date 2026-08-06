@@ -373,10 +373,11 @@
                 .filter(function(c) { return !taken.has(c.kind + ':' + c.value.toLowerCase()); })
                 .map(function(c) {
                     const d = prSuggestMatchDistance(wordLower, maxD, c.value.toLowerCase());
-                    return d === null ? null : { candidate: c, d: d };
+                    if (d === null) return null;
+                    return { candidate: c, d: d, caseMatch: c.value.indexOf(word) !== -1 };
                 })
                 .filter(Boolean)
-                .sort(function(a, b) { return a.d - b.d; })
+                .sort(function(a, b) { return a.d - b.d || (b.caseMatch - a.caseMatch); })
                 .slice(0, PR_SUGGEST_MAX_ITEMS)
                 .map(function(m) { return m.candidate; });
             if (!matches.length) {
