@@ -11,7 +11,6 @@ PR_LIST_PROCESS_HOOK = 'pr_list.process'
 PR_LIST_FILTERS_SLOT = 'pr_list.filters'
 HEADER_STATUS_SLOT = 'header.status'
 HEAD_SLOT = 'head'
-SETTINGS_SLOT = 'settings'
 
 
 @dataclass(frozen=True)

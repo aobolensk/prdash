@@ -15,7 +15,6 @@ class QuickStats:
     """Quick summary stats."""
     open_count: int = 0
     merged_count: int = 0
-    closed_count: int = 0
     avg_merge_time_hours: float = 0.0
 
 
@@ -25,7 +24,6 @@ class PeriodData:
     period_start: datetime
     opened: int = 0
     merged: int = 0
-    closed: int = 0
     lines_added: int = 0
     lines_removed: int = 0
 
@@ -35,7 +33,6 @@ class VelocityStats:
     """PR velocity over time."""
     period_data: list[PeriodData] = field(default_factory=list)
     avg_prs_per_period: float = 0.0
-    avg_merge_time_hours: float = 0.0
     total_lines_changed: int = 0
     granularity: str = "week"  # "day" or "week"
 
@@ -53,7 +50,6 @@ class ReviewerData:
     username: str
     avatar_url: str = ""
     review_count: int = 0
-    avg_turnaround_hours: float = 0.0
 
 
 @dataclass
@@ -62,7 +58,6 @@ class ReviewStats:
     reviews_given: int = 0
     reviews_received: int = 0
     avg_turnaround_hours: float = 0.0
-    top_reviewers: list[ReviewerData] = field(default_factory=list)
     top_reviewed_by: list[ReviewerData] = field(default_factory=list)
 
 
@@ -97,8 +92,6 @@ class RepoData:
     name: str
     open_count: int = 0
     merged_count: int = 0
-    avg_merge_time_hours: float = 0.0
-    activity_this_month: int = 0
 
     @property
     def full_name(self) -> str:
@@ -166,10 +159,9 @@ class StatsService:
         self,
         repos: list[tuple[str, str]],
         days: int,
-        include_closed: bool = True
     ) -> list[PullRequestInfo]:
         """Get PRs for stats computation with caching."""
-        cache_key = f"prs_stats:{self.username}:{self._repos_hash(repos)}:{days}:{include_closed}"
+        cache_key = f"prs_stats:{self.username}:{self._repos_hash(repos)}:{days}"
         if cache_key in self._pr_cache:
             return self._pr_cache[cache_key]
 
@@ -211,7 +203,6 @@ class StatsService:
 
         open_count = 0
         merged_count = 0
-        closed_count = 0
         total_merge_time = timedelta()
         merge_time_count = 0
 
@@ -232,7 +223,6 @@ class StatsService:
         stats = QuickStats(
             open_count=open_count,
             merged_count=merged_count,
-            closed_count=closed_count,
             avg_merge_time_hours=avg_merge_hours
         )
         cache.set(cache_key, stats, self.CACHE_TTL)
@@ -279,8 +269,6 @@ class StatsService:
                 periods[current] = PeriodData(period_start=current)
                 current += timedelta(days=7)
 
-        total_merge_time = timedelta()
-        merge_count = 0
         total_lines = 0
 
         for pr in prs:
@@ -304,23 +292,15 @@ class StatsService:
                     period_start = self._get_week_start(pr.merged_at)
                 if period_start in periods:
                     periods[period_start].merged += 1
-                merge_time = pr.merged_at - pr.created_at
-                total_merge_time += merge_time
-                merge_count += 1
 
         period_data = sorted(periods.values(), key=lambda p: p.period_start)
         num_periods = len(period_data) or 1
         total_prs = sum(p.opened for p in period_data)
         avg_prs = total_prs / num_periods
 
-        avg_merge_hours = 0.0
-        if merge_count > 0:
-            avg_merge_hours = total_merge_time.total_seconds() / 3600 / merge_count
-
         stats = VelocityStats(
             period_data=period_data,
             avg_prs_per_period=avg_prs,
-            avg_merge_time_hours=avg_merge_hours,
             total_lines_changed=total_lines,
             granularity=granularity
         )
@@ -340,15 +320,6 @@ class StatsService:
         reviews_received = reviews_data.get('reviews_received', 0)
         avg_turnaround = reviews_data.get('avg_turnaround_hours', 0.0)
 
-        top_reviewers = [
-            ReviewerData(
-                username=r['username'],
-                avatar_url=r.get('avatar_url', ''),
-                review_count=r['count']
-            )
-            for r in reviews_data.get('top_reviewers', [])
-        ]
-
         top_reviewed_by = [
             ReviewerData(
                 username=r['username'],
@@ -362,7 +333,6 @@ class StatsService:
             reviews_given=reviews_given,
             reviews_received=reviews_received,
             avg_turnaround_hours=avg_turnaround,
-            top_reviewers=top_reviewers,
             top_reviewed_by=top_reviewed_by
         )
         cache.set(cache_key, stats, self.CACHE_TTL)
@@ -425,9 +395,7 @@ class StatsService:
             return cached
 
         prs = self.get_prs_for_stats(repos, days)
-        now = timezone.now()
         cutoff_date = self._get_cutoff_date(days)
-        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
         repo_data: dict[tuple[str, str], RepoData] = {}
         for owner, name in repos:
@@ -442,12 +410,8 @@ class StatsService:
             if pr.merged_at:
                 if pr.merged_at >= cutoff_date:
                     rd.merged_count += 1
-                if pr.merged_at >= month_start:
-                    rd.activity_this_month += 1
             else:
                 rd.open_count += 1
-                if pr.created_at >= month_start:
-                    rd.activity_this_month += 1
 
         repos_list = sorted(
             repo_data.values(),

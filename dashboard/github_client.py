@@ -3,7 +3,7 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
@@ -126,9 +126,6 @@ class CIStatus:
     state: str  # 'success', 'pending', 'failure', 'error', or 'unknown'
     passed_count: int = 0
     total_count: int = 0
-    context: Optional[str] = None
-    description: Optional[str] = None
-    target_url: Optional[str] = None
 
 
 @dataclass(slots=True)
@@ -173,7 +170,6 @@ class PullRequestInfo:
     auto_merge_enabled: bool = False
     is_queued: bool = False
     linked_issues: list[LinkedIssue] = None
-    plugin_data: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if self.linked_issues is None:
@@ -1047,9 +1043,7 @@ class GitHubClient:
         else:
             self._add_warning(f"Rate limit hit. {count} repos not loaded.")
 
-    def _search_prs(
-        self, query: str, owner: str, name: str, limit: Optional[int] = None
-    ) -> list[int]:
+    def _search_prs(self, query: str, owner: str, name: str) -> list[int]:
         """Search for PR numbers using REST API, paginating up to GitHub's 1000-result cap."""
         token = self._get_token()
         if not token:
@@ -1098,9 +1092,6 @@ class GitHubClient:
                     if n not in seen:
                         seen.add(n)
                         pr_numbers.append(n)
-
-                if limit and len(pr_numbers) >= limit:
-                    return pr_numbers[:limit]
 
                 # GitHub Search API caps at 1000 results; stop if this page wasn't full
                 if len(items) < 100:

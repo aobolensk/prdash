@@ -101,7 +101,7 @@ def home(request):
     return render(request, 'dashboard/home.html')
 
 
-def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pending',
+def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
                   owner=None, repo=None, post_filter=None, post_filter_factory=None,
                   base_fetch_options=None, query_defaults=None):
     """
@@ -111,7 +111,6 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
         fetch_prs: Callable(client, repo_tuples_or_owner_repo, fetch_options) -> list of PRs
         active_tab: Value for context['active_tab']
         tab_changed: Value for HX-Trigger tabChanged
-        review_tab: Value for context['review_tab'] and reviewTabChanged trigger
         owner/repo: If provided, filters to single repo
         post_filter: Optional callable(prs, username) -> filtered prs
         post_filter_factory: Optional callable(client) -> post_filter function
@@ -237,14 +236,11 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed, review_tab='pe
         'page_obj': page_obj,
         'stale_data': stale_data,
     }
-    if review_tab != 'pending':
-        context['review_tab'] = review_tab
 
     if request.headers.get('HX-Request') == 'true':
         triggers = {
             'tabChanged': tab_changed,
             'repoChanged': repo_changed,
-            'reviewTabChanged': review_tab,
             'staleData': stale_data,
         }
         if not stale_data:
