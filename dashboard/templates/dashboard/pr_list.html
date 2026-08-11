@@ -1,5 +1,5 @@
 {% extends 'dashboard/base.html' %}
-{% load dashboard_tags %}
+{% load static dashboard_tags %}
 
 {% block title %}{% if active_tab == 'review_requests' %}Review Requests{% elif active_tab == 'assigned' %}Assigned{% elif active_tab == 'merged' %}Merged PRs{% else %}My PRs{% endif %}{% if current_repo %} - {{ current_repo.owner }}/{{ current_repo.name }}{% endif %} - PR Dashboard{% endblock %}
 
@@ -101,21 +101,6 @@
 {% if errors or warnings %}
 {{ errors|json_script:"pr-list-errors" }}
 {{ warnings|json_script:"pr-list-warnings" }}
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    var errorsEl = document.getElementById('pr-list-errors');
-    var warningsEl = document.getElementById('pr-list-warnings');
-    if (errorsEl) {
-        JSON.parse(errorsEl.textContent).forEach(function(message) {
-            showToast(message, 'error');
-        });
-    }
-    if (warningsEl) {
-        JSON.parse(warningsEl.textContent).forEach(function(message) {
-            showToast(message, 'warning');
-        });
-    }
-});
-</script>
+<script src="{% static 'dashboard/js/pr_list.js' %}"></script>
 {% endif %}
 {% endblock %}
