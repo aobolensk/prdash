@@ -71,9 +71,9 @@
                 {% endif %}
                 {% if pr.review_status.state == 'approved' %}
                     {% if pr.review_status.review_decision == 'REVIEW_REQUIRED' %}
-                        <span class="pr-review pr-review-approved-partial">&#10003; Approved{% if pr.review_status.approval_count > 1 %} ({{ pr.review_status.approval_count }}){% endif %}</span>
+                        <span class="pr-review pr-review-approved-partial" title="Approved by {{ pr.review_status.approvers|join:', ' }}">&#10003; Approved{% if pr.review_status.approval_count > 1 %} ({{ pr.review_status.approval_count }}){% endif %}</span>
                     {% else %}
-                        <span class="pr-review pr-review-approved">&#10003; Approved{% if pr.review_status.approval_count > 1 %} ({{ pr.review_status.approval_count }}){% endif %}</span>
+                        <span class="pr-review pr-review-approved" title="Approved by {{ pr.review_status.approvers|join:', ' }}">&#10003; Approved{% if pr.review_status.approval_count > 1 %} ({{ pr.review_status.approval_count }}){% endif %}</span>
                     {% endif %}
                 {% elif pr.review_status.state == 'changes_requested' %}
                     <span class="pr-review pr-review-changes_requested">&#10007; Changes requested</span>

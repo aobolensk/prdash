@@ -3,7 +3,7 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
@@ -135,6 +135,7 @@ class ReviewStatus:
     approval_count: int = 0
     comment_count: int = 0
     review_decision: Optional[str] = None  # 'APPROVED', 'CHANGES_REQUESTED', 'REVIEW_REQUIRED', or None
+    approvers: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -964,7 +965,8 @@ class GitHubClient:
 
             latest_review_by_user = self._compute_latest_review_states(reviews)
 
-            approval_count = sum(1 for state, _ in latest_review_by_user.values() if state == 'APPROVED')
+            approvers = [user for user, (state, _) in latest_review_by_user.items() if state == 'APPROVED']
+            approval_count = len(approvers)
             changes_requested = any(state == 'CHANGES_REQUESTED' for state, _ in latest_review_by_user.values())
 
             if changes_requested:
@@ -979,6 +981,7 @@ class GitHubClient:
                 approval_count=approval_count,
                 comment_count=comment_count,
                 review_decision=review_decision,
+                approvers=approvers,
             )
         except Exception:
             return ReviewStatus(state='not_reviewed', approval_count=0, comment_count=0)
