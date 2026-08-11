@@ -5,6 +5,7 @@ from django.views.decorators.http import require_POST
 from django.core.cache import cache
 from django.core.paginator import Paginator
 from django.urls import reverse
+from django.utils.cache import add_never_cache_headers
 from django.utils import timezone
 from dataclasses import asdict
 import hashlib
@@ -274,7 +275,9 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         response['HX-Trigger'] = json.dumps(triggers)
         return response
 
-    return render(request, 'dashboard/pr_list.html', context)
+    response = render(request, 'dashboard/pr_list.html', context)
+    add_never_cache_headers(response)
+    return response
 
 
 @login_required
@@ -617,7 +620,7 @@ def save_preferences(request):
 @require_POST
 def save_plugins(request):
     """Save the explicit set of plugins enabled for the current user."""
-    plugin_manager.configure_user(
+    plugins_changed = plugin_manager.configure_user(
         request.user,
         request.POST.getlist('enabled_plugins'),
     )
@@ -625,6 +628,7 @@ def save_plugins(request):
         'plugins': plugin_manager.plugin_statuses(request.user),
         'plugin_discovery_errors': plugin_manager.discovery_errors,
         'success': True,
+        'plugins_changed': plugins_changed,
     }
     return render(request, 'dashboard/partials/_plugin_settings.html', context)
 

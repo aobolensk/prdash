@@ -436,6 +436,10 @@ class PluginManager:
         selected = set(enabled_plugin_ids) & self.descriptors.keys()
         state_model = self._state_model()
         with transaction.atomic():
+            enabled = set(
+                state_model.objects.filter(user=user, enabled=True)
+                .values_list('plugin_id', flat=True)
+            ) & self.descriptors.keys()
             state_model.objects.filter(user=user).exclude(plugin_id__in=selected).update(enabled=False)
             for plugin_id in selected:
                 state_model.objects.update_or_create(
@@ -453,6 +457,8 @@ class PluginManager:
         for plugin_id in set(self._loaded) - selected:
             if not state_model.objects.filter(plugin_id=plugin_id, enabled=True).exists():
                 self.unload(plugin_id)
+
+        return selected != enabled
 
     def plugin_statuses(self, user, request=None):
         states = self._state_map(user, request)

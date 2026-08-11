@@ -1,7 +1,13 @@
 {% load plugin_tags %}
 <div class="preferences-form-wrapper">
     {% if success %}
-    <div class="alert alert-success">Plugin settings saved!</div>
+    <div class="alert alert-success">
+        Plugin settings saved!
+        {% if plugins_changed %}
+        Refresh the page to apply the changes.
+        <a href="{% url 'dashboard:pr_list' %}" class="btn btn-secondary">Refresh page</a>
+        {% endif %}
+    </div>
     {% endif %}
 
     {% for error in plugin_discovery_errors %}

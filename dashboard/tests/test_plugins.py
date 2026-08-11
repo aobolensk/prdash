@@ -344,6 +344,23 @@ class ReferencePluginIntegrationTests(TestCase):
             plugin_id='github-status',
             enabled=True,
         ).exists())
+        self.assertContains(response, 'Refresh the page to apply the changes.')
+        self.assertContains(response, reverse('dashboard:pr_list'))
+
+    def test_settings_does_not_suggest_refresh_without_changes(self):
+        PluginConfiguration.objects.create(
+            user=self.user,
+            plugin_id='pull-request-filters',
+            enabled=True,
+        )
+
+        response = self.client.post(
+            reverse('dashboard:save_plugins'),
+            {'enabled_plugins': ['pull-request-filters']},
+            HTTP_HX_REQUEST='true',
+        )
+
+        self.assertNotContains(response, 'Refresh the page to apply the changes.')
 
     @patch('dashboard.views.GitHubClient')
     def test_filter_ui_only_appears_when_plugin_is_enabled(self, mock_github_client):

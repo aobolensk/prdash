@@ -280,6 +280,7 @@ class HTMXResponseTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'dashboard/pr_list.html')
+        self.assertIn('no-store', response['Cache-Control'])
 
     @patch('dashboard.views.GitHubClient')
     def test_pr_list_pagination_has_single_direct_page_input(self, mock_github_client):
