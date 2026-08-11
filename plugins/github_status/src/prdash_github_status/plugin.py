@@ -18,7 +18,7 @@ class GitHubStatusPlugin:
     metadata = PluginMetadata(
         plugin_id='github-status',
         name='GitHub Status',
-        version='1.0.0',
+        version='1.1.0',
         api_version=PLUGIN_API_VERSION,
         description='Track GitHub API and pull request service availability.',
     )

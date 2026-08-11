@@ -1,13 +1,36 @@
 <style>
-.github-status-dot {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background-color: var(--color-success);
+.github-status {
+    position: relative;
+    display: inline-flex;
+    color: var(--header-text);
+    opacity: 0.85;
 }
 
-.github-status-dot.github-status-degraded {
+.github-status:hover {
+    opacity: 1;
+}
+
+.github-status-icon {
+    display: block;
+}
+
+.github-status-dot {
+    position: absolute;
+    right: -6px;
+    bottom: -6px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--color-success);
+    border: 2px solid var(--header-bg);
+    box-sizing: content-box;
+}
+
+.github-status-warning .github-status-dot {
+    background-color: var(--color-warning);
+}
+
+.github-status-outage .github-status-dot {
     background-color: var(--color-danger);
 }
 </style>

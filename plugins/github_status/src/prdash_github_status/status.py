@@ -16,24 +16,49 @@ FETCH_LOCK_TTL = 6
 REQUEST_TIMEOUT = 5
 
 TRACKED_COMPONENTS = {'API Requests', 'Pull Requests'}
-DEGRADED_STATUSES = {
-    'degraded_performance',
-    'partial_outage',
-    'major_outage',
-    'under_maintenance',
+
+WARNING_STATUSES = {'degraded_performance', 'under_maintenance'}
+OUTAGE_STATUSES = {'partial_outage', 'major_outage'}
+STATUS_LABELS = {
+    'degraded_performance': 'degraded performance',
+    'under_maintenance': 'under maintenance',
+    'partial_outage': 'partial outage',
+    'major_outage': 'major outage',
 }
+
+
+@dataclass
+class ComponentStatus:
+    name: str
+    status: str
+
+    @property
+    def label(self):
+        return STATUS_LABELS.get(self.status, self.status)
+
+    def __str__(self):
+        return f'{self.name} {self.label}'
 
 
 @dataclass
 class GitHubStatus:
     """Aggregate health of the GitHub API components used by prdash."""
 
-    degraded_components: list[str] = field(default_factory=list)
+    warning_components: list[ComponentStatus] = field(default_factory=list)
+    outage_components: list[ComponentStatus] = field(default_factory=list)
     known: bool = True
 
     @property
     def healthy(self):
-        return not self.degraded_components
+        return not self.warning_components and not self.outage_components
+
+    @property
+    def outage(self):
+        return bool(self.outage_components)
+
+    @property
+    def degraded_components(self):
+        return self.warning_components + self.outage_components
 
 
 def get_github_status():
@@ -55,11 +80,20 @@ def _fetch_github_status():
         response = requests.get(STATUS_URL, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         data = response.json()
-        degraded = [
-            component.get('name')
+        tracked = [
+            component
             for component in data.get('components', [])
             if component.get('name') in TRACKED_COMPONENTS
-            and component.get('status') in DEGRADED_STATUSES
+        ]
+        warning = [
+            ComponentStatus(c.get('name'), c.get('status'))
+            for c in tracked
+            if c.get('status') in WARNING_STATUSES
+        ]
+        outage = [
+            ComponentStatus(c.get('name'), c.get('status'))
+            for c in tracked
+            if c.get('status') in OUTAGE_STATUSES
         ]
     except (
         requests.exceptions.RequestException,
@@ -70,4 +104,4 @@ def _fetch_github_status():
         logger.warning("Failed to fetch GitHub status: %s", error)
         return GitHubStatus(known=False)
 
-    return GitHubStatus(degraded_components=degraded)
+    return GitHubStatus(warning_components=warning, outage_components=outage)

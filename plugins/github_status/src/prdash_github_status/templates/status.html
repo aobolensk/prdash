@@ -1,6 +1,9 @@
 {% if status.known %}
 <a href="https://www.githubstatus.com" target="_blank" rel="noopener"
-   class="github-status-dot{% if not status.healthy %} github-status-degraded{% endif %}"
-   title="{% if status.healthy %}GitHub: All systems operational{% else %}GitHub: {{ status.degraded_components|join:", " }} degraded{% endif %}"
-   aria-label="GitHub API status"></a>
+   class="github-status{% if status.outage %} github-status-outage{% elif not status.healthy %} github-status-warning{% endif %}"
+   title="{% if status.healthy %}GitHub status: all systems operational{% else %}GitHub status: {{ status.degraded_components|join:", " }}{% endif %}"
+   aria-label="GitHub status">
+    {% include "dashboard/partials/_github_icon.html" with icon_class="github-status-icon" size="16" %}
+    <span class="github-status-dot"></span>
+</a>
 {% endif %}

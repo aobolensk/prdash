@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prdash-github-status"
-version = "1.0.0"
+version = "1.1.0"
 description = "GitHub status tracking plugin for prdash"
 requires-python = ">=3.12"
 dependencies = ["requests>=2.33"]
