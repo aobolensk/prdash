@@ -1,6 +1,0 @@
-{% if status.known %}
-<a href="https://www.githubstatus.com" target="_blank" rel="noopener"
-   class="github-status-dot{% if not status.healthy %} github-status-degraded{% endif %}"
-   title="{% if status.healthy %}GitHub: All systems operational{% else %}GitHub: {{ status.degraded_components|join:", " }} degraded{% endif %}"
-   aria-label="GitHub API status"></a>
-{% endif %}

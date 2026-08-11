@@ -1,4 +1,7 @@
 venv
 db.sqlite3
 *.pyc
+__pycache__/
+build/
+*.egg-info/
 .env

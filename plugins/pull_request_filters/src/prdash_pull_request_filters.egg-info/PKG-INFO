@@ -1,5 +1,0 @@
-Metadata-Version: 2.4
-Name: prdash-pull-request-filters
-Version: 1.0.0
-Summary: Pull request filter plugin for prdash
-Requires-Python: >=3.12

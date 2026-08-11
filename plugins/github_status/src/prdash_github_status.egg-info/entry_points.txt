@@ -1,2 +1,0 @@
-[prdash.plugins]
-github-status = prdash_github_status.plugin:plugin
