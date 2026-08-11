@@ -1,6 +1,7 @@
 """Discovery and runtime isolation for prdash plugins."""
 
 from contextlib import contextmanager
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from importlib import import_module, metadata, resources
 import json
@@ -13,6 +14,7 @@ from typing import Any
 
 from django.conf import settings
 from django.db import OperationalError, ProgrammingError, transaction
+from django.db.models import Max
 from django.http import Http404, HttpResponse, HttpResponseServerError
 from django.template import engines
 from django.utils.safestring import mark_safe
@@ -23,6 +25,7 @@ from prdash.plugin_api import (
     PLUGIN_API_VERSION,
     PluginMetadata,
     PluginTemplateResponse,
+    PluginUserData,
     TemplateResource,
     UIContribution,
 )
@@ -109,6 +112,21 @@ class _Registrar:
 
     def update_user_config(self, user, values):
         self._manager.update_user_config(user, self._plugin_id, values)
+
+    def list_user_data(self, user, collection):
+        return self._manager.list_user_data(user, self._plugin_id, collection)
+
+    def get_user_data(self, user, collection, key):
+        return self._manager.get_user_data(user, self._plugin_id, collection, key)
+
+    def set_user_data(self, user, collection, key, value):
+        return self._manager.set_user_data(user, self._plugin_id, collection, key, value)
+
+    def delete_user_data(self, user, collection, key):
+        return self._manager.delete_user_data(user, self._plugin_id, collection, key)
+
+    def reorder_user_data(self, user, collection, keys):
+        self._manager.reorder_user_data(user, self._plugin_id, collection, keys)
 
 
 class PluginManager:
@@ -378,6 +396,18 @@ class PluginManager:
         from .models import PluginConfiguration
         return PluginConfiguration
 
+    @staticmethod
+    def _user_data_model():
+        from .models import PluginUserData
+        return PluginUserData
+
+    @staticmethod
+    def _validate_user_data_location(collection, key=None):
+        if not isinstance(collection, str) or not IDENTIFIER_PATTERN.fullmatch(collection):
+            raise ValueError('Plugin data collections require a simple name')
+        if key is not None and (not isinstance(key, str) or not key or len(key) > 128):
+            raise ValueError('Plugin data keys must be between 1 and 128 characters')
+
     def _state_map(self, user, request=None):
         cache_name = '_prdash_plugin_states'
         if request is not None and hasattr(request, cache_name):
@@ -468,6 +498,95 @@ class PluginManager:
         state.config = dict(values)
         state.save(update_fields=['config', 'updated_at'])
 
+    def list_user_data(self, user, plugin_id, collection):
+        self._validate_user_data_location(collection)
+        rows = self._user_data_model().objects.filter(
+            user=user,
+            plugin_id=plugin_id,
+            collection=collection,
+        ).order_by('position', 'key')
+        return tuple(
+            PluginUserData(row.key, row.value, row.created_at, row.updated_at)
+            for row in rows
+        )
+
+    def get_user_data(self, user, plugin_id, collection, key):
+        self._validate_user_data_location(collection, key)
+        row = self._user_data_model().objects.filter(
+            user=user,
+            plugin_id=plugin_id,
+            collection=collection,
+            key=key,
+        ).first()
+        if row is None:
+            return None
+        return PluginUserData(row.key, row.value, row.created_at, row.updated_at)
+
+    def set_user_data(self, user, plugin_id, collection, key, value):
+        self._validate_user_data_location(collection, key)
+        try:
+            json.dumps(value, allow_nan=False)
+        except (TypeError, ValueError) as error:
+            raise ValueError('Plugin data values must be JSON serializable') from error
+        model = self._user_data_model()
+        with transaction.atomic():
+            rows = model.objects.filter(
+                user=user,
+                plugin_id=plugin_id,
+                collection=collection,
+            )
+            last_position = rows.aggregate(max_position=Max('position'))['max_position']
+            row, _ = model.objects.update_or_create(
+                user=user,
+                plugin_id=plugin_id,
+                collection=collection,
+                key=key,
+                defaults={'value': value},
+                create_defaults={
+                    'value': value,
+                    'position': (last_position if last_position is not None else -1) + 1,
+                },
+            )
+        return PluginUserData(row.key, row.value, row.created_at, row.updated_at)
+
+    def delete_user_data(self, user, plugin_id, collection, key):
+        self._validate_user_data_location(collection, key)
+        deleted, _ = self._user_data_model().objects.filter(
+            user=user,
+            plugin_id=plugin_id,
+            collection=collection,
+            key=key,
+        ).delete()
+        return bool(deleted)
+
+    def reorder_user_data(self, user, plugin_id, collection, keys):
+        self._validate_user_data_location(collection)
+        if not isinstance(keys, (list, tuple)):
+            raise ValueError('Plugin data order must be a list of keys')
+        for key in keys:
+            self._validate_user_data_location(collection, key)
+        if len(keys) != len(set(keys)):
+            raise ValueError('Plugin data order cannot contain duplicate keys')
+
+        model = self._user_data_model()
+        with transaction.atomic():
+            rows = list(model.objects.select_for_update().filter(
+                user=user,
+                plugin_id=plugin_id,
+                collection=collection,
+            ))
+            rows_by_key = {row.key: row for row in rows}
+            if set(keys) != set(rows_by_key):
+                raise ValueError('Plugin data order must include every collection key')
+            changed_rows = []
+            for position, key in enumerate(keys):
+                row = rows_by_key[key]
+                if row.position != position:
+                    row.position = position
+                    changed_rows.append(row)
+            if changed_rows:
+                model.objects.bulk_update(changed_rows, ['position'])
+
     def run_hook(self, name, value, hook_context, user, request=None):
         """Run enabled hook callbacks in order and isolate individual failures."""
         states = self._state_map(user, request)
@@ -533,6 +652,14 @@ class PluginManager:
             context['plugin_id'] = plugin_id
             context['plugin_config'] = dict(states[plugin_id].config)
             try:
+                if contribution.context_provider is not None:
+                    contribution_context = contribution.context_provider(
+                        request,
+                        context['plugin_config'],
+                    )
+                    if not isinstance(contribution_context, Mapping):
+                        raise TypeError('Plugin UI context providers must return a mapping')
+                    context.update(contribution_context)
                 rendered.append(self._render_resource(
                     contribution.template,
                     context,
@@ -567,7 +694,10 @@ class PluginManager:
         try:
             response = callback(request, config)
             if isinstance(response, PluginTemplateResponse):
-                content = self._render_resource(response.template, response.context, request)
+                context = dict(response.context)
+                context['plugin_id'] = plugin_id
+                context['plugin_config'] = config
+                content = self._render_resource(response.template, context, request)
                 return HttpResponse(content, status=response.status)
             if isinstance(response, HttpResponse):
                 return response

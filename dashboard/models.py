@@ -66,6 +66,31 @@ class PluginConfiguration(models.Model):
         return f"{self.plugin_id} for {self.user.username}"
 
 
+class PluginUserData(models.Model):
+    """A plugin-owned JSON value scoped to a user and named collection."""
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='plugin_user_data')
+    plugin_id = models.CharField(max_length=128)
+    collection = models.CharField(max_length=64)
+    key = models.CharField(max_length=128)
+    value = models.JSONField()
+    position = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'plugin_id', 'collection', 'key'],
+                name='unique_plugin_user_data_key',
+            ),
+        ]
+        ordering = ['collection', 'position', 'key']
+
+    def __str__(self):
+        return f"{self.plugin_id}:{self.collection}:{self.key} for {self.user.username}"
+
+
 AUTO_REFRESH_INTERVAL_CHOICES = [
     (1, '1 minute'), (2, '2 minutes'), (5, '5 minutes'), (10, '10 minutes'),
     (15, '15 minutes'), (30, '30 minutes'), (60, '1 hour'),

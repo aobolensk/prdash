@@ -1,10 +1,10 @@
 """Public interfaces for prdash plugins."""
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol, Sequence
 
 
-PLUGIN_API_VERSION = '1.0'
+PLUGIN_API_VERSION = '1.1'
 
 PR_LIST_QUERY_HOOK = 'pr_list.query'
 PR_LIST_PROCESS_HOOK = 'pr_list.process'
@@ -48,6 +48,7 @@ class UIContribution:
     slot: str
     template: TemplateResource
     order: int = 100
+    context_provider: 'UIContextProvider | None' = None
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,16 @@ class PluginTemplateResponse:
     template: TemplateResource
     context: Mapping[str, Any] = field(default_factory=dict)
     status: int = 200
+
+
+@dataclass(frozen=True)
+class PluginUserData:
+    """A plugin-owned JSON value stored for one user in a named collection."""
+
+    key: str
+    value: Any
+    created_at: Any
+    updated_at: Any
 
 
 @dataclass
@@ -84,6 +95,7 @@ class PullRequestListContext:
 
 Hook = Callable[[Any, Any, Mapping[str, Any]], Any]
 Route = Callable[[Any, Mapping[str, Any]], Any]
+UIContextProvider = Callable[[Any, Mapping[str, Any]], Mapping[str, Any]]
 
 
 class PluginRegistrar(Protocol):
@@ -109,6 +121,21 @@ class PluginRegistrar(Protocol):
         ...
 
     def update_user_config(self, user: Any, values: Mapping[str, Any]) -> None:
+        ...
+
+    def list_user_data(self, user: Any, collection: str) -> tuple[PluginUserData, ...]:
+        ...
+
+    def get_user_data(self, user: Any, collection: str, key: str) -> PluginUserData | None:
+        ...
+
+    def set_user_data(self, user: Any, collection: str, key: str, value: Any) -> PluginUserData:
+        ...
+
+    def delete_user_data(self, user: Any, collection: str, key: str) -> bool:
+        ...
+
+    def reorder_user_data(self, user: Any, collection: str, keys: Sequence[str]) -> None:
         ...
 
 

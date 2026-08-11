@@ -135,6 +135,37 @@ registrar.register_ui(UIContribution(
 Templates receive the normal Django request context plus `plugin_id` and
 `plugin_config`. Public v1 slots are listed in `prdash.plugin_api`.
 
+The core fuzzy search exposes a browser API after the
+`prdash:pullRequestSearchReady` event:
+
+```javascript
+document.addEventListener('prdash:pullRequestSearchReady', function() {
+    const search = window.prdash.pullRequestSearch;
+    const state = search.getState();
+    search.setState({
+        open: true,
+        include: {text: 'bug', pills: [{kind: 'label', value: 'urgent'}]},
+        exclude: {text: '', pills: []}
+    });
+});
+```
+
+`getState()` returns this same JSON-serializable structure. `setState()`
+returns `false` when the current page has no PR search UI. Plugins should store
+this state unchanged and validate it again in their route handlers.
+
+For request-specific UI data, pass a context provider when registering a
+contribution. It receives `(request, config)` and returns a mapping merged into
+the template context:
+
+```python
+registrar.register_ui(UIContribution(
+    slot='pr_list.filters',
+    template=TemplateResource(package='my_prdash_plugin', path='templates/filters.html'),
+    context_provider=lambda request, config: {'items': []},
+))
+```
+
 ## Dependencies and configuration
 
 Declare Python dependencies under `[project].dependencies`. Declare another
@@ -164,3 +195,21 @@ registrar.update_user_config(request.user, {'timeout': 10})
 
 Validate user values before saving them. Never place secrets in template context
 or logs.
+
+Use named user-data collections for user-created records rather than packing a
+growing list into plugin configuration:
+
+```python
+registrar.set_user_data(request.user, 'saved_views', 'daily', {'query': {'author': 'octocat'}})
+saved_views = registrar.list_user_data(request.user, 'saved_views')
+```
+
+Collection names are simple identifiers and values must be JSON serializable.
+Each key is unique for a user, plugin, and collection.
+
+Collections can also preserve a user-selected order. Pass every current key in
+its desired order:
+
+```python
+registrar.reorder_user_data(request.user, 'saved_views', ('daily', 'weekly'))
+```

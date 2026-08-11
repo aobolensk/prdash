@@ -268,6 +268,62 @@ function prRemovePill(field, pill) {
     applyPrSearch();
 }
 
+function prSearchFieldState(field) {
+    return {
+        text: field ? field.inputEl.value : '',
+        pills: field ? field.pills.map(function(pill) {
+            return { kind: pill.kind, value: pill.value };
+        }) : []
+    };
+}
+
+function prSetSearchFieldState(field, state) {
+    if (!field || !state || typeof state !== 'object') return;
+    field.pills.slice().forEach(function(pill) { pill.el.remove(); });
+    field.pills = [];
+    field.inputEl.value = typeof state.text === 'string' ? state.text : '';
+    if (Array.isArray(state.pills)) {
+        state.pills.forEach(function(pill) {
+            if (!pill || (pill.kind !== 'repo' && pill.kind !== 'label') ||
+                    typeof pill.value !== 'string' || !pill.value.trim()) {
+                return;
+            }
+            const value = pill.value.trim();
+            const duplicate = field.pills.some(function(existing) {
+                return existing.kind === pill.kind && existing.value.toLowerCase() === value.toLowerCase();
+            });
+            if (duplicate) return;
+            const savedPill = { kind: pill.kind, value: value };
+            savedPill.el = prCreatePillElement(field, savedPill);
+            field.pills.push(savedPill);
+            field.fieldEl.insertBefore(savedPill.el, field.inputEl);
+        });
+    }
+    prHideSuggestions(field);
+}
+
+function getPrSearchState() {
+    const bar = document.getElementById('pr-search-bar');
+    return {
+        open: Boolean(bar && !bar.hidden),
+        include: prSearchFieldState(prIncludeField),
+        exclude: prSearchFieldState(prExcludeField)
+    };
+}
+
+function setPrSearchState(state) {
+    if (!state || typeof state !== 'object' || !prIncludeField || !prExcludeField) {
+        return false;
+    }
+    prSetSearchFieldState(prIncludeField, state.include);
+    prSetSearchFieldState(prExcludeField, state.exclude);
+    togglePrSearch(state.open !== false);
+    document.dispatchEvent(new CustomEvent('prdash:pullRequestSearchChanged', {
+        detail: getPrSearchState()
+    }));
+    return true;
+}
+
 function prHideSuggestions(field) {
     field.suggestions = [];
     field.activeIndex = -1;
@@ -657,6 +713,12 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('pr-search-exclude-suggest'),
         true
     );
+    window.prdash = window.prdash || {};
+    window.prdash.pullRequestSearch = {
+        getState: getPrSearchState,
+        setState: setPrSearchState
+    };
+    document.dispatchEvent(new CustomEvent('prdash:pullRequestSearchReady'));
     document.addEventListener('click', function(evt) {
         [prIncludeField, prExcludeField].forEach(function(field) {
             if (field && !field.fieldEl.contains(evt.target)) {

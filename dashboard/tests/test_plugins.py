@@ -6,10 +6,11 @@ from unittest.mock import MagicMock, patch
 
 from django.contrib.auth.models import User
 from django.http import HttpResponse
+from django.template import Context
 from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
-from dashboard.models import PluginConfiguration
+from dashboard.models import PluginConfiguration, PluginUserData
 from dashboard.plugin_manager import PluginDescriptor, PluginManager, plugin_manager
 from prdash.plugin_api import (
     PLUGIN_API_VERSION,
@@ -17,6 +18,8 @@ from prdash.plugin_api import (
     PluginMetadata,
     PullRequestListContext,
     PullRequestQuery,
+    TemplateResource,
+    UIContribution,
 )
 
 
@@ -97,6 +100,25 @@ class _DependencyPlugin:
 
     def initialize(self, registrar):
         pass
+
+    def shutdown(self):
+        pass
+
+
+class _UiContextPlugin:
+    metadata = PluginMetadata(
+        plugin_id='ui-context',
+        name='UI Context',
+        version='1.0.0',
+        api_version=PLUGIN_API_VERSION,
+    )
+
+    def initialize(self, registrar):
+        registrar.register_ui(UIContribution(
+            slot='example',
+            template=TemplateResource('unused', 'unused.html'),
+            context_provider=lambda request, config: {'from_provider': request.path},
+        ))
 
     def shutdown(self):
         pass
@@ -187,6 +209,60 @@ class PluginRuntimeTests(TestCase):
             manager.get_service(self.user, 'hook-plugin', 'value'),
             42,
         )
+
+    def test_plugin_user_data_is_scoped_to_a_user_and_collection(self):
+        manager = self.manager_with_plugin(_HookPlugin(lambda value, context, config: value))
+        other_user = User.objects.create_user(username='other', password='testpass')
+
+        manager.set_user_data(self.user, 'hook-plugin', 'saved_items', 'first', {'value': 1})
+        manager.set_user_data(self.user, 'hook-plugin', 'saved_items', 'second', {'value': 2})
+        manager.set_user_data(self.user, 'hook-plugin', 'other_items', 'first', {'value': 2})
+        manager.reorder_user_data(self.user, 'hook-plugin', 'saved_items', ['second', 'first'])
+
+        saved_items = manager.list_user_data(self.user, 'hook-plugin', 'saved_items')
+
+        self.assertEqual(
+            [(item.key, item.value) for item in saved_items],
+            [('second', {'value': 2}), ('first', {'value': 1})],
+        )
+        self.assertIsNone(manager.get_user_data(other_user, 'hook-plugin', 'saved_items', 'first'))
+        self.assertTrue(manager.delete_user_data(self.user, 'hook-plugin', 'saved_items', 'first'))
+        self.assertFalse(manager.delete_user_data(self.user, 'hook-plugin', 'saved_items', 'first'))
+
+    def test_plugin_user_data_rejects_non_standard_json_values(self):
+        manager = self.manager_with_plugin(_HookPlugin(lambda value, context, config: value))
+
+        with self.assertRaisesMessage(ValueError, 'JSON serializable'):
+            manager.set_user_data(
+                self.user,
+                'hook-plugin',
+                'saved_items',
+                'invalid',
+                {'value': float('nan')},
+            )
+
+    def test_ui_context_provider_adds_request_specific_template_context(self):
+        plugin = _UiContextPlugin()
+        manager = PluginManager()
+        manager.descriptors['ui-context'] = PluginDescriptor(
+            plugin_id='ui-context',
+            name='UI Context',
+            version='1.0.0',
+            description='',
+            entrypoint='unused:plugin',
+            source='test',
+        )
+        manager._load_object = MagicMock(return_value=plugin)
+        manager._render_resource = MagicMock(return_value='rendered')
+        manager.configure_user(self.user, {'ui-context'})
+        request = self.factory.get('/example/')
+        request.user = self.user
+
+        result = manager.render_slot('example', Context({'request': request}))
+
+        self.assertEqual(result, 'rendered')
+        rendered_context = manager._render_resource.call_args.args[1]
+        self.assertEqual(rendered_context['from_provider'], '/example/')
 
     def test_dependency_must_remain_enabled_for_plugin_execution(self):
         manager = PluginManager()
@@ -288,6 +364,124 @@ class ReferencePluginIntegrationTests(TestCase):
 
         self.assertNotContains(disabled_response, 'CI Status')
         self.assertContains(enabled_response, 'CI Status')
+
+    @patch('dashboard.views.GitHubClient')
+    def test_saved_search_categories_are_plugin_owned(self, mock_github_client):
+        PluginConfiguration.objects.create(
+            user=self.user,
+            plugin_id='saved-search-categories',
+            enabled=True,
+        )
+        github_client = MagicMock()
+        github_client.get_all_user_prs.return_value = []
+        github_client.get_username.return_value = 'testuser'
+        github_client.errors = []
+        github_client.warnings = []
+        mock_github_client.return_value = github_client
+        url = reverse(
+            'dashboard:plugin_route',
+            kwargs={'plugin_id': 'saved-search-categories', 'route': 'categories'},
+        )
+        query = {
+            'open': True,
+            'include': {'text': 'bug', 'pills': [{'kind': 'label', 'value': 'urgent'}]},
+            'exclude': {'text': '', 'pills': []},
+        }
+
+        response = self.client.post(
+            url,
+            data=json.dumps({'name': 'Needs attention', 'query': query}),
+            content_type='application/json',
+        )
+        list_response = self.client.get(reverse('dashboard:pr_list'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['category'], {'name': 'Needs attention', 'query': query})
+        self.assertTrue(PluginUserData.objects.filter(
+            user=self.user,
+            plugin_id='saved-search-categories',
+            collection='categories',
+            key='Needs attention',
+            value={'query': query},
+        ).exists())
+        self.assertContains(list_response, 'saved-search-categories')
+        self.assertContains(list_response, 'Needs attention')
+
+    def test_saved_search_category_rejects_empty_query(self):
+        PluginConfiguration.objects.create(
+            user=self.user,
+            plugin_id='saved-search-categories',
+            enabled=True,
+        )
+        url = reverse(
+            'dashboard:plugin_route',
+            kwargs={'plugin_id': 'saved-search-categories', 'route': 'categories'},
+        )
+
+        response = self.client.post(
+            url,
+            data=json.dumps({
+                'name': 'Empty',
+                'query': {
+                    'include': {'text': '', 'pills': []},
+                    'exclude': {'text': '', 'pills': []},
+                },
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(PluginUserData.objects.filter(
+            user=self.user,
+            plugin_id='saved-search-categories',
+        ).exists())
+
+    def test_saved_search_category_rejects_non_object_payload(self):
+        PluginConfiguration.objects.create(
+            user=self.user,
+            plugin_id='saved-search-categories',
+            enabled=True,
+        )
+        url = reverse(
+            'dashboard:plugin_route',
+            kwargs={'plugin_id': 'saved-search-categories', 'route': 'categories'},
+        )
+
+        response = self.client.post(url, data='[]', content_type='application/json')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['error'], 'Request body must contain a JSON object')
+
+    def test_saved_search_categories_keep_user_order(self):
+        PluginConfiguration.objects.create(
+            user=self.user,
+            plugin_id='saved-search-categories',
+            enabled=True,
+        )
+        url = reverse(
+            'dashboard:plugin_route',
+            kwargs={'plugin_id': 'saved-search-categories', 'route': 'categories'},
+        )
+        query = {
+            'include': {'text': 'bug', 'pills': []},
+            'exclude': {'text': '', 'pills': []},
+        }
+        for name in ('First', 'Second'):
+            self.client.post(
+                url,
+                data=json.dumps({'name': name, 'query': query}),
+                content_type='application/json',
+            )
+
+        response = self.client.put(
+            url,
+            data=json.dumps({'names': ['Second', 'First']}),
+            content_type='application/json',
+        )
+        categories = self.client.get(url).json()['categories']
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([category['name'] for category in categories], ['Second', 'First'])
 
     @patch('dashboard.views.GitHubClient')
     def test_filter_hook_changes_fetch_options(self, mock_github_client):
