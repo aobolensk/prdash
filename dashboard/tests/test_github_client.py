@@ -229,7 +229,7 @@ class GitHubClientCIStatusParsingTests(TestCase):
     def _client(self):
         return GitHubClient(user=None)
 
-    def _pr_data(self, rollup_state, contexts):
+    def _pr_data(self, rollup_state, contexts, check_suites=None):
         return {
             'number': 123,
             'commits': {
@@ -239,7 +239,8 @@ class GitHubClientCIStatusParsingTests(TestCase):
                             'statusCheckRollup': {
                                 'state': rollup_state,
                                 'contexts': contexts,
-                            }
+                            },
+                            'checkSuites': check_suites or {'nodes': []},
                         }
                     }
                 ]
@@ -261,6 +262,31 @@ class GitHubClientCIStatusParsingTests(TestCase):
         )
 
         self.assertEqual(ci_status.state, 'pending')
+
+    def test_parse_ci_status_pending_approval(self):
+        """Verify pending approval detection."""
+        contexts = {
+            'totalCount': 2,
+            'nodes': [
+                {'conclusion': 'SUCCESS', 'status': 'COMPLETED'},
+                {'conclusion': 'SUCCESS', 'status': 'COMPLETED'},
+            ],
+        }
+        check_suites = {
+            'nodes': [
+                {
+                    'status': 'COMPLETED',
+                    'conclusion': 'ACTION_REQUIRED',
+                },
+            ],
+        }
+
+        ci_status = self._client()._parse_ci_status_from_graphql(
+            self._pr_data('SUCCESS', contexts, check_suites)
+        )
+
+        self.assertEqual(ci_status.state, 'success')
+        self.assertTrue(ci_status.pending_approval)
 
     def test_parse_ci_status_all_skipped(self):
         """Verify all skipped = success."""

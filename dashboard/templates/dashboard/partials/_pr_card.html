@@ -3,7 +3,7 @@
 <article class="pr-card" data-search="{{ pr.title }} {{ pr.repo_full_name }} #{{ pr.number }} {% if pr.author %}{{ pr.author }} {% endif %}{% if pr.branch_name %}{{ pr.branch_name }} {% endif %}{% for label in pr.labels %}{{ label.name }} {% endfor %}{% for issue in pr.linked_issues %}#{{ issue.number }} {% endfor %}" data-repo="{{ pr.repo_full_name }}" data-labels="{% for label in pr.labels %}{{ label.name }}{% if not forloop.last %}|{% endif %}{% endfor %}">
     <div class="pr-card-header">
         {% if pr.ci_status.total_count > 0 %}
-        <a href="{{ pr.url }}/checks" target="_blank" rel="noopener" class="pr-ci-status pr-ci-{{ pr.ci_status.state }}" title="CI Status: {{ pr.ci_status.state }}" aria-label="CI Status: {{ pr.ci_status.state }}">
+        <a href="{{ pr.url }}/checks" target="_blank" rel="noopener" class="pr-ci-status pr-ci-{{ pr.ci_status.state }}" title="CI Status: {{ pr.ci_status.state }}{% if pr.ci_status.pending_approval %}, approval required{% endif %}" aria-label="CI Status: {{ pr.ci_status.state }}{% if pr.ci_status.pending_approval %}, approval required{% endif %}">
             {% if pr.ci_status.state == 'success' %}
                 &#10003;
             {% elif pr.ci_status.state == 'failure' or pr.ci_status.state == 'error' %}
@@ -13,9 +13,12 @@
             {% else %}
                 &#8211;
             {% endif %}
+            {% if pr.ci_status.pending_approval %}
+                <span class="pr-ci-approval" aria-hidden="true">&#128274;</span>
+            {% endif %}
         </a>
         {% else %}
-        <div class="pr-ci-status pr-ci-{{ pr.ci_status.state }}" title="CI Status: {{ pr.ci_status.state }}" aria-label="CI Status: {{ pr.ci_status.state }}">
+        <div class="pr-ci-status pr-ci-{{ pr.ci_status.state }}" title="CI Status: {{ pr.ci_status.state }}{% if pr.ci_status.pending_approval %}, approval required{% endif %}" aria-label="CI Status: {{ pr.ci_status.state }}{% if pr.ci_status.pending_approval %}, approval required{% endif %}">
             {% if pr.ci_status.state == 'success' %}
                 &#10003;
             {% elif pr.ci_status.state == 'failure' or pr.ci_status.state == 'error' %}
@@ -24,6 +27,9 @@
                 &#8987;
             {% else %}
                 &#8211;
+            {% endif %}
+            {% if pr.ci_status.pending_approval %}
+                <span class="pr-ci-approval" aria-hidden="true">&#128274;</span>
             {% endif %}
         </div>
         {% endif %}

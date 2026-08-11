@@ -94,6 +94,12 @@ PR_GRAPHQL_FIELDS = '''
                         }
                     }
                 }
+                checkSuites(first: 100) {
+                    nodes {
+                        status
+                        conclusion
+                    }
+                }
             }
         }
     }
@@ -126,6 +132,7 @@ class CIStatus:
     state: str  # 'success', 'pending', 'failure', 'error', or 'unknown'
     passed_count: int = 0
     total_count: int = 0
+    pending_approval: bool = False
 
 
 @dataclass(slots=True)
@@ -875,6 +882,11 @@ class GitHubClient:
             truncated = contexts_data.get('totalCount', 0) > len(raw_nodes)
             contexts = self._drop_superseded_check_runs(raw_nodes)
             total_count = len(contexts)
+            check_suites = commits[0].get('commit', {}).get('checkSuites', {}).get('nodes', [])
+            pending_approval = any(
+                suite.get('status') == 'WAITING' or suite.get('conclusion') == 'ACTION_REQUIRED'
+                for suite in check_suites
+            )
             rollup_state = {
                 'ERROR': 'error',
                 'EXPECTED': 'pending',
@@ -884,7 +896,10 @@ class GitHubClient:
             }.get(rollup.get('state'))
 
             if total_count == 0:
-                return CIStatus(state=rollup_state or 'unknown')
+                return CIStatus(
+                    state=rollup_state or 'unknown',
+                    pending_approval=pending_approval,
+                )
 
             if truncated and rollup_state:
                 return CIStatus(
@@ -894,6 +909,7 @@ class GitHubClient:
                         if c.get('conclusion') == 'SUCCESS' or c.get('state') == 'SUCCESS'
                     ),
                     total_count=contexts_data.get('totalCount', total_count),
+                    pending_approval=pending_approval,
                 )
 
             success_count = 0
@@ -947,7 +963,8 @@ class GitHubClient:
             return CIStatus(
                 state=state,
                 passed_count=success_count,
-                total_count=total_count
+                total_count=total_count,
+                pending_approval=pending_approval,
             )
         except Exception:
             return CIStatus(state='unknown')
