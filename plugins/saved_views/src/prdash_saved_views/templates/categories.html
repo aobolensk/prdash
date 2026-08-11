@@ -1,0 +1,29 @@
+<div class="filter-group saved-search-categories"
+     id="saved-search-categories"
+     data-categories-url="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='categories' %}">
+    {% for category in saved_search_categories %}
+    <div class="saved-search-category" data-category-name="{{ category.name }}">
+        <button type="button"
+                class="tab saved-search-category-apply"
+                draggable="true"
+                title="Drag to reorder">{{ category.name }}</button>
+        <button type="button"
+                class="btn-icon saved-search-category-delete"
+                aria-label="Delete {{ category.name }}">&#10005;</button>
+    </div>
+    {% endfor %}
+    <button type="button"
+            class="tab saved-search-category-toggle"
+            aria-label="Save search category"
+            aria-controls="saved-search-category-form"
+            aria-expanded="false">+</button>
+    <form class="saved-search-category-form" id="saved-search-category-form" hidden>
+        <input type="text"
+               class="filter-select saved-search-category-name"
+               placeholder="Category name"
+               maxlength="80"
+               aria-label="Category name">
+        <button type="submit" class="tab">Save search</button>
+    </form>
+    {{ saved_search_categories|json_script:"saved-search-categories-data" }}
+</div>

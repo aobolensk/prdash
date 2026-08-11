@@ -366,10 +366,10 @@ class ReferencePluginIntegrationTests(TestCase):
         self.assertContains(enabled_response, 'CI Status')
 
     @patch('dashboard.views.GitHubClient')
-    def test_saved_search_categories_are_plugin_owned(self, mock_github_client):
+    def test_saved_views_are_plugin_owned(self, mock_github_client):
         PluginConfiguration.objects.create(
             user=self.user,
-            plugin_id='saved-search-categories',
+            plugin_id='saved-views',
             enabled=True,
         )
         github_client = MagicMock()
@@ -380,7 +380,7 @@ class ReferencePluginIntegrationTests(TestCase):
         mock_github_client.return_value = github_client
         url = reverse(
             'dashboard:plugin_route',
-            kwargs={'plugin_id': 'saved-search-categories', 'route': 'categories'},
+            kwargs={'plugin_id': 'saved-views', 'route': 'categories'},
         )
         query = {
             'open': True,
@@ -399,23 +399,23 @@ class ReferencePluginIntegrationTests(TestCase):
         self.assertEqual(response.json()['category'], {'name': 'Needs attention', 'query': query})
         self.assertTrue(PluginUserData.objects.filter(
             user=self.user,
-            plugin_id='saved-search-categories',
+            plugin_id='saved-views',
             collection='categories',
             key='Needs attention',
             value={'query': query},
         ).exists())
-        self.assertContains(list_response, 'saved-search-categories')
+        self.assertContains(list_response, 'saved-views')
         self.assertContains(list_response, 'Needs attention')
 
     def test_saved_search_category_rejects_empty_query(self):
         PluginConfiguration.objects.create(
             user=self.user,
-            plugin_id='saved-search-categories',
+            plugin_id='saved-views',
             enabled=True,
         )
         url = reverse(
             'dashboard:plugin_route',
-            kwargs={'plugin_id': 'saved-search-categories', 'route': 'categories'},
+            kwargs={'plugin_id': 'saved-views', 'route': 'categories'},
         )
 
         response = self.client.post(
@@ -433,18 +433,18 @@ class ReferencePluginIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse(PluginUserData.objects.filter(
             user=self.user,
-            plugin_id='saved-search-categories',
+            plugin_id='saved-views',
         ).exists())
 
     def test_saved_search_category_rejects_non_object_payload(self):
         PluginConfiguration.objects.create(
             user=self.user,
-            plugin_id='saved-search-categories',
+            plugin_id='saved-views',
             enabled=True,
         )
         url = reverse(
             'dashboard:plugin_route',
-            kwargs={'plugin_id': 'saved-search-categories', 'route': 'categories'},
+            kwargs={'plugin_id': 'saved-views', 'route': 'categories'},
         )
 
         response = self.client.post(url, data='[]', content_type='application/json')
@@ -452,15 +452,15 @@ class ReferencePluginIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()['error'], 'Request body must contain a JSON object')
 
-    def test_saved_search_categories_keep_user_order(self):
+    def test_saved_views_keep_user_order(self):
         PluginConfiguration.objects.create(
             user=self.user,
-            plugin_id='saved-search-categories',
+            plugin_id='saved-views',
             enabled=True,
         )
         url = reverse(
             'dashboard:plugin_route',
-            kwargs={'plugin_id': 'saved-search-categories', 'route': 'categories'},
+            kwargs={'plugin_id': 'saved-views', 'route': 'categories'},
         )
         query = {
             'include': {'text': 'bug', 'pills': []},

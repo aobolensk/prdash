@@ -1,0 +1,9 @@
+{
+  "id": "saved-views",
+  "name": "Saved Views",
+  "version": "1.0.0",
+  "api_version": "1.1",
+  "description": "Save fuzzy pull request searches as one-click views.",
+  "entrypoint": "prdash_saved_views.plugin:plugin",
+  "python_path": "src"
+}

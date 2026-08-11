@@ -1,0 +1,144 @@
+<style>
+.saved-search-category { position: relative; }
+.saved-search-category-delete { position: absolute; top: 50%; right: 2px; padding: 2px 4px; color: var(--color-text-muted); background: var(--color-bg); border: 0; border-radius: 4px; cursor: pointer; opacity: 0; pointer-events: none; transform: translateY(-50%); transition: opacity 0.15s; }
+.saved-search-category:hover .saved-search-category-delete,
+.saved-search-category:focus-within .saved-search-category-delete { opacity: 1; pointer-events: auto; }
+.saved-search-category-delete:hover { color: var(--color-error, #dc3545); background: var(--color-bg-tertiary); }
+.filter-toolbar .saved-search-category-apply { padding-right: 30px; }
+.saved-search-category.dragging { opacity: 0.45; }
+.saved-search-category-form { display: flex; gap: 8px; }
+.saved-search-category-form[hidden] { display: none !important; }
+</style>
+<script>
+(function() {
+    let swapListenerBound = false;
+
+    function categoryData(root) {
+        const data = root.querySelector('#saved-search-categories-data');
+        return data ? JSON.parse(data.textContent) : [];
+    }
+
+    function csrfToken() {
+        const input = document.querySelector('[name=csrfmiddlewaretoken]');
+        return input ? input.value : '';
+    }
+
+    function reportError(error) {
+        if (typeof window.showToast === 'function') {
+            window.showToast(error.message, 'error');
+        } else {
+            window.alert(error.message);
+        }
+    }
+
+    function request(root, method, payload) {
+        return fetch(root.dataset.categoriesUrl, {
+            method: method,
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken()
+            },
+            body: JSON.stringify(payload)
+        }).then(function(response) {
+            return response.json().then(function(data) {
+                if (!response.ok) throw new Error(data.error || 'Could not save category');
+                return data;
+            });
+        });
+    }
+
+    function bind() {
+        const root = document.getElementById('saved-search-categories');
+        const search = window.prdash && window.prdash.pullRequestSearch;
+        if (!root || !search || root.dataset.bound) return;
+        root.dataset.bound = 'true';
+        if (!swapListenerBound) {
+            document.body.addEventListener('htmx:afterSwap', bind);
+            swapListenerBound = true;
+        }
+        const form = root.querySelector('.saved-search-category-form');
+        const nameInput = root.querySelector('.saved-search-category-name');
+        const toggle = root.querySelector('.saved-search-category-toggle');
+
+        toggle.addEventListener('click', function() {
+            form.hidden = !form.hidden;
+            toggle.textContent = form.hidden ? '+' : '×';
+            toggle.setAttribute('aria-expanded', String(!form.hidden));
+            toggle.setAttribute(
+                'aria-label',
+                form.hidden ? 'Save search category' : 'Hide category form',
+            );
+            if (!form.hidden) nameInput.focus();
+        });
+
+        form.addEventListener('submit', function(event) {
+            event.preventDefault();
+            const query = search.getState();
+            query.open = true;
+            request(root, 'POST', {name: nameInput.value, query: query}).then(function() {
+                window.location.reload();
+            }).catch(reportError);
+        });
+
+        root.querySelectorAll('.saved-search-category-apply').forEach(function(button) {
+            button.addEventListener('click', function() {
+                const name = button.closest('[data-category-name]').dataset.categoryName;
+                const category = categoryData(root).find(function(item) { return item.name === name; });
+                if (category) search.setState(category.query);
+            });
+        });
+
+        let draggedCategory = null;
+        let originalOrder = [];
+        root.querySelectorAll('.saved-search-category').forEach(function(category) {
+            const applyButton = category.querySelector('.saved-search-category-apply');
+            applyButton.addEventListener('dragstart', function(event) {
+                draggedCategory = category;
+                originalOrder = categoryNames(root);
+                category.classList.add('dragging');
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', category.dataset.categoryName);
+            });
+            category.addEventListener('dragover', function(event) {
+                if (!draggedCategory || draggedCategory === category) return;
+                event.preventDefault();
+                const bounds = category.getBoundingClientRect();
+                root.insertBefore(
+                    draggedCategory,
+                    event.clientX < bounds.left + bounds.width / 2 ? category : category.nextSibling,
+                );
+            });
+        });
+        root.addEventListener('dragend', function() {
+            if (!draggedCategory) return;
+            draggedCategory.classList.remove('dragging');
+            const names = categoryNames(root);
+            draggedCategory = null;
+            if (names.join('\u0000') === originalOrder.join('\u0000')) return;
+            request(root, 'PUT', {names: names}).catch(function(error) {
+                reportError(error);
+                window.location.reload();
+            });
+        });
+
+        root.querySelectorAll('.saved-search-category-delete').forEach(function(button) {
+            button.addEventListener('click', function() {
+                const item = button.closest('[data-category-name]');
+                if (!window.confirm('Delete category "' + item.dataset.categoryName + '"?')) return;
+                request(root, 'DELETE', {name: item.dataset.categoryName}).then(function() {
+                    item.remove();
+                }).catch(reportError);
+            });
+        });
+    }
+
+    function categoryNames(root) {
+        return Array.from(root.querySelectorAll('.saved-search-category')).map(function(category) {
+            return category.dataset.categoryName;
+        });
+    }
+
+    document.addEventListener('prdash:pullRequestSearchReady', bind);
+})();
+</script>
