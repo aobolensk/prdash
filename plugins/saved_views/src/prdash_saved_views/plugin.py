@@ -19,7 +19,7 @@ MAX_CATEGORY_NAME_LENGTH = 80
 MAX_TEXT_LENGTH = 500
 MAX_PILLS_PER_FIELD = 40
 MAX_PILL_VALUE_LENGTH = 200
-PILL_KINDS = {'repo', 'label'}
+PILL_KINDS = {'repo', 'label', 'author'}
 
 
 class SavedViewsPlugin:

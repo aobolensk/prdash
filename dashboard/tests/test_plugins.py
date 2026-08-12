@@ -443,6 +443,38 @@ class ReferencePluginIntegrationTests(TestCase):
         self.assertContains(list_response, 'saved-views')
         self.assertContains(list_response, 'Needs attention')
 
+    @patch('dashboard.views.GitHubClient')
+    def test_saved_views_accept_author_pill(self, mock_github_client):
+        PluginConfiguration.objects.create(
+            user=self.user,
+            plugin_id='saved-views',
+            enabled=True,
+        )
+        github_client = MagicMock()
+        github_client.get_all_user_prs.return_value = []
+        github_client.get_username.return_value = 'testuser'
+        github_client.errors = []
+        github_client.warnings = []
+        mock_github_client.return_value = github_client
+        url = reverse(
+            'dashboard:plugin_route',
+            kwargs={'plugin_id': 'saved-views', 'route': 'categories'},
+        )
+        query = {
+            'open': True,
+            'include': {'text': '', 'pills': [{'kind': 'author', 'value': 'octocat'}]},
+            'exclude': {'text': '', 'pills': []},
+        }
+
+        response = self.client.post(
+            url,
+            data=json.dumps({'name': 'By octocat', 'query': query}),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['category'], {'name': 'By octocat', 'query': query})
+
     def test_saved_search_category_rejects_empty_query(self):
         PluginConfiguration.objects.create(
             user=self.user,

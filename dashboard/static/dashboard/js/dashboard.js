@@ -25,9 +25,10 @@ function showToast(message, type = 'error') {
 const PR_HL_SELECTOR = '.pr-title, .pr-repo, .pr-number, .pr-author, .pr-branch-name, .pr-linked-issues, .pr-label';
 
 // Pill-field controllers for the include/exclude search inputs, set up in
-// DOMContentLoaded. Tokens are {kind: 'text'|'repo'|'label', value} objects;
-// repo/label tokens come from committed suggestion pills and match exactly,
-// while text tokens are the free-typed words and match fuzzily as before.
+// DOMContentLoaded. Tokens are {kind: 'text'|'repo'|'label'|'author', value}
+// objects; repo/label/author tokens come from committed suggestion pills and
+// match exactly, while text tokens are the free-typed words and match
+// fuzzily as before.
 let prIncludeField = null;
 let prExcludeField = null;
 
@@ -87,6 +88,9 @@ function prTokenMatchesCard(token, card, haystack) {
     if (token.kind === 'label') {
         const labels = (card.dataset.labels || '').toLowerCase().split('|').filter(Boolean);
         return labels.indexOf(token.value) !== -1;
+    }
+    if (token.kind === 'author') {
+        return (card.dataset.author || '').toLowerCase() === token.value;
     }
     return prTokenMatches(token.value, haystack);
 }
@@ -200,9 +204,26 @@ function prHighlightCard(card, tokenValues) {
 const PR_SUGGEST_MIN_CHARS = 3;
 const PR_SUGGEST_MAX_ITEMS = 8;
 
-// Repo names come from the tracked repos baked into data-repos; label
-// names are read live off whatever PR cards are currently rendered, so
-// suggestions always reflect what's actually on the page.
+// A PR has one repo and one author, so once an include pill picks one, no
+// other same-kind suggestion can also match; exclude tokens are OR'd, so
+// they're unaffected.
+const PR_SINGLETON_PILL_KINDS = ['repo', 'author'];
+
+function prCollectUniqueCandidates(elements, kind, getName, candidates) {
+    const seen = new Set();
+    elements.forEach(function(el) {
+        const name = getName(el).trim();
+        const key = name.toLowerCase();
+        if (name && !seen.has(key)) {
+            seen.add(key);
+            candidates.push({ kind: kind, value: name });
+        }
+    });
+}
+
+// Repo names come from the tracked repos baked into data-repos; label and
+// author names are read live off whatever PR cards are currently rendered,
+// so suggestions always reflect what's actually on the page.
 function prSuggestCandidates() {
     const bar = document.getElementById('pr-search-bar');
     const content = document.getElementById('pr-content');
@@ -212,16 +233,13 @@ function prSuggestCandidates() {
             candidates.push({ kind: 'repo', value: name });
         });
     }
-    const seenLabels = new Set();
     if (content) {
-        content.querySelectorAll('.pr-label').forEach(function(el) {
-            const name = el.textContent.trim();
-            const key = name.toLowerCase();
-            if (name && !seenLabels.has(key)) {
-                seenLabels.add(key);
-                candidates.push({ kind: 'label', value: name });
-            }
-        });
+        prCollectUniqueCandidates(content.querySelectorAll('.pr-label'), 'label', function(el) {
+            return el.textContent;
+        }, candidates);
+        prCollectUniqueCandidates(content.querySelectorAll('.pr-card[data-author]'), 'author', function(card) {
+            return card.dataset.author;
+        }, candidates);
     }
     return candidates;
 }
@@ -284,7 +302,7 @@ function prSetSearchFieldState(field, state) {
     field.inputEl.value = typeof state.text === 'string' ? state.text : '';
     if (Array.isArray(state.pills)) {
         state.pills.forEach(function(pill) {
-            if (!pill || (pill.kind !== 'repo' && pill.kind !== 'label') ||
+            if (!pill || (pill.kind !== 'repo' && pill.kind !== 'label' && pill.kind !== 'author') ||
                     typeof pill.value !== 'string' || !pill.value.trim()) {
                 return;
             }
@@ -378,9 +396,13 @@ function prUpdateSuggestions(field) {
     const wordLower = word.toLowerCase();
     const maxD = prMaxTypos(wordLower.length);
     const taken = new Set(field.pills.map(p => p.kind + ':' + p.value.toLowerCase()));
-    const hasRepoPill = !field.isExclude && field.pills.some(function(p) { return p.kind === 'repo'; });
+    const blockedKinds = field.isExclude ? new Set() : new Set(
+        PR_SINGLETON_PILL_KINDS.filter(function(kind) {
+            return field.pills.some(function(p) { return p.kind === kind; });
+        })
+    );
     const matches = prSuggestCandidates()
-        .filter(function(c) { return !(hasRepoPill && c.kind === 'repo'); })
+        .filter(function(c) { return !blockedKinds.has(c.kind); })
         .filter(function(c) { return !taken.has(c.kind + ':' + c.value.toLowerCase()); })
         .map(function(c) {
             const d = prSuggestMatchDistance(wordLower, maxD, c.value.toLowerCase());
