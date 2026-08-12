@@ -431,6 +431,17 @@ class PluginManager:
             if state.enabled and plugin_id in self.descriptors
         }
 
+    def _activate_user_plugins(self, user, request=None):
+        """Return user state, enabled ids, and plugins loaded for this activation."""
+        states = self._state_map(user, request)
+        enabled_ids = self._enabled_ids(user, request)
+        active_plugins = {}
+        for plugin_id in enabled_ids:
+            loaded = self.load(plugin_id, enabled_ids)
+            if loaded is not None:
+                active_plugins[plugin_id] = loaded
+        return states, enabled_ids, active_plugins
+
     def configure_user(self, user, enabled_plugin_ids):
         """Persist the explicit enabled set and update this process registry."""
         selected = set(enabled_plugin_ids) & self.descriptors.keys()
@@ -461,10 +472,7 @@ class PluginManager:
         return selected != enabled
 
     def plugin_statuses(self, user, request=None):
-        states = self._state_map(user, request)
-        enabled_ids = self._enabled_ids(user, request)
-        for plugin_id in enabled_ids:
-            self.load(plugin_id, enabled_ids)
+        states, enabled_ids, _ = self._activate_user_plugins(user, request)
 
         statuses = []
         for descriptor in sorted(self.descriptors.values(), key=lambda item: item.name.lower()):
@@ -595,16 +603,10 @@ class PluginManager:
 
     def run_hook(self, name, value, hook_context, user, request=None):
         """Run enabled hook callbacks in order and isolate individual failures."""
-        states = self._state_map(user, request)
-        enabled_ids = self._enabled_ids(user, request)
-        active_plugin_ids = set()
-        for plugin_id in enabled_ids:
-            if self.load(plugin_id, enabled_ids) is not None:
-                active_plugin_ids.add(plugin_id)
+        states, _, active_plugins = self._activate_user_plugins(user, request)
 
         callbacks = []
-        for plugin_id in active_plugin_ids:
-            loaded = self._loaded.get(plugin_id)
+        for plugin_id, loaded in active_plugins.items():
             config = dict(states[plugin_id].config)
             for index, (hook_name, priority, callback) in enumerate(
                 loaded.registration.hooks
@@ -628,16 +630,10 @@ class PluginManager:
         """Render enabled UI contributions for one template slot."""
         request = template_context.get('request')
         user = getattr(request, 'user', None)
-        states = self._state_map(user, request)
-        enabled_ids = self._enabled_ids(user, request)
-        active_plugin_ids = set()
-        for plugin_id in enabled_ids:
-            if self.load(plugin_id, enabled_ids) is not None:
-                active_plugin_ids.add(plugin_id)
+        states, _, active_plugins = self._activate_user_plugins(user, request)
 
         contributions = []
-        for plugin_id in active_plugin_ids:
-            loaded = self._loaded.get(plugin_id)
+        for plugin_id, loaded in active_plugins.items():
             for index, contribution in enumerate(loaded.registration.ui):
                 if contribution.slot == slot:
                     contributions.append((

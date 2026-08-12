@@ -135,6 +135,10 @@ class _DependentPlugin:
 
     def initialize(self, registrar):
         registrar.register_hook('example', self.increment)
+        registrar.register_ui(UIContribution(
+            slot='example',
+            template=TemplateResource('unused', 'unused.html'),
+        ))
 
     def shutdown(self):
         pass
@@ -289,22 +293,37 @@ class PluginRuntimeTests(TestCase):
             'dependent:plugin': _DependentPlugin(),
         }
         manager._load_object = MagicMock(side_effect=plugins.get)
+        manager._render_resource = MagicMock(return_value='rendered')
+        request = self.factory.get('/example/')
+        request.user = self.user
         manager.configure_user(self.user, {'dependency', 'dependent'})
         with_dependency = manager.run_hook('example', 1, None, self.user)
+        with_dependency_slot = manager.render_slot('example', Context({'request': request}))
+        with_dependency_statuses = {
+            status['id']: status for status in manager.plugin_statuses(self.user)
+        }
 
         manager.configure_user(self.user, {'dependent'})
         without_dependency = manager.run_hook('example', 1, None, self.user)
+        blocked_request = self.factory.get('/example/')
+        blocked_request.user = self.user
+        without_dependency_slot = manager.render_slot(
+            'example',
+            Context({'request': blocked_request}),
+        )
+
+        without_dependency_statuses = {
+            status['id']: status for status in manager.plugin_statuses(self.user)
+        }
 
         self.assertEqual(with_dependency, 2)
+        self.assertEqual(with_dependency_slot, 'rendered')
+        self.assertTrue(with_dependency_statuses['dependent']['loaded'])
         self.assertEqual(without_dependency, 1)
-        dependent_status = next(
-            status
-            for status in manager.plugin_statuses(self.user)
-            if status['id'] == 'dependent'
-        )
+        self.assertEqual(without_dependency_slot, '')
         self.assertIn(
             'must be enabled first',
-            dependent_status['error'],
+            without_dependency_statuses['dependent']['error'],
         )
 
 
