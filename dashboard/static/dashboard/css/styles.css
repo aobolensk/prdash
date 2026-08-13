@@ -15,8 +15,8 @@
     --color-warning: #9a6700;
     --color-link: #0969da;
     --color-shadow: rgba(31, 35, 40, 0.12);
-    --header-bg: #24292f;
-    --header-text: #ffffff;
+    --header-bg: var(--color-bg-secondary);
+    --header-text: var(--color-text);
 }
 
 [data-theme="dark"] {
@@ -35,8 +35,6 @@
     --color-warning: #d29922;
     --color-link: #58a6ff;
     --color-shadow: rgba(0, 0, 0, 0.3);
-    --header-bg: #161b22;
-    --header-text: #c9d1d9;
 }
 
 /* Reset and base styles */
