@@ -793,6 +793,10 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
+    document.body.addEventListener('pageTitle', function(evt) {
+        document.title = evt.detail.value || evt.detail;
+    });
+
     document.body.addEventListener('repoChanged', function(evt) {
         const currentRepo = evt.detail.value || evt.detail;
         const dashboard = document.getElementById('dashboard-layout');

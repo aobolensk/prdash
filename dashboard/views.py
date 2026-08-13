@@ -226,6 +226,18 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         'assigned': cache.get(f"pr_count:{request.user.id}:assigned"),
     }
 
+    tab_titles = {
+        'review_requests': 'Review Requests',
+        'assigned': 'Assigned',
+        'merged': 'Merged PRs',
+        'author': 'PRs by Author',
+        'author_merged': 'PRs by Author',
+    }
+    page_title = tab_titles.get(active_tab, 'My PRs')
+    if current_repo:
+        page_title = f'{page_title} - {current_repo.full_name}'
+    page_title = f'{page_title} - PR Dashboard'
+
     context = {
         'prs': prs,
         'repos': repos,
@@ -242,12 +254,14 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         'auto_refresh_interval_mins': user_prefs.get_auto_refresh_interval_for_tab(active_tab),
         'pr_counts': pr_counts,
         'page_obj': page_obj,
+        'page_title': page_title,
         'stale_data': stale_data,
     }
 
     if request.headers.get('HX-Request') == 'true':
         triggers = {
             'tabChanged': tab_changed,
+            'pageTitle': page_title,
             'repoChanged': repo_changed,
             'staleData': stale_data,
         }

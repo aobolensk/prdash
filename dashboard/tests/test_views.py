@@ -302,6 +302,7 @@ class HTMXResponseTests(TestCase):
         mock_client.get_all_user_prs.assert_called_once_with([], author='octocat')
         self.assertContains(response, 'Pull Requests by octocat')
         self.assertContains(response, 'PRs by Author')
+        self.assertContains(response, '<title>PRs by Author - PR Dashboard</title>', html=True)
 
     @patch('dashboard.views.GitHubClient')
     def test_author_pr_list_without_author_does_not_fetch(self, mock_github_client):
@@ -387,6 +388,27 @@ class HTMXResponseTests(TestCase):
         self.assertIn('HX-Trigger', response.headers)
         triggers = json.loads(response['HX-Trigger'])
         self.assertIn('tabChanged', triggers)
+        self.assertEqual(triggers['pageTitle'], 'My PRs - PR Dashboard')
+
+    @patch('dashboard.views.GitHubClient')
+    def test_author_pr_list_htmx_sets_browser_title(self, mock_github_client):
+        """Verify the author tab updates the browser title after an HTMX swap."""
+        mock_client = MagicMock()
+        mock_client.get_all_user_prs.return_value = []
+        mock_client.get_username.return_value = 'testuser'
+        mock_client.errors = []
+        mock_client.warnings = []
+        mock_client.get_notification_triggers.return_value = {}
+        mock_github_client.return_value = mock_client
+
+        response = self.client.get(
+            reverse('dashboard:author_pr_list'),
+            HTTP_HX_REQUEST='true',
+        )
+
+        triggers = json.loads(response['HX-Trigger'])
+        self.assertEqual(triggers['pageTitle'], 'PRs by Author - PR Dashboard')
+        self.assertContains(response, 'autocomplete="off"')
 
     @patch('dashboard.views.GitHubClient')
     def test_pr_list_htmx_repeat_poll_with_no_changes_skips_render(self, mock_github_client):

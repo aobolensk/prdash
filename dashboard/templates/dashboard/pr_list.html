@@ -1,7 +1,7 @@
 {% extends 'dashboard/base.html' %}
 {% load static dashboard_tags %}
 
-{% block title %}{% if active_tab == 'review_requests' %}Review Requests{% elif active_tab == 'assigned' %}Assigned{% elif active_tab == 'merged' %}Merged PRs{% elif active_tab == 'author' or active_tab == 'author_merged' %}PRs by Author{% else %}My PRs{% endif %}{% if current_repo %} - {{ current_repo.owner }}/{{ current_repo.name }}{% endif %} - PR Dashboard{% endblock %}
+{% block title %}{{ page_title }}{% endblock %}
 
 {% block content %}
 <div class="dashboard-layout"
@@ -64,6 +64,7 @@
                        name="repo"
                        placeholder="owner/repo"
                        class="input"
+                       autocomplete="off"
                        required>
                 <button type="submit" class="btn btn-primary">Add</button>
             </form>
