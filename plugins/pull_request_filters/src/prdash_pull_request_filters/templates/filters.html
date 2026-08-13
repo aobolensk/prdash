@@ -84,32 +84,6 @@
     </select>
 </div>
 
-<form class="author-filter-form"
-      hx-get="{{ current_url }}"
-      hx-include=".filter-toolbar"
-      hx-target="#pr-content"
-      hx-swap="innerHTML"
-      hx-push-url="true"
-      hx-indicator="#refresh-spinner">
-    <label for="author-input">Author:</label>
-    <input type="text"
-           id="author-input"
-           name="author"
-           value="{{ author|default:'' }}"
-           placeholder="{{ current_username|default:'username' }}"
-           class="input input-small">
-    <button type="submit" class="btn btn-secondary btn-small">Filter</button>
-    {% if author %}
-        <a href="{{ current_url }}"
-           class="btn btn-secondary btn-small"
-           hx-get="{{ current_url }}"
-           hx-target="#pr-content"
-           hx-swap="innerHTML"
-           hx-push-url="true"
-           hx-indicator="#refresh-spinner">Clear</a>
-    {% endif %}
-</form>
-
 {% if has_active_filters %}
 <a href="{{ current_url }}"
    class="btn btn-secondary btn-small filter-clear-all"

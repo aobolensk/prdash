@@ -19,7 +19,7 @@ class PullRequestFiltersPlugin:
         version='1.0.0',
         api_version=PLUGIN_API_VERSION,
         description=(
-            'Filter and sort pull requests by author, review, CI, draft, and merge state.'
+            'Filter and sort pull requests by review, CI, draft, and merge state.'
         ),
     )
 
@@ -56,17 +56,8 @@ class PullRequestFiltersPlugin:
                 'sort',
                 defaults.get('sort', 'updated_desc'),
             ),
-            'author': context.request.GET.get(
-                'author',
-                defaults.get('author', ''),
-            ).strip(),
         }
         query.parameters.update(parameters)
-
-        author = parameters['author']
-        if author:
-            query.fetch_options['author'] = author
-        query.cache_vary['author'] = author
 
         my_review = parameters['my_review']
         if context.active_tab == 'review_requests':
@@ -90,9 +81,7 @@ class PullRequestFiltersPlugin:
             }
             query.fetch_options.update(review_options.get(my_review, {}))
 
-        query.affects_count = bool(
-            author or any(parameters[key] for key in FILTER_KEYS)
-        )
+        query.affects_count = any(parameters[key] for key in FILTER_KEYS)
         return query
 
     @staticmethod

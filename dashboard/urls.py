@@ -12,6 +12,8 @@ urlpatterns = [
     ),
     path('prs/', views.pr_list, name='pr_list'),
     path('prs/merged/', views.merged_pr_list, name='merged_pr_list'),
+    path('prs/by-author/', views.author_pr_list, name='author_pr_list'),
+    path('prs/by-author/merged/', views.author_merged_pr_list, name='author_merged_pr_list'),
     path('prs/review-requests/', views.review_requests_list, name='review_requests_list'),
     path('prs/review-requests/reviewed/', views.review_reviewed_list, name='review_reviewed_list'),
     path('prs/review-requests/approved/', views.review_approved_list, name='review_approved_list'),

@@ -552,7 +552,7 @@ class ReferencePluginIntegrationTests(TestCase):
         self.assertEqual([category['name'] for category in categories], ['Second', 'First'])
 
     @patch('dashboard.views.GitHubClient')
-    def test_filter_hook_changes_fetch_options(self, mock_github_client):
+    def test_filter_plugin_does_not_fetch_by_author(self, mock_github_client):
         PluginConfiguration.objects.create(
             user=self.user,
             plugin_id='pull-request-filters',
@@ -567,7 +567,7 @@ class ReferencePluginIntegrationTests(TestCase):
 
         self.client.get(reverse('dashboard:pr_list'), {'author': 'octocat'})
 
-        github_client.get_all_user_prs.assert_called_once_with([], author='octocat')
+        github_client.get_all_user_prs.assert_called_once_with([])
 
     def test_github_status_route_is_unavailable_until_enabled(self):
         url = reverse(

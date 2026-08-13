@@ -104,7 +104,7 @@ def home(request):
 
 def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
                   owner=None, repo=None, post_filter=None, post_filter_factory=None,
-                  base_fetch_options=None, query_defaults=None):
+                  base_fetch_options=None, query_defaults=None, author_required=False):
     """
     Generic PR list view helper.
 
@@ -136,25 +136,32 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
     )
     plugin_context.query = query
     author = query.parameters.get('author') or None
+    if author_required:
+        author = request.GET.get('author', '').strip() or None
     fetch_options = dict(base_fetch_options or {})
     fetch_options.update(query.fetch_options)
+    if author_required and author:
+        fetch_options['author'] = author
 
     if owner and repo:
         current_repo = get_object_or_404(
             TrackedRepository, user=request.user, owner=owner, name=repo
         )
-        prs = fetch_prs(client, owner, repo, fetch_options)
+        prs = fetch_prs(client, owner, repo, fetch_options) if author or not author_required else []
         repo_changed = f'{owner}/{repo}'
     else:
         current_repo = None
         enabled_repos = repos.filter(enabled=True)
         repo_tuples = [(r.owner, r.name) for r in enabled_repos]
-        prs = fetch_prs(client, repo_tuples, fetch_options)
+        prs = fetch_prs(client, repo_tuples, fetch_options) if author or not author_required else []
         repo_changed = ''
 
     cache_gen = cache.get(f"pr_results_gen:{request.user.id}", 0)
+    cache_vary = dict(query.cache_vary)
+    if author_required:
+        cache_vary['author'] = author or ''
     query_cache_vary = hashlib.sha256(
-        json.dumps(query.cache_vary, sort_keys=True).encode()
+        json.dumps(cache_vary, sort_keys=True).encode()
     ).hexdigest()
     results_cache_key = (
         f"pr_results:{request.user.id}:{cache_gen}:{request.path}:"
@@ -297,6 +304,28 @@ def merged_pr_list(request):
         fetch_prs=lambda c, repos, options: c.get_all_merged_prs(repos, **options),
         active_tab='merged',
         tab_changed='merged',
+    )
+
+
+@login_required
+def author_pr_list(request):
+    return _pr_list_view(
+        request,
+        fetch_prs=lambda c, repos, options: c.get_all_user_prs(repos, **options),
+        active_tab='author',
+        tab_changed='author_prs',
+        author_required=True,
+    )
+
+
+@login_required
+def author_merged_pr_list(request):
+    return _pr_list_view(
+        request,
+        fetch_prs=lambda c, repos, options: c.get_all_merged_prs(repos, **options),
+        active_tab='author_merged',
+        tab_changed='author_merged',
+        author_required=True,
     )
 
 

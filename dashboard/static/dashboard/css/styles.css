@@ -538,15 +538,15 @@ a:hover {
     border-color: var(--color-primary);
 }
 
-/* Author filter form */
-.author-filter-form {
+/* Author picker */
+.author-picker-form {
     display: flex;
     align-items: center;
     gap: 8px;
     padding-bottom: 8px;
 }
 
-.author-filter-form label {
+.author-picker-form label {
     font-size: 13px;
     color: var(--color-text-secondary);
     white-space: nowrap;
@@ -2359,7 +2359,7 @@ mark.pr-hl {
         min-width: calc(50% - 4px);
     }
 
-    .author-filter-form {
+    .author-picker-form {
         width: 100%;
     }
 

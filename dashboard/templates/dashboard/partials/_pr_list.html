@@ -65,7 +65,15 @@
     {% endif %}
 {% else %}
     <div class="empty-state">
-        {% if repos %}
+        {% if active_tab == 'author' or active_tab == 'author_merged' %}
+            {% if not author %}
+            <p>Enter a GitHub username to view their pull requests.</p>
+            {% elif repos %}
+            <p>No {% if active_tab == 'author_merged' %}merged {% else %}open {% endif %}pull requests found.</p>
+            {% else %}
+            <p>Add a repository to start tracking pull requests.</p>
+            {% endif %}
+        {% elif repos %}
             {% if active_tab == 'merged' %}
                 <p>No merged pull requests found.</p>
             {% else %}

@@ -779,6 +779,8 @@ document.addEventListener('DOMContentLoaded', function() {
         let sidebarTab = activeTab;
         if (activeTab === 'merged') {
             sidebarTab = 'my_prs';
+        } else if (activeTab === 'author_prs' || activeTab === 'author_merged') {
+            sidebarTab = 'author_prs';
         } else if (activeTab === 'review_approved') {
             sidebarTab = 'review_requests';
         }
@@ -858,6 +860,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // Map current tab to sidebar tab for comparison
             let currentSidebarTab = currentTab;
             if (currentTab === 'merged') currentSidebarTab = 'my_prs';
+            else if (currentTab === 'author_merged') currentSidebarTab = 'author_prs';
             else if (currentTab === 'review_approved') currentSidebarTab = 'review_requests';
 
             // If clicking the same tab we're on, clear repo filter (use "all" URL)
@@ -908,6 +911,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // Map current tab to sidebar tab for comparison
             let currentSidebarTab = currentTab;
             if (currentTab === 'merged') currentSidebarTab = 'my_prs';
+            else if (currentTab === 'author_merged') currentSidebarTab = 'author_prs';
             else if (currentTab === 'review_approved') currentSidebarTab = 'review_requests';
 
             // If clicking the same tab we're on, clear repo filter (use "all" URL)

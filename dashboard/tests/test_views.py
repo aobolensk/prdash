@@ -283,6 +283,61 @@ class HTMXResponseTests(TestCase):
         self.assertIn('no-store', response['Cache-Control'])
 
     @patch('dashboard.views.GitHubClient')
+    def test_author_pr_list_fetches_selected_author(self, mock_github_client):
+        """Verify the author tab fetches open PRs for the selected author."""
+        mock_client = MagicMock()
+        mock_client.get_all_user_prs.return_value = []
+        mock_client.get_username.return_value = 'testuser'
+        mock_client.errors = []
+        mock_client.warnings = []
+        mock_github_client.return_value = mock_client
+
+        response = self.client.get(
+            reverse('dashboard:author_pr_list'),
+            {'author': 'octocat'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'dashboard/pr_list.html')
+        mock_client.get_all_user_prs.assert_called_once_with([], author='octocat')
+        self.assertContains(response, 'Pull Requests by octocat')
+        self.assertContains(response, 'PRs by Author')
+
+    @patch('dashboard.views.GitHubClient')
+    def test_author_pr_list_without_author_does_not_fetch(self, mock_github_client):
+        """Verify the author tab prompts for an author before querying GitHub."""
+        mock_client = MagicMock()
+        mock_client.get_username.return_value = 'testuser'
+        mock_client.errors = []
+        mock_client.warnings = []
+        mock_github_client.return_value = mock_client
+
+        response = self.client.get(reverse('dashboard:author_pr_list'))
+
+        self.assertEqual(response.status_code, 200)
+        mock_client.get_all_user_prs.assert_not_called()
+        self.assertContains(response, 'Enter a GitHub username to view their pull requests.')
+
+    @patch('dashboard.views.GitHubClient')
+    def test_author_merged_pr_list_fetches_selected_author(self, mock_github_client):
+        """Verify the author tab can show merged PRs for the selected author."""
+        mock_client = MagicMock()
+        mock_client.get_all_merged_prs.return_value = []
+        mock_client.get_username.return_value = 'testuser'
+        mock_client.errors = []
+        mock_client.warnings = []
+        mock_github_client.return_value = mock_client
+
+        response = self.client.get(
+            reverse('dashboard:author_merged_pr_list'),
+            {'author': 'octocat'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_client.get_all_merged_prs.assert_called_once_with([], author='octocat')
+        self.assertContains(response, 'class="tab active"')
+
+    @patch('dashboard.views.GitHubClient')
     def test_pr_list_pagination_has_single_direct_page_input(self, mock_github_client):
         """Verify the current page is an editable page-number input."""
         UserPreferences.objects.create(user=self.user, pr_list_page_size=25)
