@@ -1,0 +1,9 @@
+{
+  "id": "github-actions-rerun-failed-jobs",
+  "name": "GitHub Actions Re-run Failed Jobs",
+  "version": "1.0.0",
+  "api_version": "1.1",
+  "description": "Re-run failed GitHub Actions jobs from pull request cards.",
+  "entrypoint": "prdash_github_actions_rerun_failed_jobs.plugin:plugin",
+  "python_path": "src"
+}

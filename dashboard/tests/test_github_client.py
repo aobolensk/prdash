@@ -50,15 +50,18 @@ class GitHubClientCIStatusTests(TestCase):
         self.assertEqual(ci_status.passed_count, 98)
         self.assertEqual(ci_status.total_count, 174)
 
-    def _check_run(self, conclusion, workflow_name, run_number, status='COMPLETED'):
+    def _check_run(self, conclusion, workflow_name, run_number, database_id=None, status='COMPLETED'):
+        workflow_run = {
+            'runNumber': run_number,
+            'workflow': {'name': workflow_name},
+        }
+        if database_id is not None:
+            workflow_run['databaseId'] = database_id
         return {
             'conclusion': conclusion,
             'status': status,
             'checkSuite': {
-                'workflowRun': {
-                    'runNumber': run_number,
-                    'workflow': {'name': workflow_name},
-                }
+                'workflowRun': workflow_run,
             },
         }
 
@@ -101,6 +104,22 @@ class GitHubClientCIStatusTests(TestCase):
         )
 
         self.assertEqual(ci_status.state, 'failure')
+
+    def test_latest_failed_workflow_run_id_is_exposed(self):
+        contexts = {
+            'totalCount': 3,
+            'nodes': [
+                self._check_run('FAILURE', 'CI', 1, database_id=12),
+                self._check_run('SUCCESS', 'CI', 2, database_id=13),
+                self._check_run('TIMED_OUT', 'CI', 2, database_id=13),
+            ],
+        }
+
+        ci_status = self._client()._parse_ci_status_from_graphql(
+            self._pr_data('FAILURE', contexts)
+        )
+
+        self.assertEqual(ci_status.failed_workflow_run_ids, (13,))
 
     def test_action_required_conclusion_is_a_failure(self):
         """A latest-run check with a failing-but-uncommon conclusion fails the PR."""

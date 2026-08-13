@@ -1,4 +1,4 @@
-{% load dashboard_tags %}
+{% load dashboard_tags plugin_tags %}
 
 <article class="pr-card" data-search="{{ pr.title }} {{ pr.repo_full_name }} #{{ pr.number }} {% if pr.author %}{{ pr.author }} {% endif %}{% if pr.branch_name %}{{ pr.branch_name }} {% endif %}{% for label in pr.labels %}{{ label.name }} {% endfor %}{% for issue in pr.linked_issues %}#{{ issue.number }} {% endfor %}" data-repo="{{ pr.repo_full_name }}" data-labels="{% for label in pr.labels %}{{ label.name }}{% if not forloop.last %}|{% endif %}{% endfor %}" data-author="{{ pr.author }}">
     <div class="pr-card-header">
@@ -71,6 +71,7 @@
                 {% endif %}
                 {% if pr.ci_status.total_count > 0 %}
                     <span class="pr-ci-count">CI: {{ pr.ci_status.passed_count }}/{{ pr.ci_status.total_count }}</span>
+                    {% plugin_slot 'pr_card.meta' pr=pr %}
                 {% endif %}
                 {% if pr.review_status.comment_count > 0 %}
                     <span class="pr-comments">&#128172; {{ pr.review_status.comment_count }}</span>

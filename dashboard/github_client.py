@@ -80,6 +80,7 @@ PR_GRAPHQL_FIELDS = '''
                                 conclusion
                                 checkSuite {
                                     workflowRun {
+                                        databaseId
                                         runNumber
                                         workflow {
                                             name
@@ -133,6 +134,7 @@ class CIStatus:
     passed_count: int = 0
     total_count: int = 0
     pending_approval: bool = False
+    failed_workflow_run_ids: tuple[int, ...] = ()
 
 
 @dataclass(slots=True)
@@ -916,6 +918,7 @@ class GitHubClient:
             failure_count = 0
             skipped_count = 0
             pending_count = 0
+            failed_workflow_run_ids = set()
 
             for context in contexts:
                 # Check if it's a CheckRun or StatusContext
@@ -929,6 +932,10 @@ class GitHubClient:
                         'ACTION_REQUIRED', 'STARTUP_FAILURE',
                     ):
                         failure_count += 1
+                        workflow_run = (context.get('checkSuite') or {}).get('workflowRun') or {}
+                        run_id = workflow_run.get('databaseId')
+                        if conclusion != 'ACTION_REQUIRED' and isinstance(run_id, int):
+                            failed_workflow_run_ids.add(run_id)
                     elif conclusion in ('SKIPPED', 'NEUTRAL', 'STALE'):
                         skipped_count += 1
                     elif conclusion is None:
@@ -965,6 +972,7 @@ class GitHubClient:
                 passed_count=success_count,
                 total_count=total_count,
                 pending_approval=pending_approval,
+                failed_workflow_run_ids=tuple(sorted(failed_workflow_run_ids)),
             )
         except Exception:
             return CIStatus(state='unknown')

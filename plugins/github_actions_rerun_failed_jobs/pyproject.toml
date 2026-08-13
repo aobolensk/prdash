@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prdash-github-actions-rerun-failed-jobs"
+version = "1.0.0"
+description = "Re-run failed GitHub Actions jobs from prdash"
+requires-python = ">=3.12"
+dependencies = ["requests>=2.32"]
+
+[project.entry-points."prdash.plugins"]
+github-actions-rerun-failed-jobs = "prdash_github_actions_rerun_failed_jobs.plugin:plugin"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+prdash_github_actions_rerun_failed_jobs = ["templates/*.html"]

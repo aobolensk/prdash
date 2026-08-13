@@ -1,0 +1,14 @@
+<style>
+.pr-ci-rerun {
+    display: inline-flex;
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    document.body.addEventListener('githubActionsRerunFailedJobsToast', function(event) {
+        const toast = event.detail.value || event.detail;
+        showToast(toast.message, toast.type);
+    });
+});
+</script>

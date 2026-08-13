@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -11,6 +12,7 @@ from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
 from dashboard.models import PluginConfiguration, PluginUserData
+from dashboard.github_client import CIStatus, PullRequestInfo, ReviewStatus
 from dashboard.plugin_manager import PluginDescriptor, PluginManager, plugin_manager
 from prdash.plugin_api import (
     PLUGIN_API_VERSION,
@@ -342,6 +344,7 @@ class ReferencePluginIntegrationTests(TestCase):
 
         self.assertContains(response, 'Pull Request Filters')
         self.assertContains(response, 'GitHub Status')
+        self.assertContains(response, 'GitHub Actions Re-run Failed Jobs')
         self.assertFalse(
             PluginConfiguration.objects.filter(user=self.user, enabled=True).exists()
         )
@@ -400,6 +403,120 @@ class ReferencePluginIntegrationTests(TestCase):
 
         self.assertNotContains(disabled_response, 'CI Status')
         self.assertContains(enabled_response, 'CI Status')
+
+    @patch('dashboard.views.GitHubClient')
+    def test_rerun_button_appears_beside_failed_ci_count(self, mock_github_client):
+        PluginConfiguration.objects.create(
+            user=self.user,
+            plugin_id='github-actions-rerun-failed-jobs',
+            enabled=True,
+        )
+        github_client = MagicMock()
+        github_client.get_all_user_prs.return_value = [PullRequestInfo(
+            number=123,
+            title='Failed CI',
+            url='https://github.com/owner/repo/pull/123',
+            repo_owner='owner',
+            repo_name='repo',
+            author='testuser',
+            author_avatar='',
+            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            labels=[],
+            ci_status=CIStatus(
+                state='failure',
+                passed_count=1,
+                total_count=2,
+                failed_workflow_run_ids=(456,),
+            ),
+            review_status=ReviewStatus(state='not_reviewed'),
+            draft=False,
+            additions=1,
+            deletions=1,
+        )]
+        github_client.get_username.return_value = 'testuser'
+        github_client.errors = []
+        github_client.warnings = []
+        mock_github_client.return_value = github_client
+
+        response = self.client.get(reverse('dashboard:pr_list'))
+
+        self.assertContains(response, 'CI: 1/2')
+        self.assertContains(response, 'Re-run failed CI jobs')
+        self.assertContains(
+            response,
+            reverse(
+                'dashboard:plugin_route',
+                kwargs={'plugin_id': 'github-actions-rerun-failed-jobs', 'route': 'rerun'},
+            ),
+        )
+
+    @patch('requests.post')
+    @patch('dashboard.github_client.GitHubClient._get_token', return_value='token')
+    def test_rerun_plugin_requests_only_failed_jobs(self, mock_token, mock_post):
+        PluginConfiguration.objects.create(
+            user=self.user,
+            plugin_id='github-actions-rerun-failed-jobs',
+            enabled=True,
+        )
+        mock_post.return_value.status_code = 201
+        url = reverse(
+            'dashboard:plugin_route',
+            kwargs={'plugin_id': 'github-actions-rerun-failed-jobs', 'route': 'rerun'},
+        )
+
+        response = self.client.post(url, {
+            'owner': 'owner',
+            'repository': 'repo',
+            'run_id': ['42', '7', '42'],
+        })
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(
+            json.loads(response['HX-Trigger'])['githubActionsRerunFailedJobsToast'],
+            {'message': 'Re-run requested for 2 workflow run(s).', 'type': 'success'},
+        )
+        self.assertEqual(mock_post.call_count, 2)
+        self.assertEqual(
+            mock_post.call_args_list[0].args[0],
+            'https://api.github.com/repos/owner/repo/actions/runs/7/rerun-failed-jobs',
+        )
+        self.assertEqual(
+            mock_post.call_args_list[1].args[0],
+            'https://api.github.com/repos/owner/repo/actions/runs/42/rerun-failed-jobs',
+        )
+
+    @patch('requests.post')
+    @patch('dashboard.github_client.GitHubClient._get_token', return_value='token')
+    def test_rerun_plugin_reports_github_errors_as_toasts(self, mock_token, mock_post):
+        PluginConfiguration.objects.create(
+            user=self.user,
+            plugin_id='github-actions-rerun-failed-jobs',
+            enabled=True,
+        )
+        mock_post.return_value.status_code = 403
+        mock_post.return_value.json.return_value = {
+            'message': 'OAuth App access is restricted by this organization.'
+        }
+        url = reverse(
+            'dashboard:plugin_route',
+            kwargs={'plugin_id': 'github-actions-rerun-failed-jobs', 'route': 'rerun'},
+        )
+
+        response = self.client.post(url, {
+            'owner': 'llvm',
+            'repository': 'llvm-project',
+            'run_id': '42',
+        })
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(
+            json.loads(response['HX-Trigger'])['githubActionsRerunFailedJobsToast'],
+            {
+                'message': 'OAuth App access is restricted by this organization.',
+                'type': 'error',
+            },
+        )
 
     @patch('dashboard.views.GitHubClient')
     def test_saved_views_are_plugin_owned(self, mock_github_client):

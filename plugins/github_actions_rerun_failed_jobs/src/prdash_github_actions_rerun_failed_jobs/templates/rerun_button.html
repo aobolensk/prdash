@@ -1,0 +1,16 @@
+{% if pr.ci_status.failed_workflow_run_ids %}
+<form class="pr-ci-rerun"
+      hx-post="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='rerun' %}"
+      hx-confirm="Re-run failed CI jobs?">
+    {% csrf_token %}
+    <input type="hidden" name="owner" value="{{ pr.repo_owner }}">
+    <input type="hidden" name="repository" value="{{ pr.repo_name }}">
+    {% for run_id in pr.ci_status.failed_workflow_run_ids %}
+    <input type="hidden" name="run_id" value="{{ run_id }}">
+    {% endfor %}
+    <button type="submit" class="btn btn-secondary btn-icon-square"
+            title="Re-run failed CI jobs" aria-label="Re-run failed CI jobs">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+    </button>
+</form>
+{% endif %}
