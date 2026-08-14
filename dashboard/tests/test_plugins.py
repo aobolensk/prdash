@@ -345,6 +345,7 @@ class ReferencePluginIntegrationTests(TestCase):
         self.assertContains(response, 'Pull Request Filters')
         self.assertContains(response, 'GitHub Status')
         self.assertContains(response, 'GitHub Actions Re-run Failed Jobs')
+        self.assertContains(response, 'GitHub PR Preview')
         self.assertFalse(
             PluginConfiguration.objects.filter(user=self.user, enabled=True).exists()
         )
@@ -449,6 +450,126 @@ class ReferencePluginIntegrationTests(TestCase):
                 'dashboard:plugin_route',
                 kwargs={'plugin_id': 'github-actions-rerun-failed-jobs', 'route': 'rerun'},
             ),
+        )
+
+    @patch('dashboard.views.GitHubClient')
+    def test_pr_preview_button_appears_for_every_pull_request(self, mock_github_client):
+        PluginConfiguration.objects.create(
+            user=self.user,
+            plugin_id='github-pr-preview',
+            enabled=True,
+        )
+        github_client = MagicMock()
+        github_client.get_all_user_prs.return_value = [PullRequestInfo(
+            number=123,
+            title='Preview me',
+            url='https://github.com/owner/repo/pull/123',
+            repo_owner='owner',
+            repo_name='repo',
+            author='testuser',
+            author_avatar='',
+            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            labels=[],
+            ci_status=CIStatus(state='unknown'),
+            review_status=ReviewStatus(state='not_reviewed'),
+            draft=False,
+            additions=1,
+            deletions=1,
+        )]
+        github_client.get_username.return_value = 'testuser'
+        github_client.errors = []
+        github_client.warnings = []
+        mock_github_client.return_value = github_client
+
+        response = self.client.get(reverse('dashboard:pr_list'))
+
+        self.assertContains(response, 'Review pull request diff')
+        self.assertContains(
+            response,
+            reverse(
+                'dashboard:plugin_route',
+                kwargs={'plugin_id': 'github-pr-preview', 'route': 'preview'},
+            ),
+        )
+
+    @patch('requests.get')
+    @patch('dashboard.github_client.GitHubClient._get_token', return_value='token')
+    def test_pr_preview_loads_files_and_commentable_diff_lines(self, mock_token, mock_get):
+        PluginConfiguration.objects.create(
+            user=self.user,
+            plugin_id='github-pr-preview',
+            enabled=True,
+        )
+        pull_response = MagicMock(status_code=200)
+        pull_response.json.return_value = {
+            'title': 'Preview me',
+            'html_url': 'https://github.com/owner/repo/pull/123',
+            'head': {'sha': 'head-sha'},
+        }
+        files_response = MagicMock(status_code=200)
+        files_response.json.return_value = [{
+            'filename': 'dashboard/views.py',
+            'status': 'modified',
+            'additions': 1,
+            'deletions': 1,
+            'patch': '@@ -10,2 +10,2 @@\n unchanged\n-old\n+new',
+        }]
+        mock_get.side_effect = [pull_response, files_response]
+        url = reverse(
+            'dashboard:plugin_route',
+            kwargs={'plugin_id': 'github-pr-preview', 'route': 'preview'},
+        )
+
+        response = self.client.get(url, {
+            'owner': 'owner', 'repository': 'repo', 'number': '123',
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'dashboard/views.py')
+        self.assertContains(response, 'name="line" value="11"')
+        self.assertContains(response, 'name="side" value="RIGHT"')
+        self.assertContains(response, 'name="commit_id" value="head-sha"')
+
+    @patch('requests.post')
+    @patch('dashboard.github_client.GitHubClient._get_token', return_value='token')
+    def test_pr_preview_publishes_inline_comment(self, mock_token, mock_post):
+        PluginConfiguration.objects.create(
+            user=self.user,
+            plugin_id='github-pr-preview',
+            enabled=True,
+        )
+        mock_post.return_value = MagicMock(status_code=201)
+        url = reverse(
+            'dashboard:plugin_route',
+            kwargs={'plugin_id': 'github-pr-preview', 'route': 'comment'},
+        )
+
+        response = self.client.post(url, {
+            'owner': 'owner',
+            'repository': 'repo',
+            'number': '123',
+            'path': 'dashboard/views.py',
+            'line': '11',
+            'side': 'RIGHT',
+            'commit_id': 'head-sha',
+            'body': 'Please simplify this.',
+        })
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(
+            json.loads(response['HX-Trigger'])['githubPRPreviewToast'],
+            {'message': 'Inline comment published.', 'type': 'success'},
+        )
+        self.assertEqual(
+            mock_post.call_args.kwargs['json'],
+            {
+                'body': 'Please simplify this.',
+                'commit_id': 'head-sha',
+                'path': 'dashboard/views.py',
+                'line': 11,
+                'side': 'RIGHT',
+            },
         )
 
     @patch('requests.post')

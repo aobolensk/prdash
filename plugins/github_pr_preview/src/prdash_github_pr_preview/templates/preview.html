@@ -1,0 +1,66 @@
+{% if error %}
+<div class="github-pr-preview-error">{{ error }}</div>
+{% else %}
+<div class="github-pr-preview-header">
+    <div>
+        <h2>{{ pull_request.title }}</h2>
+        <p>{{ owner }}/{{ repository }} #{{ number }}</p>
+    </div>
+    <a href="{{ pull_request.html_url }}" target="_blank" rel="noopener" class="btn btn-secondary btn-small">Open on GitHub</a>
+</div>
+<nav class="github-pr-preview-files" aria-label="Changed files">
+    {% for file in files %}
+    <a href="#github-pr-preview-file-{{ forloop.counter }}">{{ file.filename }}</a>
+    {% endfor %}
+</nav>
+<div class="github-pr-preview-diffs">
+    {% for file in files %}
+    <section class="github-pr-preview-file" id="github-pr-preview-file-{{ forloop.counter }}">
+        <header>
+            <strong>{{ file.filename }}</strong>
+            <span class="github-pr-preview-additions">+{{ file.additions }}</span>
+            <span class="github-pr-preview-deletions">-{{ file.deletions }}</span>
+        </header>
+        {% if file.has_patch %}
+        <table class="github-pr-preview-diff">
+            <tbody>
+                {% for line in file.lines %}
+                <tr class="github-pr-preview-line github-pr-preview-{{ line.kind }}">
+                    {% if line.kind == 'hunk' or line.kind == 'meta' %}
+                    <td colspan="5" class="github-pr-preview-code"><code>{{ line.text }}</code></td>
+                    {% else %}
+                    <td class="github-pr-preview-number">{{ line.old_number }}</td>
+                    <td class="github-pr-preview-number">{{ line.new_number }}</td>
+                    <td class="github-pr-preview-marker">{% if line.kind == 'addition' %}+{% elif line.kind == 'removal' %}-{% else %}&nbsp;{% endif %}</td>
+                    <td class="github-pr-preview-code"><code>{{ line.text }}</code></td>
+                    <td class="github-pr-preview-comment-cell">
+                        <button type="button" class="github-pr-preview-comment-button" title="Add inline comment" aria-label="Add inline comment">+</button>
+                        <form class="github-pr-preview-comment-form"
+                              hx-post="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='comment' %}"
+                              hx-swap="none">
+                            {% csrf_token %}
+                            <input type="hidden" name="owner" value="{{ owner }}">
+                            <input type="hidden" name="repository" value="{{ repository }}">
+                            <input type="hidden" name="number" value="{{ number }}">
+                            <input type="hidden" name="path" value="{{ file.filename }}">
+                            <input type="hidden" name="line" value="{{ line.line_number }}">
+                            <input type="hidden" name="side" value="{{ line.side }}">
+                            <input type="hidden" name="commit_id" value="{{ commit_id }}">
+                            <textarea name="body" rows="3" required placeholder="Leave an inline comment"></textarea>
+                            <div><button type="submit" class="btn btn-primary btn-small">Comment</button><button type="button" class="btn btn-secondary btn-small github-pr-preview-cancel">Cancel</button></div>
+                        </form>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="github-pr-preview-no-diff">GitHub did not provide a text diff for this file.</p>
+        {% endif %}
+    </section>
+    {% empty %}
+    <p class="github-pr-preview-no-diff">This pull request has no changed files.</p>
+    {% endfor %}
+</div>
+{% endif %}

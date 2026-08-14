@@ -52,6 +52,7 @@
                 <div class="pr-stats">
                     <span class="pr-additions">+{{ pr.additions }}</span>
                     <span class="pr-deletions">-{{ pr.deletions }}</span>
+                    {% plugin_slot 'pr_card.actions' pr=pr %}
                 </div>
             </div>
             <div class="pr-meta">

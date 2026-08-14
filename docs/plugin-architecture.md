@@ -37,7 +37,7 @@ Plugins register through the scoped registrar passed to `initialize`:
 - Hooks transform a value at a documented hook such as `pr_list.query` or
   `pr_list.process`.
 - UI contributions render packaged Django templates in documented slots such as
-  `head`, `header.status`, `pr_list.filters`, or `settings`. A contribution can
+  `head`, `header.status`, `pr_list.filters`, `pr_card.actions`, or `settings`. A contribution can
   provide request-specific template context without adding a core view contract.
 - Routes are reached through the core dispatcher at
   `/plugins/<plugin-id>/<route>/`; a disabled plugin route returns 404.

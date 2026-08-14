@@ -1,0 +1,9 @@
+{
+  "id": "github-pr-preview",
+  "name": "GitHub PR Preview",
+  "version": "1.0.0",
+  "api_version": "1.1",
+  "description": "Review pull request diffs and publish inline comments.",
+  "entrypoint": "prdash_github_pr_preview.plugin:plugin",
+  "python_path": "src"
+}

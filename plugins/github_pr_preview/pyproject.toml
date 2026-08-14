@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prdash-github-pr-preview"
+version = "1.0.0"
+description = "GitHub pull request diff preview plugin for prdash"
+requires-python = ">=3.12"
+dependencies = ["requests>=2.32"]
+
+[project.entry-points."prdash.plugins"]
+github-pr-preview = "prdash_github_pr_preview.plugin:plugin"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+prdash_github_pr_preview = ["templates/*.html"]
