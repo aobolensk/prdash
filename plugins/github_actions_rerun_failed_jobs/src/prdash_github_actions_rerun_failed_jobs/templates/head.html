@@ -8,7 +8,7 @@
 document.addEventListener('DOMContentLoaded', function() {
     document.body.addEventListener('githubActionsRerunFailedJobsToast', function(event) {
         const toast = event.detail.value || event.detail;
-        showToast(toast.message, toast.type);
+        window.showToast(toast.message, toast.type);
     });
 });
 </script>

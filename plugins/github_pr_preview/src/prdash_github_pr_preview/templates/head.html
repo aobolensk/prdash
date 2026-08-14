@@ -52,7 +52,7 @@
 
     document.body.addEventListener('githubPRPreviewToast', function(event) {
         const toast = event.detail.value || event.detail;
-        showToast(toast.message, toast.type);
+        window.showToast(toast.message, toast.type);
     });
 })();
 </script>
