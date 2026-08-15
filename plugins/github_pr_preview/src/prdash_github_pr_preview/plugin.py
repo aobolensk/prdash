@@ -41,6 +41,7 @@ class GitHubPRPreviewPlugin:
         ))
         registrar.register_route('preview', self.preview)
         registrar.register_route('comment', self.comment)
+        registrar.register_route('reply', self.reply)
 
     def shutdown(self):
         pass
@@ -124,6 +125,71 @@ class GitHubPRPreviewPlugin:
             lines.append({'kind': 'meta', 'text': source_line})
         return lines
 
+    @staticmethod
+    def _comment_locations(comments):
+        locations = {}
+        unmatched = {}
+        display_comments = {}
+        for comment in comments:
+            path = comment.get('path', '')
+            line = comment.get('line')
+            side = comment.get('side')
+            display_comment = {
+                'id': comment.get('id'),
+                'author': (comment.get('user') or {}).get('login', 'Unknown'),
+                'avatar_url': (comment.get('user') or {}).get('avatar_url', ''),
+                'body': comment.get('body', ''),
+                'created_at': comment.get('created_at', ''),
+                'html_url': comment.get('html_url', ''),
+                'can_reply': isinstance(comment.get('id'), int) and not comment.get('in_reply_to_id'),
+                'replies': [],
+            }
+            if isinstance(comment.get('id'), int):
+                display_comments[comment['id']] = display_comment
+            if not path or not isinstance(line, int) or side not in {'LEFT', 'RIGHT'}:
+                if path:
+                    unmatched.setdefault(path, []).append(display_comment)
+                continue
+            locations.setdefault((path, line, side), []).append(display_comment)
+
+        for comment in comments:
+            parent_id = comment.get('in_reply_to_id')
+            comment_id = comment.get('id')
+            if not isinstance(parent_id, int) or not isinstance(comment_id, int):
+                continue
+            parent = display_comments.get(parent_id)
+            reply = display_comments.get(comment_id)
+            if parent and reply:
+                parent['replies'].append(reply)
+                for location_comments in locations.values():
+                    if reply in location_comments:
+                        location_comments.remove(reply)
+                for path_comments in unmatched.values():
+                    if reply in path_comments:
+                        path_comments.remove(reply)
+        return locations, unmatched
+
+    def _load_pages(self, url, headers, fallback):
+        items = []
+        page = 1
+        while True:
+            try:
+                response = requests.get(
+                    url,
+                    params={'per_page': 100, 'page': page},
+                    headers=headers,
+                    timeout=15,
+                )
+            except requests.exceptions.RequestException:
+                return None, fallback
+            if response.status_code != 200:
+                return None, self._error_message(response, fallback)
+            page_items = response.json()
+            items.extend(page_items)
+            if len(page_items) < 100:
+                return items, None
+            page += 1
+
     def preview(self, request, config):
         if request.method != 'GET':
             return HttpResponseNotAllowed(['GET'])
@@ -147,36 +213,48 @@ class GitHubPRPreviewPlugin:
             )
         pull_request = pull_response.json()
 
+        changed_files, files_error = self._load_pages(
+            f'{pull_url}/files',
+            headers,
+            'GitHub could not load the changed files.',
+        )
+        if files_error:
+            return self._preview_error(files_error)
+
+        comments, comments_error = self._load_pages(
+            f'{pull_url}/comments',
+            headers,
+            'GitHub could not load the inline comments.',
+        )
+        if comments_error:
+            return self._preview_error(comments_error)
+
         files = []
-        page = 1
-        while True:
-            try:
-                files_response = requests.get(
-                    f'{pull_url}/files',
-                    params={'per_page': 100, 'page': page},
-                    headers=headers,
-                    timeout=15,
-                )
-            except requests.exceptions.RequestException:
-                return self._preview_error('GitHub could not load the changed files.')
-            if files_response.status_code != 200:
-                return self._preview_error(
-                    self._error_message(files_response, 'GitHub could not load the changed files.')
-                )
-            page_files = files_response.json()
-            for changed_file in page_files:
-                files.append({
-                    'filename': changed_file.get('filename', ''),
-                    'status': changed_file.get('status', ''),
-                    'additions': changed_file.get('additions', 0),
-                    'deletions': changed_file.get('deletions', 0),
-                    'lines': self._parse_patch(changed_file['patch'])
-                    if changed_file.get('patch') else (),
-                    'has_patch': bool(changed_file.get('patch')),
-                })
-            if len(page_files) < 100:
-                break
-            page += 1
+        for changed_file in changed_files:
+            files.append({
+                'filename': changed_file.get('filename', ''),
+                'status': changed_file.get('status', ''),
+                'additions': changed_file.get('additions', 0),
+                'deletions': changed_file.get('deletions', 0),
+                'lines': self._parse_patch(changed_file['patch'])
+                if changed_file.get('patch') else (),
+                'has_patch': bool(changed_file.get('patch')),
+            })
+
+        comment_locations, unmatched_comments = self._comment_locations(comments)
+        for changed_file in files:
+            matched_locations = set()
+            for line in changed_file['lines']:
+                location = (changed_file['filename'], line.get('line_number'), line.get('side'))
+                line['comments'] = comment_locations.get(location, ())
+                if line['comments']:
+                    matched_locations.add(location)
+            changed_file['unmatched_comments'] = unmatched_comments.get(changed_file['filename'], []) + [
+                comment
+                for location, location_comments in comment_locations.items()
+                if location[0] == changed_file['filename'] and location not in matched_locations
+                for comment in location_comments
+            ]
 
         return PluginTemplateResponse(
             template=TemplateResource(PACKAGE, 'templates/preview.html'),
@@ -228,6 +306,31 @@ class GitHubPRPreviewPlugin:
                 self._error_message(response, 'GitHub could not publish the inline comment.')
             )
         return self._toast('Inline comment published.', 'success')
+
+    def reply(self, request, config):
+        if request.method != 'POST':
+            return HttpResponseNotAllowed(['POST'])
+        values = self._request_values(request)
+        comment_id = request.POST.get('comment_id', '')
+        body = request.POST.get('body', '').strip()
+        if values is None or not comment_id.isdigit() or int(comment_id) < 1 or not body:
+            return self._toast('Enter a reply to this comment.')
+        owner, repository, number = values
+        token = GitHubClient(request.user)._get_token()
+        if not token:
+            return self._toast('GitHub authentication is unavailable.')
+        try:
+            response = requests.post(
+                f'{GITHUB_API_URL}/repos/{owner}/{repository}/pulls/{number}/comments/{comment_id}/replies',
+                headers=self._headers(token),
+                json={'body': body},
+                timeout=15,
+            )
+        except requests.exceptions.RequestException:
+            return self._toast('GitHub could not publish the reply.')
+        if response.status_code != 201:
+            return self._toast(self._error_message(response, 'GitHub could not publish the reply.'))
+        return self._toast('Reply published.', 'success')
 
     @staticmethod
     def _preview_error(message):

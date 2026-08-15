@@ -6,7 +6,7 @@
         <h2>{{ pull_request.title }}</h2>
         <p>{{ owner }}/{{ repository }} #{{ number }}</p>
     </div>
-    <a href="{{ pull_request.html_url }}" target="_blank" rel="noopener" class="btn btn-secondary btn-small">Open on GitHub</a>
+    <a href="{{ pull_request.html_url }}" target="_blank" rel="noopener" class="btn btn-secondary btn-small github-pr-preview-open-github">Open on GitHub<svg aria-hidden="true" viewBox="0 0 16 16"><path d="M6.75 2.75h6.5v6.5h-1.5V5.31L6.28 9.78 5.22 8.72l4.47-4.47H6.75v-1.5z"></path><path d="M12 12v1.25h-8.5v-8.5h1.25v-1.5H2v11.5h11.5V12z"></path></svg></a>
 </div>
 <nav class="github-pr-preview-files" aria-label="Changed files">
     {% for file in files %}
@@ -52,11 +52,84 @@
                     </td>
                     {% endif %}
                 </tr>
+                {% for comment in line.comments %}
+                <tr class="github-pr-preview-existing-comment">
+                    <td colspan="3"></td>
+                    <td colspan="2">
+                        <article class="github-pr-preview-comment">
+                            <header>
+                                {% if comment.avatar_url %}<img src="{{ comment.avatar_url }}" alt="" class="github-pr-preview-avatar">{% endif %}
+                                <div>{% if comment.html_url %}<a href="{{ comment.html_url }}" target="_blank" rel="noopener">{{ comment.author }}</a>{% else %}{{ comment.author }}{% endif %}<time datetime="{{ comment.created_at }}" data-github-pr-preview-date>{{ comment.created_at }}</time></div>
+                            </header>
+                            <div>{{ comment.body|linebreaksbr }}</div>
+                            {% for reply in comment.replies %}
+                            <article class="github-pr-preview-comment github-pr-preview-reply">
+                                <header>
+                                    {% if reply.avatar_url %}<img src="{{ reply.avatar_url }}" alt="" class="github-pr-preview-avatar">{% endif %}
+                                    <div>{% if reply.html_url %}<a href="{{ reply.html_url }}" target="_blank" rel="noopener">{{ reply.author }}</a>{% else %}{{ reply.author }}{% endif %}<time datetime="{{ reply.created_at }}" data-github-pr-preview-date>{{ reply.created_at }}</time></div>
+                                </header>
+                                <div>{{ reply.body|linebreaksbr }}</div>
+                            </article>
+                            {% endfor %}
+                            {% if comment.can_reply %}
+                            <button type="button" class="btn btn-secondary btn-small github-pr-preview-reply-button">Reply</button>
+                            <form class="github-pr-preview-reply-form"
+                                  hx-post="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='reply' %}"
+                                  hx-swap="none">
+                                {% csrf_token %}
+                                <input type="hidden" name="owner" value="{{ owner }}">
+                                <input type="hidden" name="repository" value="{{ repository }}">
+                                <input type="hidden" name="number" value="{{ number }}">
+                                <input type="hidden" name="comment_id" value="{{ comment.id }}">
+                                <textarea name="body" rows="3" required placeholder="Reply to this comment"></textarea>
+                                <div><button type="submit" class="btn btn-primary btn-small">Reply</button><button type="button" class="btn btn-secondary btn-small github-pr-preview-cancel">Cancel</button></div>
+                            </form>
+                            {% endif %}
+                        </article>
+                    </td>
+                </tr>
+                {% endfor %}
                 {% endfor %}
             </tbody>
         </table>
         {% else %}
         <p class="github-pr-preview-no-diff">GitHub did not provide a text diff for this file.</p>
+        {% endif %}
+        {% if file.unmatched_comments %}
+        <div class="github-pr-preview-unmatched-comments">
+            {% for comment in file.unmatched_comments %}
+            <article class="github-pr-preview-comment">
+                <header>
+                    {% if comment.avatar_url %}<img src="{{ comment.avatar_url }}" alt="" class="github-pr-preview-avatar">{% endif %}
+                    <div>{% if comment.html_url %}<a href="{{ comment.html_url }}" target="_blank" rel="noopener">{{ comment.author }}</a>{% else %}{{ comment.author }}{% endif %}<time datetime="{{ comment.created_at }}" data-github-pr-preview-date>{{ comment.created_at }}</time></div>
+                </header>
+                <div>{{ comment.body|linebreaksbr }}</div>
+                {% for reply in comment.replies %}
+                <article class="github-pr-preview-comment github-pr-preview-reply">
+                    <header>
+                        {% if reply.avatar_url %}<img src="{{ reply.avatar_url }}" alt="" class="github-pr-preview-avatar">{% endif %}
+                        <div>{% if reply.html_url %}<a href="{{ reply.html_url }}" target="_blank" rel="noopener">{{ reply.author }}</a>{% else %}{{ reply.author }}{% endif %}<time datetime="{{ reply.created_at }}" data-github-pr-preview-date>{{ reply.created_at }}</time></div>
+                    </header>
+                    <div>{{ reply.body|linebreaksbr }}</div>
+                </article>
+                {% endfor %}
+                {% if comment.can_reply %}
+                <button type="button" class="btn btn-secondary btn-small github-pr-preview-reply-button">Reply</button>
+                <form class="github-pr-preview-reply-form"
+                      hx-post="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='reply' %}"
+                      hx-swap="none">
+                    {% csrf_token %}
+                    <input type="hidden" name="owner" value="{{ owner }}">
+                    <input type="hidden" name="repository" value="{{ repository }}">
+                    <input type="hidden" name="number" value="{{ number }}">
+                    <input type="hidden" name="comment_id" value="{{ comment.id }}">
+                    <textarea name="body" rows="3" required placeholder="Reply to this comment"></textarea>
+                    <div><button type="submit" class="btn btn-primary btn-small">Reply</button><button type="button" class="btn btn-secondary btn-small github-pr-preview-cancel">Cancel</button></div>
+                </form>
+                {% endif %}
+            </article>
+            {% endfor %}
+        </div>
         {% endif %}
     </section>
     {% empty %}

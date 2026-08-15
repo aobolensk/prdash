@@ -515,7 +515,42 @@ class ReferencePluginIntegrationTests(TestCase):
             'deletions': 1,
             'patch': '@@ -10,2 +10,2 @@\n unchanged\n-old\n+new',
         }]
-        mock_get.side_effect = [pull_response, files_response]
+        comments_response = MagicMock(status_code=200)
+        comments_response.json.return_value = [
+            {
+                'id': 42,
+                'path': 'dashboard/views.py',
+                'line': 11,
+                'side': 'RIGHT',
+                'body': 'Existing inline comment.',
+                'created_at': '2026-01-01T12:00:00Z',
+                'html_url': 'https://github.com/owner/repo/pull/123#discussion_r1',
+                'user': {
+                    'login': 'reviewer',
+                    'avatar_url': 'https://avatars.githubusercontent.com/u/1',
+                },
+            },
+            {
+                'id': 43,
+                'in_reply_to_id': 42,
+                'path': 'dashboard/views.py',
+                'line': 11,
+                'side': 'RIGHT',
+                'body': 'Existing reply.',
+                'created_at': '2026-01-01T12:30:00Z',
+                'html_url': 'https://github.com/owner/repo/pull/123#discussion_r1',
+                'user': {'login': 'author'},
+            },
+        ]
+
+        def get_response(url, **kwargs):
+            if url.endswith('/files'):
+                return files_response
+            if url.endswith('/comments'):
+                return comments_response
+            return pull_response
+
+        mock_get.side_effect = get_response
         url = reverse(
             'dashboard:plugin_route',
             kwargs={'plugin_id': 'github-pr-preview', 'route': 'preview'},
@@ -527,9 +562,18 @@ class ReferencePluginIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'dashboard/views.py')
+        self.assertContains(response, 'github-pr-preview-open-github')
         self.assertContains(response, 'name="line" value="11"')
         self.assertContains(response, 'name="side" value="RIGHT"')
         self.assertContains(response, 'name="commit_id" value="head-sha"')
+        self.assertContains(response, 'Existing inline comment.')
+        self.assertContains(response, 'Existing reply.')
+        self.assertContains(response, 'reviewer')
+        self.assertContains(response, 'https://avatars.githubusercontent.com/u/1')
+        self.assertContains(response, 'datetime="2026-01-01T12:00:00Z"')
+        self.assertContains(response, 'name="comment_id" value="42"')
+        content = response.content.decode()
+        self.assertLess(content.index('Existing reply.'), content.index('github-pr-preview-reply-button'))
 
     @patch('requests.post')
     @patch('dashboard.github_client.GitHubClient._get_token', return_value='token')
@@ -571,6 +615,39 @@ class ReferencePluginIntegrationTests(TestCase):
                 'side': 'RIGHT',
             },
         )
+
+    @patch('requests.post')
+    @patch('dashboard.github_client.GitHubClient._get_token', return_value='token')
+    def test_pr_preview_replies_to_inline_comment(self, mock_token, mock_post):
+        PluginConfiguration.objects.create(
+            user=self.user,
+            plugin_id='github-pr-preview',
+            enabled=True,
+        )
+        mock_post.return_value = MagicMock(status_code=201)
+        url = reverse(
+            'dashboard:plugin_route',
+            kwargs={'plugin_id': 'github-pr-preview', 'route': 'reply'},
+        )
+
+        response = self.client.post(url, {
+            'owner': 'owner',
+            'repository': 'repo',
+            'number': '123',
+            'comment_id': '42',
+            'body': 'Thanks for the suggestion.',
+        })
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(
+            json.loads(response['HX-Trigger'])['githubPRPreviewToast'],
+            {'message': 'Reply published.', 'type': 'success'},
+        )
+        self.assertEqual(
+            mock_post.call_args.args[0],
+            'https://api.github.com/repos/owner/repo/pulls/123/comments/42/replies',
+        )
+        self.assertEqual(mock_post.call_args.kwargs['json'], {'body': 'Thanks for the suggestion.'})
 
     @patch('requests.post')
     @patch('dashboard.github_client.GitHubClient._get_token', return_value='token')
