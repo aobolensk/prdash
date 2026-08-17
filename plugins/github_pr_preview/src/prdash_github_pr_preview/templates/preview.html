@@ -5,8 +5,35 @@
     <div>
         <h2>{{ pull_request.title }}</h2>
         <p>{{ owner }}/{{ repository }} #{{ number }}</p>
+        {% if pull_request.body %}
+        <div class="github-pr-preview-description">{{ pull_request.body|linebreaksbr }}</div>
+        {% endif %}
     </div>
-    <a href="{{ pull_request.html_url }}" target="_blank" rel="noopener" class="btn btn-secondary btn-small github-pr-preview-open-github">Open on GitHub<svg aria-hidden="true" viewBox="0 0 16 16"><path d="M6.75 2.75h6.5v6.5h-1.5V5.31L6.28 9.78 5.22 8.72l4.47-4.47H6.75v-1.5z"></path><path d="M12 12v1.25h-8.5v-8.5h1.25v-1.5H2v11.5h11.5V12z"></path></svg></a>
+    <div class="github-pr-preview-header-actions">
+        <a href="{{ pull_request.html_url }}" target="_blank" rel="noopener" class="btn btn-secondary btn-small github-pr-preview-open-github">Open on GitHub<svg aria-hidden="true" viewBox="0 0 16 16"><path d="M6.75 2.75h6.5v6.5h-1.5V5.31L6.28 9.78 5.22 8.72l4.47-4.47H6.75v-1.5z"></path><path d="M12 12v1.25h-8.5v-8.5h1.25v-1.5H2v11.5h11.5V12z"></path></svg></a>
+        {% if pull_request.state == 'open' %}
+        <form class="github-pr-preview-action-form"
+              hx-post="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='update-branch' %}"
+              hx-swap="none"
+              hx-confirm="Update this branch with the latest changes from the base branch?">
+            {% csrf_token %}
+            <input type="hidden" name="owner" value="{{ owner }}">
+            <input type="hidden" name="repository" value="{{ repository }}">
+            <input type="hidden" name="number" value="{{ number }}">
+            <button type="submit" class="btn btn-secondary btn-small">Update branch</button>
+        </form>
+        <form class="github-pr-preview-action-form"
+              hx-post="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='merge' %}"
+              hx-swap="none"
+              hx-confirm="Merge this pull request?">
+            {% csrf_token %}
+            <input type="hidden" name="owner" value="{{ owner }}">
+            <input type="hidden" name="repository" value="{{ repository }}">
+            <input type="hidden" name="number" value="{{ number }}">
+            <button type="submit" class="btn btn-primary btn-small">Merge</button>
+        </form>
+        {% endif %}
+    </div>
 </div>
 <nav class="github-pr-preview-files" aria-label="Changed files">
     {% for file in files %}

@@ -649,6 +649,66 @@ class ReferencePluginIntegrationTests(TestCase):
         )
         self.assertEqual(mock_post.call_args.kwargs['json'], {'body': 'Thanks for the suggestion.'})
 
+    @patch('requests.put')
+    @patch('dashboard.github_client.GitHubClient._get_token', return_value='token')
+    def test_pr_preview_updates_branch(self, mock_token, mock_put):
+        PluginConfiguration.objects.create(
+            user=self.user,
+            plugin_id='github-pr-preview',
+            enabled=True,
+        )
+        mock_put.return_value = MagicMock(status_code=202)
+        url = reverse(
+            'dashboard:plugin_route',
+            kwargs={'plugin_id': 'github-pr-preview', 'route': 'update-branch'},
+        )
+
+        response = self.client.post(url, {
+            'owner': 'owner',
+            'repository': 'repo',
+            'number': '123',
+        })
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(
+            json.loads(response['HX-Trigger'])['githubPRPreviewToast'],
+            {'message': 'Branch update started.', 'type': 'success'},
+        )
+        self.assertEqual(
+            mock_put.call_args.args[0],
+            'https://api.github.com/repos/owner/repo/pulls/123/update-branch',
+        )
+
+    @patch('requests.put')
+    @patch('dashboard.github_client.GitHubClient._get_token', return_value='token')
+    def test_pr_preview_merges_pull_request(self, mock_token, mock_put):
+        PluginConfiguration.objects.create(
+            user=self.user,
+            plugin_id='github-pr-preview',
+            enabled=True,
+        )
+        mock_put.return_value = MagicMock(status_code=200)
+        url = reverse(
+            'dashboard:plugin_route',
+            kwargs={'plugin_id': 'github-pr-preview', 'route': 'merge'},
+        )
+
+        response = self.client.post(url, {
+            'owner': 'owner',
+            'repository': 'repo',
+            'number': '123',
+        })
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(
+            json.loads(response['HX-Trigger'])['githubPRPreviewToast'],
+            {'message': 'Pull request merged.', 'type': 'success'},
+        )
+        self.assertEqual(
+            mock_put.call_args.args[0],
+            'https://api.github.com/repos/owner/repo/pulls/123/merge',
+        )
+
     @patch('requests.post')
     @patch('dashboard.github_client.GitHubClient._get_token', return_value='token')
     def test_rerun_plugin_requests_only_failed_jobs(self, mock_token, mock_post):
