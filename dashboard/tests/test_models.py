@@ -32,6 +32,23 @@ class PersonalAccessTokenModelTests(TestCase):
         with self.assertRaises(IntegrityError):
             PersonalAccessToken.objects.create(user=self.user, token='token2')
 
+    def test_pat_token_encrypted_at_rest(self):
+        """Verify the token is not stored in plaintext in the database."""
+        PersonalAccessToken.objects.create(user=self.user, token='ghp_testtoken123456')
+
+        raw_value = PersonalAccessToken.objects.values_list('token', flat=True).get(user=self.user)
+
+        self.assertNotEqual(raw_value, 'ghp_testtoken123456')
+        self.assertNotIn('ghp_testtoken123456', raw_value)
+
+    def test_pat_token_decrypts_transparently(self):
+        """Verify the token round-trips through save/reload unchanged."""
+        PersonalAccessToken.objects.create(user=self.user, token='ghp_testtoken123456')
+
+        pat = PersonalAccessToken.objects.get(user=self.user)
+
+        self.assertEqual(pat.token, 'ghp_testtoken123456')
+
 
 class TrackedRepositoryModelTests(TestCase):
     """Tests for TrackedRepository model."""

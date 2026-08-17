@@ -1,6 +1,8 @@
 from django.db import models
 from django.contrib.auth.models import User
 
+from .fields import EncryptedCharField
+
 
 class PersonalAccessToken(models.Model):
     """A GitHub Personal Access Token for API access.
@@ -9,7 +11,7 @@ class PersonalAccessToken(models.Model):
     Fine-grained tokens are recommended as they allow scoping to specific repos.
     """
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='github_pat')
-    token = models.CharField(max_length=255, help_text="GitHub fine-grained or classic token")
+    token = EncryptedCharField(max_length=512, help_text="GitHub fine-grained or classic token")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
