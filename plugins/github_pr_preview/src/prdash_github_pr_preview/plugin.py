@@ -1,8 +1,11 @@
+import functools
 import json
 import re
+from importlib import resources
 
 import requests
 from django.http import HttpResponse, HttpResponseNotAllowed
+from django.template import engines
 
 from dashboard.github_client import GITHUB_API_VERSION, GitHubClient
 from prdash.plugin_api import (
@@ -195,24 +198,26 @@ class GitHubPRPreviewPlugin:
     def preview(self, request, config):
         if request.method != 'GET':
             return HttpResponseNotAllowed(['GET'])
+        fragment_only = request.headers.get('Sec-Fetch-Mode') != 'navigate'
+        respond = functools.partial(self._preview_response, fragment_only, request)
         values = self._request_values(request)
         if values is None:
-            return self._preview_error('Could not determine this pull request.')
+            return respond({'error': 'Could not determine this pull request.'})
         owner, repository, number = values
         token = GitHubClient(request.user)._get_token()
         if not token:
-            return self._preview_error('GitHub authentication is unavailable.')
+            return respond({'error': 'GitHub authentication is unavailable.'})
 
         headers = self._headers(token)
         pull_url = f'{GITHUB_API_URL}/repos/{owner}/{repository}/pulls/{number}'
         try:
             pull_response = requests.get(pull_url, headers=headers, timeout=15)
         except requests.exceptions.RequestException:
-            return self._preview_error('GitHub could not load this pull request.')
+            return respond({'error': 'GitHub could not load this pull request.'})
         if pull_response.status_code != 200:
-            return self._preview_error(
-                self._error_message(pull_response, 'GitHub could not load this pull request.')
-            )
+            return respond({
+                'error': self._error_message(pull_response, 'GitHub could not load this pull request.'),
+            })
         pull_request = pull_response.json()
 
         changed_files, files_error = self._load_pages(
@@ -221,7 +226,7 @@ class GitHubPRPreviewPlugin:
             'GitHub could not load the changed files.',
         )
         if files_error:
-            return self._preview_error(files_error)
+            return respond({'error': files_error})
 
         comments, comments_error = self._load_pages(
             f'{pull_url}/comments',
@@ -229,7 +234,7 @@ class GitHubPRPreviewPlugin:
             'GitHub could not load the inline comments.',
         )
         if comments_error:
-            return self._preview_error(comments_error)
+            return respond({'error': comments_error})
 
         files = []
         for changed_file in changed_files:
@@ -258,17 +263,14 @@ class GitHubPRPreviewPlugin:
                 for comment in location_comments
             ]
 
-        return PluginTemplateResponse(
-            template=TemplateResource(PACKAGE, 'templates/preview.html'),
-            context={
-                'owner': owner,
-                'repository': repository,
-                'number': number,
-                'pull_request': pull_request,
-                'commit_id': pull_request.get('head', {}).get('sha', ''),
-                'files': files,
-            },
-        )
+        return respond({
+            'owner': owner,
+            'repository': repository,
+            'number': number,
+            'pull_request': pull_request,
+            'commit_id': pull_request.get('head', {}).get('sha', ''),
+            'files': files,
+        })
 
     def comment(self, request, config):
         if request.method != 'POST':
@@ -369,11 +371,32 @@ class GitHubPRPreviewPlugin:
         )
 
     @staticmethod
-    def _preview_error(message):
-        return PluginTemplateResponse(
-            template=TemplateResource(PACKAGE, 'templates/preview.html'),
-            context={'error': message},
-        )
+    def _render(template_resource, context, request):
+        source = resources.files(template_resource.package).joinpath(
+            template_resource.path
+        ).read_text(encoding='utf-8')
+        return engines['django'].from_string(source).render(context, request)
+
+    @staticmethod
+    @functools.lru_cache(maxsize=1)
+    def _rendered_head():
+        return GitHubPRPreviewPlugin._render(TemplateResource(PACKAGE, 'templates/head.html'), {}, None)
+
+    def _preview_response(self, fragment_only, request, context):
+        if fragment_only:
+            return PluginTemplateResponse(
+                template=TemplateResource(PACKAGE, 'templates/preview.html'),
+                context=context,
+            )
+        page_context = dict(context)
+        page_context['plugin_id'] = self.metadata.plugin_id
+        body = self._render(TemplateResource(PACKAGE, 'templates/preview.html'), page_context, request)
+        page = self._render(TemplateResource(PACKAGE, 'templates/page.html'), {
+            'head': self._rendered_head(),
+            'body': body,
+            'pull_request': context.get('pull_request'),
+        }, request)
+        return HttpResponse(page)
 
     @staticmethod
     def _toast(message, toast_type='error'):

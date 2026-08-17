@@ -1,0 +1,20 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% if pull_request.title %}{{ pull_request.title }} - {% endif %}PR Dashboard</title>
+    <link rel="stylesheet" href="{% static 'dashboard/css/styles.css' %}">
+    {{ head|safe }}
+    <script src="{% static 'dashboard/js/htmx.min.js' %}" defer></script>
+    <script src="{% static 'dashboard/js/dashboard.js' %}" defer></script>
+</head>
+<body>
+    <div class="github-pr-preview-page" id="github-pr-preview-dialog">
+        {{ body|safe }}
+    </div>
+    <div id="toast-container" class="toast-container"></div>
+    <script>window.githubPRPreviewFormatDates(document);</script>
+</body>
+</html>
