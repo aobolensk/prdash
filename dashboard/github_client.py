@@ -145,6 +145,7 @@ class ReviewStatus:
     comment_count: int = 0
     review_decision: Optional[str] = None  # 'APPROVED', 'CHANGES_REQUESTED', 'REVIEW_REQUIRED', or None
     approvers: list[str] = field(default_factory=list)
+    review_states: dict[str, str] = field(default_factory=dict)  # username -> latest review state
 
 
 @dataclass(slots=True)
@@ -989,10 +990,11 @@ class GitHubClient:
             review_decision = pr_data.get('reviewDecision')
 
             latest_review_by_user = self._compute_latest_review_states(reviews)
+            review_states = {user: state for user, (state, _) in latest_review_by_user.items()}
 
-            approvers = [user for user, (state, _) in latest_review_by_user.items() if state == 'APPROVED']
+            approvers = [user for user, state in review_states.items() if state == 'APPROVED']
             approval_count = len(approvers)
-            changes_requested = any(state == 'CHANGES_REQUESTED' for state, _ in latest_review_by_user.values())
+            changes_requested = any(state == 'CHANGES_REQUESTED' for state in review_states.values())
 
             if changes_requested:
                 state = 'changes_requested'
@@ -1007,6 +1009,7 @@ class GitHubClient:
                 comment_count=comment_count,
                 review_decision=review_decision,
                 approvers=approvers,
+                review_states=review_states,
             )
         except Exception:
             return ReviewStatus(state='not_reviewed', approval_count=0, comment_count=0)
@@ -1524,101 +1527,23 @@ class GitHubClient:
         all_prs.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
         return all_prs
 
-    @staticmethod
-    def _group_prs_by_repo(prs: list[PullRequestInfo]) -> dict[tuple[str, str], list[PullRequestInfo]]:
-        """Group PRs by (owner, name) tuple."""
-        prs_by_repo: dict[tuple[str, str], list[PullRequestInfo]] = {}
-        for pr in prs:
-            key = (pr.repo_owner, pr.repo_name)
-            if key not in prs_by_repo:
-                prs_by_repo[key] = []
-            prs_by_repo[key].append(pr)
-        return prs_by_repo
-
     def _filter_prs_by_user_review_state(
         self,
         prs: list[PullRequestInfo],
         username: str,
         state_predicate: callable,
     ) -> list[PullRequestInfo]:
-        """Filter PRs based on a user's review state using GraphQL.
+        """Filter PRs based on a user's latest review state.
+
+        Uses review_states already populated on each PR's review_status from the
+        initial PR fetch, so this is a pure in-memory filter with no extra API calls.
 
         Args:
             prs: List of PRs to filter
             username: GitHub username to check review state for
             state_predicate: Function(state: str) -> bool that returns True if the state matches
         """
-        if not prs:
-            return []
-
-        prs_by_repo = self._group_prs_by_repo(prs)
-
-        matching_prs = []
-        token = self._get_token()
-        if not token:
-            return []
-
-        for (owner, name), repo_prs in prs_by_repo.items():
-            pr_numbers = [pr.number for pr in repo_prs]
-
-            pr_queries = []
-            for i, pr_num in enumerate(pr_numbers[:100]):
-                pr_queries.append(f'''
-                    pr{i}: pullRequest(number: {pr_num}) {{
-                        number
-                        reviews(first: 100) {{
-                            nodes {{
-                                author {{
-                                    login
-                                }}
-                                state
-                                submittedAt
-                            }}
-                        }}
-                    }}
-                ''')
-
-            query = f'''
-                query {{
-                    repository(owner: "{owner}", name: "{name}") {{
-                        {' '.join(pr_queries)}
-                    }}
-                }}
-            '''
-
-            try:
-                data = self._post_graphql(
-                    query,
-                    owner=owner,
-                    name=name,
-                    operation='Review state filter GraphQL query',
-                    token=token,
-                )
-                if data is None:
-                    continue
-
-                repo_data = data.get('data', {}).get('repository', {})
-                if not repo_data:
-                    continue
-
-                pr_map = {pr.number: pr for pr in repo_prs}
-                for i, pr_num in enumerate(pr_numbers[:100]):
-                    pr_data = repo_data.get(f'pr{i}')
-                    if not pr_data:
-                        continue
-
-                    reviews = pr_data.get('reviews', {}).get('nodes', [])
-                    latest_review_by_user = self._compute_latest_review_states(reviews)
-
-                    if username in latest_review_by_user:
-                        user_state = latest_review_by_user[username][0]
-                        if state_predicate(user_state) and pr_num in pr_map:
-                            matching_prs.append(pr_map[pr_num])
-
-            except Exception:
-                pass
-
-        return matching_prs
+        return [pr for pr in prs if state_predicate(pr.review_status.review_states.get(username))]
 
     def filter_prs_approved_by_user(
         self, prs: list[PullRequestInfo], username: str

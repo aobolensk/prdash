@@ -4,8 +4,9 @@ from unittest.mock import MagicMock, patch
 import requests
 from django.contrib.auth.models import User
 from django.test import TestCase
+from django.utils import timezone
 
-from dashboard.github_client import GRAPHQL_PR_BATCH_SIZE, GitHubClient
+from dashboard.github_client import CIStatus, GRAPHQL_PR_BATCH_SIZE, GitHubClient, PullRequestInfo, ReviewStatus
 from dashboard.models import PersonalAccessToken
 
 
@@ -417,6 +418,61 @@ class GitHubClientReviewStatusParsingTests(TestCase):
         status = self._client()._parse_review_status_from_graphql(pr_data)
 
         self.assertEqual(status.state, 'approved')
+
+
+class GitHubClientReviewStateFilterTests(TestCase):
+    """Tests for filtering PRs by a user's review state."""
+
+    def _client(self):
+        return GitHubClient(user=None)
+
+    def _pr(self, number, review_states):
+        now = timezone.now()
+        return PullRequestInfo(
+            number=number,
+            title=f'PR {number}',
+            url=f'https://github.com/owner/repo/pull/{number}',
+            repo_owner='owner',
+            repo_name='repo',
+            author='author',
+            author_avatar='',
+            created_at=now,
+            updated_at=now,
+            labels=[],
+            ci_status=CIStatus(state='success'),
+            review_status=ReviewStatus(state='approved', review_states=review_states),
+            draft=False,
+            additions=1,
+            deletions=1,
+        )
+
+    @patch.object(GitHubClient, '_post_graphql')
+    def test_filter_prs_approved_by_user_uses_cached_review_states(self, mock_post_graphql):
+        """Verify filtering by approval doesn't issue a GraphQL request."""
+        prs = [
+            self._pr(1, {'reviewer': 'APPROVED'}),
+            self._pr(2, {'reviewer': 'CHANGES_REQUESTED'}),
+        ]
+
+        result = self._client().filter_prs_approved_by_user(prs, 'reviewer')
+
+        self.assertEqual([pr.number for pr in result], [1])
+        mock_post_graphql.assert_not_called()
+
+    @patch.object(GitHubClient, '_post_graphql')
+    def test_filter_prs_reviewed_not_approved_by_user_excludes_approved(self, mock_post_graphql):
+        """Verify the not-approved filter excludes approvers but keeps other review states."""
+        prs = [
+            self._pr(1, {'reviewer': 'APPROVED'}),
+            self._pr(2, {'reviewer': 'CHANGES_REQUESTED'}),
+            self._pr(3, {'reviewer': 'COMMENTED'}),
+            self._pr(4, {'someone_else': 'APPROVED'}),
+        ]
+
+        result = self._client().filter_prs_reviewed_not_approved_by_user(prs, 'reviewer')
+
+        self.assertEqual([pr.number for pr in result], [2, 3])
+        mock_post_graphql.assert_not_called()
 
 
 class GitHubClientResponseSummarizationTests(TestCase):
