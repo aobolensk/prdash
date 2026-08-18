@@ -1142,29 +1142,52 @@ class GitHubClient:
         message = self._summarize_response(response)
         self._handle_error(owner, name, status_code=response.status_code, message=message)
 
+    def _resolve_author(self, author: Optional[str]) -> Optional[str]:
+        """Default to the authenticated user when no explicit author is given."""
+        if author is not None:
+            return author
+        return self.get_username()
+
+    def _finalize_repo_prs(
+        self, owner: str, name: str, pr_numbers: list[int], sort_key
+    ) -> list[PullRequestInfo]:
+        """Shared tail for get_X_for_repo: batch-fetch PR details and sort."""
+        if not pr_numbers:
+            return []
+        result = self._fetch_prs_batch_graphql(owner, name, pr_numbers)
+        result.sort(key=sort_key, reverse=True)
+        return result
+
+    def _search_and_finalize_repo_prs(
+        self, owner: str, name: str, query: str, sort_key
+    ) -> list[PullRequestInfo]:
+        """Search a single repo, then run the shared get_X_for_repo tail."""
+        pr_numbers = self._search_prs(query, owner, name)
+        return self._finalize_repo_prs(owner, name, pr_numbers, sort_key)
+
+    def _consolidated_search_and_fetch(
+        self, repos: list[tuple[str, str]], query: str, sort_key
+    ) -> list[PullRequestInfo]:
+        """Shared tail for get_all_X: consolidated search, multi-repo fetch, and sort."""
+        pr_data = self._search_prs_consolidated(query, repos)
+        all_prs = self._fetch_multi_repo_prs(pr_data)
+        all_prs.sort(key=sort_key, reverse=True)
+        return all_prs
+
     def get_user_prs_for_repo(self, owner: str, name: str, author: Optional[str] = None) -> list[PullRequestInfo]:
         """Get open PRs authored by the specified user (or current user) for a specific repository."""
         if not self.client:
             return []
 
         try:
-            # Use provided author or default to authenticated user
-            if author is None:
-                author = self.get_username()
-                if not author:
-                    return []
-
-            # Use GitHub Search API
-            query = f"repo:{owner}/{name} is:pr is:open author:{author}"
-            pr_numbers = self._search_prs(query, owner, name)
-
-            if not pr_numbers:
+            author = self._resolve_author(author)
+            if not author:
                 return []
 
-            result = self._fetch_prs_batch_graphql(owner, name, pr_numbers)
-
-            result.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
-            return result
+            query = f"repo:{owner}/{name} is:pr is:open author:{author}"
+            return self._search_and_finalize_repo_prs(
+                owner, name, query, lambda pr: (pr.updated_at, pr.number)
+            )
         except Exception as e:
             self._handle_api_error(e, owner, name)
             return []
@@ -1177,18 +1200,13 @@ class GitHubClient:
         if not repos:
             return []
 
-        if author is None:
-            author = self.get_username()
-            if not author:
-                return []
+        author = self._resolve_author(author)
+        if not author:
+            return []
 
         # Single search for ALL open PRs by this author (1 API call instead of N)
         query = f"is:pr is:open author:{author}"
-        pr_data = self._search_prs_consolidated(query, repos)
-
-        all_prs = self._fetch_multi_repo_prs(pr_data)
-        all_prs.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
-        return all_prs
+        return self._consolidated_search_and_fetch(repos, query, lambda pr: (pr.updated_at, pr.number))
 
     def _fetch_multi_repo_prs(
         self, pr_data: dict[tuple[str, str], list[int]]
@@ -1300,23 +1318,14 @@ class GitHubClient:
             return []
 
         try:
-            # Use provided author or default to authenticated user
-            if author is None:
-                author = self.get_username()
-                if not author:
-                    return []
-
-            # Use GitHub Search API
-            query = f"repo:{owner}/{name} is:pr is:merged author:{author}"
-            pr_numbers = self._search_prs(query, owner, name)
-
-            if not pr_numbers:
+            author = self._resolve_author(author)
+            if not author:
                 return []
 
-            result = self._fetch_prs_batch_graphql(owner, name, pr_numbers)
-
-            result.sort(key=lambda pr: (pr.merged_at or pr.updated_at, pr.number), reverse=True)
-            return result
+            query = f"repo:{owner}/{name} is:pr is:merged author:{author}"
+            return self._search_and_finalize_repo_prs(
+                owner, name, query, lambda pr: (pr.merged_at or pr.updated_at, pr.number)
+            )
         except Exception as e:
             self._handle_api_error(e, owner, name)
             return []
@@ -1329,17 +1338,14 @@ class GitHubClient:
         if not repos:
             return []
 
-        if author is None:
-            author = self.get_username()
-            if not author:
-                return []
+        author = self._resolve_author(author)
+        if not author:
+            return []
 
         query = f"is:pr is:merged author:{author}"
-        pr_data = self._search_prs_consolidated(query, repos)
-
-        all_prs = self._fetch_multi_repo_prs(pr_data)
-        all_prs.sort(key=lambda pr: (pr.merged_at or pr.updated_at, pr.number), reverse=True)
-        return all_prs
+        return self._consolidated_search_and_fetch(
+            repos, query, lambda pr: (pr.merged_at or pr.updated_at, pr.number)
+        )
 
     def get_review_requests_for_repo(
         self, owner: str, name: str, approved_by_me: bool = False,
@@ -1380,12 +1386,7 @@ class GitHubClient:
                     reviewed_numbers = reviewed_future.result()
 
                 # Combine and deduplicate using set (order doesn't matter as results are sorted later)
-                all_numbers = list(set(pending_numbers) | set(reviewed_numbers))
-
-                if not all_numbers:
-                    return []
-
-                result = self._fetch_prs_batch_graphql(owner, name, all_numbers)
+                pr_numbers = list(set(pending_numbers) | set(reviewed_numbers))
             else:
                 if approved_by_me or reviewed_by_me:
                     # Search for PRs where I was a reviewer
@@ -1400,13 +1401,7 @@ class GitHubClient:
 
                 pr_numbers = self._search_prs(query, owner, name)
 
-                if not pr_numbers:
-                    return []
-
-                result = self._fetch_prs_batch_graphql(owner, name, pr_numbers)
-
-            result.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
-            return result
+            return self._finalize_repo_prs(owner, name, pr_numbers, lambda pr: (pr.updated_at, pr.number))
         except Exception as e:
             self._handle_api_error(e, owner, name)
             return []
@@ -1489,15 +1484,9 @@ class GitHubClient:
             if author:
                 query += f" author:{author}"
 
-            pr_numbers = self._search_prs(query, owner, name)
-
-            if not pr_numbers:
-                return []
-
-            result = self._fetch_prs_batch_graphql(owner, name, pr_numbers)
-
-            result.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
-            return result
+            return self._search_and_finalize_repo_prs(
+                owner, name, query, lambda pr: (pr.updated_at, pr.number)
+            )
         except Exception as e:
             self._handle_api_error(e, owner, name)
             return []
@@ -1521,11 +1510,7 @@ class GitHubClient:
         if author:
             query += f" author:{author}"
 
-        pr_data = self._search_prs_consolidated(query, repos)
-
-        all_prs = self._fetch_multi_repo_prs(pr_data)
-        all_prs.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
-        return all_prs
+        return self._consolidated_search_and_fetch(repos, query, lambda pr: (pr.updated_at, pr.number))
 
     def _filter_prs_by_user_review_state(
         self,
