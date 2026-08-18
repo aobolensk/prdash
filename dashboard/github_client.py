@@ -1083,7 +1083,7 @@ class GitHubClient:
         headers = {
             'Authorization': f'Bearer {token}',
             'Accept': 'application/vnd.github+json',
-            'X-GitHub-Api-Version': '2022-11-28',
+            'X-GitHub-Api-Version': GITHUB_API_VERSION,
         }
 
         seen: set[int] = set()
@@ -1223,7 +1223,7 @@ class GitHubClient:
         headers = {
             'Authorization': f'Bearer {token}',
             'Accept': 'application/vnd.github+json',
-            'X-GitHub-Api-Version': '2022-11-28',
+            'X-GitHub-Api-Version': GITHUB_API_VERSION,
         }
 
         tracked_repos = {(owner.lower(), name.lower()) for owner, name in repos}
