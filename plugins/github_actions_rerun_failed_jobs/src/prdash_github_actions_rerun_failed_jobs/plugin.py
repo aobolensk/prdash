@@ -2,7 +2,7 @@ import json
 import re
 
 import requests
-from django.http import HttpResponse, HttpResponseNotAllowed
+from django.http import HttpResponse, HttpResponseNotAllowed, JsonResponse
 
 from dashboard.github_client import GITHUB_API_VERSION, GitHubClient
 from prdash.plugin_api import (
@@ -16,6 +16,7 @@ from prdash.plugin_api import (
 
 PACKAGE = 'prdash_github_actions_rerun_failed_jobs'
 REPOSITORY_PART_PATTERN = re.compile(r'^[A-Za-z0-9_.-]+$')
+RATE_LIMIT_STATUS_CODES = {403, 429}
 
 
 class GitHubActionsRerunFailedJobsPlugin:
@@ -37,6 +38,7 @@ class GitHubActionsRerunFailedJobsPlugin:
             template=TemplateResource(PACKAGE, 'templates/rerun_button.html'),
         ))
         registrar.register_route('rerun', self.rerun)
+        registrar.register_route('rerun-track', self.rerun_track)
 
     def shutdown(self):
         pass
@@ -46,6 +48,34 @@ class GitHubActionsRerunFailedJobsPlugin:
         if request.method != 'POST':
             return HttpResponseNotAllowed(['POST'])
 
+        outcome, message = GitHubActionsRerunFailedJobsPlugin._handle_rerun(request)
+        return GitHubActionsRerunFailedJobsPlugin._toast(
+            message, 'success' if outcome == 'success' else 'error'
+        )
+
+    @staticmethod
+    def rerun_track(request, config):
+        if request.method != 'POST':
+            return HttpResponseNotAllowed(['POST'])
+
+        outcome, message = GitHubActionsRerunFailedJobsPlugin._handle_rerun(request)
+        return JsonResponse({'outcome': outcome, 'message': message})
+
+    @staticmethod
+    def _handle_rerun(request):
+        parsed, error = GitHubActionsRerunFailedJobsPlugin._parse_request(request)
+        if error:
+            return 'error', error
+
+        token = GitHubClient(request.user)._get_token()
+        if not token:
+            return 'error', 'GitHub authentication is unavailable.'
+
+        owner, repository, run_ids = parsed
+        return GitHubActionsRerunFailedJobsPlugin._attempt_rerun(owner, repository, run_ids, token)
+
+    @staticmethod
+    def _parse_request(request):
         owner = request.POST.get('owner', '')
         repository = request.POST.get('repository', '')
         run_ids = request.POST.getlist('run_id')
@@ -55,14 +85,11 @@ class GitHubActionsRerunFailedJobsPlugin:
             or not run_ids
             or any(not run_id.isdigit() for run_id in run_ids)
         ):
-            return GitHubActionsRerunFailedJobsPlugin._toast(
-                'Could not determine failed workflow runs.'
-            )
+            return None, 'Could not determine failed workflow runs.'
+        return (owner, repository, run_ids), None
 
-        token = GitHubClient(request.user)._get_token()
-        if not token:
-            return GitHubActionsRerunFailedJobsPlugin._toast('GitHub authentication is unavailable.')
-
+    @staticmethod
+    def _attempt_rerun(owner, repository, run_ids, token):
         headers = {
             'Accept': 'application/vnd.github+json',
             'Authorization': f'Bearer {token}',
@@ -75,14 +102,30 @@ class GitHubActionsRerunFailedJobsPlugin:
                 timeout=10,
             )
             if response.status_code != 201:
-                return GitHubActionsRerunFailedJobsPlugin._toast(
-                    GitHubActionsRerunFailedJobsPlugin._error_message(response)
-                )
+                message = GitHubActionsRerunFailedJobsPlugin._error_message(response)
+                return GitHubActionsRerunFailedJobsPlugin._classify(response, message), message
 
-        return GitHubActionsRerunFailedJobsPlugin._toast(
-            f'Re-run requested for {len(set(run_ids))} workflow run(s).',
-            'success',
-        )
+        return 'success', f'Re-run requested for {len(set(run_ids))} workflow run(s).'
+
+    @staticmethod
+    def _classify(response, message):
+        if response.status_code == 422:
+            return 'retry'
+        if GitHubActionsRerunFailedJobsPlugin._is_rate_limited(response, message):
+            return 'retry'
+        if 'already running' in message.lower():
+            return 'retry'
+        return 'error'
+
+    @staticmethod
+    def _is_rate_limited(response, message):
+        if response.status_code not in RATE_LIMIT_STATUS_CODES:
+            return False
+        if response.headers.get('Retry-After'):
+            return True
+        if response.headers.get('X-RateLimit-Remaining') == '0':
+            return True
+        return 'rate limit' in message.lower()
 
     @staticmethod
     def _error_message(response):

@@ -1,14 +1,261 @@
 <style>
+.pr-ci-rerun-group {
+    align-items: center;
+    display: inline-flex;
+}
+
 .pr-ci-rerun {
     display: inline-flex;
+}
+
+.pr-ci-rerun-group .pr-ci-rerun button {
+    border-bottom-right-radius: 0;
+    border-top-right-radius: 0;
+}
+
+.pr-ci-rerun-dropdown {
+    position: relative;
+}
+
+.pr-ci-rerun-dropdown-toggle {
+    border-bottom-left-radius: 0;
+    border-left: 0;
+    border-top-left-radius: 0;
+}
+
+.pr-ci-rerun-dropdown-toggle.tracking {
+    background-color: var(--color-primary);
+    border-color: var(--color-primary);
+    color: #fff;
+}
+
+.pr-ci-rerun-menu {
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    box-shadow: 0 4px 16px var(--color-shadow);
+    display: flex;
+    flex-direction: column;
+    min-width: 220px;
+    padding: 4px;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    z-index: 5;
+}
+
+.pr-ci-rerun-menu[hidden] {
+    display: none;
+}
+
+.pr-ci-rerun-track-item {
+    background: none;
+    border: 0;
+    border-radius: 4px;
+    color: var(--color-text);
+    cursor: pointer;
+    font: inherit;
+    padding: 6px 10px;
+    text-align: left;
+    white-space: nowrap;
+    width: 100%;
+}
+
+.pr-ci-rerun-track-item:hover {
+    background: var(--color-bg-secondary);
+}
+
+.pr-ci-rerun-track-item.tracking {
+    color: var(--color-primary);
+}
+
+.pr-ci-rerun-spinner {
+    border: 2px solid var(--color-border);
+    border-radius: 50%;
+    border-top-color: var(--color-primary);
+    height: 16px;
+    margin-right: 6px;
+    width: 16px;
+}
+
+.pr-ci-rerun-spinner:not([hidden]) {
+    animation: pr-ci-rerun-spin 0.8s linear infinite;
+    display: inline-block;
+}
+
+.pr-ci-rerun-tracking-indicator {
+    color: var(--color-success);
+    margin-right: 6px;
+}
+
+.pr-ci-rerun-tracking-indicator:not([hidden]) {
+    align-items: center;
+    animation: pr-ci-rerun-pulse 2s ease-in-out infinite;
+    display: flex;
+}
+
+@keyframes pr-ci-rerun-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes pr-ci-rerun-pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
 }
 </style>
 
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    document.body.addEventListener('githubActionsRerunFailedJobsToast', function(event) {
-        const toast = event.detail.value || event.detail;
-        window.showToast(toast.message, toast.type);
+(function() {
+    var POLL_INTERVAL_MS = 60000;
+    var tracking = new Map();
+
+    function csrfToken() {
+        var el = document.querySelector('[name=csrfmiddlewaretoken]');
+        return el ? el.value : '';
+    }
+
+    function findMenu(key) {
+        var menus = document.querySelectorAll('.pr-ci-rerun-menu');
+        for (var i = 0; i < menus.length; i++) {
+            if (menus[i].dataset.key === key) return menus[i];
+        }
+        return null;
+    }
+
+    function setTrackingUI(menu, active) {
+        var group = menu.closest('.pr-ci-rerun-group');
+        var toggle = group.querySelector('.pr-ci-rerun-dropdown-toggle');
+        var item = group.querySelector('.pr-ci-rerun-track-item');
+        var indicator = group.querySelector('.pr-ci-rerun-tracking-indicator');
+        toggle.classList.toggle('tracking', active);
+        item.classList.toggle('tracking', active);
+        item.textContent = active ? 'Stop tracking' : 'Track and retry when available';
+        if (indicator) indicator.hidden = !active;
+    }
+
+    function setRequestSpinner(menu, active) {
+        var spinner = menu.closest('.pr-ci-rerun-group').querySelector('.pr-ci-rerun-spinner');
+        if (spinner) spinner.hidden = !active;
+    }
+
+    function stopTracking(key) {
+        var timerId = tracking.get(key);
+        if (timerId !== undefined) {
+            clearTimeout(timerId);
+            tracking.delete(key);
+        }
+        var menu = findMenu(key);
+        if (menu) {
+            setTrackingUI(menu, false);
+            setRequestSpinner(menu, false);
+        }
+    }
+
+    function attemptRerun(menu) {
+        var formData = new FormData();
+        formData.append('owner', menu.dataset.owner);
+        formData.append('repository', menu.dataset.repository);
+        (menu.dataset.runIds || '').split(',').filter(Boolean).forEach(function(runId) {
+            formData.append('run_id', runId);
+        });
+        return fetch(menu.dataset.url, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'X-CSRFToken': csrfToken() },
+            body: formData,
+        }).then(function(response) {
+            if (!response.ok) {
+                return { outcome: 'error', message: 'Server returned HTTP ' + response.status + ' while retrying.' };
+            }
+            return response.json();
+        });
+    }
+
+    function finishRequest(key, menu) {
+        if (!tracking.has(key)) return false;
+        setRequestSpinner(findMenu(key) || menu, false);
+        return true;
+    }
+
+    function tick(key) {
+        if (!tracking.has(key)) return;
+        var menu = findMenu(key);
+        if (!menu) {
+            stopTracking(key);
+            return;
+        }
+        setTrackingUI(menu, true);
+        setRequestSpinner(menu, true);
+        attemptRerun(menu).then(function(result) {
+            if (!finishRequest(key, menu)) return;
+            if (result.outcome === 'success') {
+                window.showToast(result.message, 'success');
+                stopTracking(key);
+            } else if (result.outcome === 'retry') {
+                tracking.set(key, setTimeout(function() { tick(key); }, POLL_INTERVAL_MS));
+            } else {
+                window.showToast(result.message, 'error');
+                stopTracking(key);
+            }
+        }).catch(function() {
+            if (!finishRequest(key, menu)) return;
+            window.showToast('Lost connection while tracking CI status.', 'error');
+            stopTracking(key);
+        });
+    }
+
+    function startTracking(menu) {
+        var key = menu.dataset.key;
+        tracking.set(key, null);
+        setTrackingUI(menu, true);
+        window.showToast('Tracking CI status. Will retry automatically once available.', 'success');
+        tick(key);
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        document.body.addEventListener('githubActionsRerunFailedJobsToast', function(event) {
+            var toast = event.detail.value || event.detail;
+            window.showToast(toast.message, toast.type);
+        });
+
+        document.addEventListener('click', function(evt) {
+            var toggle = evt.target.closest('.pr-ci-rerun-dropdown-toggle');
+            if (toggle) {
+                var group = toggle.closest('.pr-ci-rerun-group');
+                var menu = group.querySelector('.pr-ci-rerun-menu');
+                var wasOpen = !menu.hidden;
+                document.querySelectorAll('.pr-ci-rerun-menu').forEach(function(m) { m.hidden = true; });
+                document.querySelectorAll('.pr-ci-rerun-dropdown-toggle').forEach(function(t) {
+                    t.setAttribute('aria-expanded', 'false');
+                });
+                menu.hidden = wasOpen;
+                toggle.setAttribute('aria-expanded', String(!wasOpen));
+                return;
+            }
+
+            var item = evt.target.closest('.pr-ci-rerun-track-item');
+            if (item) {
+                var menuEl = item.closest('.pr-ci-rerun-menu');
+                var key = menuEl.dataset.key;
+                if (tracking.has(key)) {
+                    stopTracking(key);
+                } else {
+                    startTracking(menuEl);
+                }
+                menuEl.hidden = true;
+                return;
+            }
+
+            if (!evt.target.closest('.pr-ci-rerun-dropdown')) {
+                document.querySelectorAll('.pr-ci-rerun-menu').forEach(function(m) { m.hidden = true; });
+            }
+        });
     });
-});
+})();
 </script>
