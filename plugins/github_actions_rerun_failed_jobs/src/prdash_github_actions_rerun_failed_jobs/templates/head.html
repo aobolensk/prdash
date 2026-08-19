@@ -118,6 +118,7 @@
 (function() {
     var POLL_INTERVAL_MS = 60000;
     var tracking = new Map();
+    var requesting = new Set();
 
     function csrfToken() {
         var el = document.querySelector('[name=csrfmiddlewaretoken]');
@@ -154,11 +155,24 @@
             clearTimeout(timerId);
             tracking.delete(key);
         }
+        requesting.delete(key);
         var menu = findMenu(key);
         if (menu) {
             setTrackingUI(menu, false);
             setRequestSpinner(menu, false);
         }
+    }
+
+    // Shared by tick() and the post-swap listener since htmx swaps replace PR cards with fresh DOM nodes.
+    function resync(key) {
+        var menu = findMenu(key);
+        if (!menu) {
+            stopTracking(key);
+            return null;
+        }
+        setTrackingUI(menu, true);
+        setRequestSpinner(menu, requesting.has(key));
+        return menu;
     }
 
     function attemptRerun(menu) {
@@ -182,6 +196,7 @@
     }
 
     function finishRequest(key, menu) {
+        requesting.delete(key);
         if (!tracking.has(key)) return false;
         setRequestSpinner(findMenu(key) || menu, false);
         return true;
@@ -189,13 +204,12 @@
 
     function tick(key) {
         if (!tracking.has(key)) return;
-        var menu = findMenu(key);
+        requesting.add(key);
+        var menu = resync(key);
         if (!menu) {
-            stopTracking(key);
+            requesting.delete(key);
             return;
         }
-        setTrackingUI(menu, true);
-        setRequestSpinner(menu, true);
         attemptRerun(menu).then(function(result) {
             if (!finishRequest(key, menu)) return;
             if (result.outcome === 'success') {
@@ -226,6 +240,14 @@
         document.body.addEventListener('githubActionsRerunFailedJobsToast', function(event) {
             var toast = event.detail.value || event.detail;
             window.showToast(toast.message, toast.type);
+        });
+
+        document.body.addEventListener('htmx:afterSwap', function(event) {
+            if (tracking.size === 0) return;
+            var target = event.detail.target;
+            if (target && target.id === 'pr-content') {
+                tracking.forEach(function(_, key) { resync(key); });
+            }
         });
 
         document.addEventListener('click', function(evt) {
