@@ -66,9 +66,9 @@
                     </span>
                 {% endif %}
                 {% if pr.merged_at %}
-                    <span class="pr-time pr-merged" data-timestamp="{{ pr.merged_at|date:'c' }}">merged {{ pr.merged_at|time_ago }}</span>
+                    <span class="pr-time pr-merged" data-timestamp="{{ pr.merged_at|date:'c' }}" data-time-prefix="merged">merged {{ pr.merged_at|time_ago }}</span>
                 {% else %}
-                    <span class="pr-time" data-timestamp="{{ pr.updated_at|date:'c' }}">updated {{ pr.updated_at|time_ago }}</span>
+                    <span class="pr-time" data-timestamp="{{ pr.updated_at|date:'c' }}" data-time-prefix="updated">updated {{ pr.updated_at|time_ago }}</span>
                 {% endif %}
                 {% if pr.ci_status.total_count > 0 %}
                     <span class="pr-ci-count">CI: {{ pr.ci_status.passed_count }}/{{ pr.ci_status.total_count }}</span>

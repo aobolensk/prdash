@@ -605,11 +605,15 @@ function syncClockOffset(el) {
     clockOffsetMs = date.getTime() - Date.now();
 }
 
+function elapsedSeconds(date) {
+    return Math.max(0, Math.round((Date.now() + clockOffsetMs - date.getTime()) / 1000));
+}
+
 function formatLastUpdated(root = document) {
     root.querySelectorAll('.last-updated[data-updated]').forEach(el => {
         const date = new Date(el.dataset.updated);
         if (isNaN(date)) return;
-        const seconds = Math.max(0, Math.round((Date.now() + clockOffsetMs - date.getTime()) / 1000));
+        const seconds = elapsedSeconds(date);
         let text;
         if (seconds < 10) {
             text = 'just now';
@@ -631,6 +635,32 @@ function formatLastUpdated(root = document) {
     });
 }
 
+const plural = (n, unit) => `${n} ${unit}${n !== 1 ? 's' : ''} ago`;
+
+// Mirror of the time_ago filter (dashboard_tags.py), which only renders the
+// first paint: a poll finding no changes skips the swap, freezing that text.
+function relativeTimeText(seconds) {
+    const minutes = seconds / 60;
+    const hours = minutes / 60;
+    const days = hours / 24;
+    if (seconds < 60) return 'just now';
+    if (minutes < 60) return plural(Math.floor(minutes), 'minute');
+    if (hours < 24) return plural(Math.floor(hours), 'hour');
+    if (days < 7) return plural(Math.floor(days), 'day');
+    if (days < 30) return plural(Math.floor(days / 7), 'week');
+    if (days < 365) return plural(Math.floor(days / 30), 'month');
+    return plural(Math.floor(days / 365), 'year');
+}
+
+function formatRelativeTimes(root = document) {
+    root.querySelectorAll('[data-timestamp][data-time-prefix]').forEach(el => {
+        const date = new Date(el.dataset.timestamp);
+        if (isNaN(date)) return;
+        const text = `${el.dataset.timePrefix} ${relativeTimeText(elapsedSeconds(date))}`;
+        if (el.textContent !== text) el.textContent = text;
+    });
+}
+
 function formatTimestampTitles(root = document) {
     root.querySelectorAll('[data-timestamp]').forEach(el => {
         if (el.title) return;
@@ -647,7 +677,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const initialLastUpdated = document.querySelector('.last-updated[data-updated]');
     if (initialLastUpdated) syncClockOffset(initialLastUpdated);
     formatLastUpdated();
+    formatRelativeTimes();
     setInterval(formatLastUpdated, 15000);
+    // Whole-minute resolution, so a coarser tick than the header above.
+    setInterval(formatRelativeTimes, 60000);
 
     const settingsLink = document.getElementById('settings-link');
     if (settingsLink && window.location.pathname === settingsLink.getAttribute('href')) {
@@ -693,6 +726,7 @@ document.addEventListener('DOMContentLoaded', function() {
             : null;
         if (swappedLastUpdated) syncClockOffset(swappedLastUpdated);
         formatLastUpdated(evt.detail.target);
+        formatRelativeTimes(evt.detail.target);
         // Only reconcile search state when #pr-content itself was swapped
         // (its cards and toggle button were recreated); unrelated swaps
         // like #repo-list must not trigger a full re-filter/re-highlight.
