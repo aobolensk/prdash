@@ -25,6 +25,7 @@ GRAPHQL_RETRY_ATTEMPTS = 2
 GRAPHQL_RETRY_BACKOFF_SECONDS = 0.5
 GRAPHQL_TIMEOUT_SECONDS = 20
 GRAPHQL_TRANSIENT_STATUS_CODES = {502, 503, 504}
+GRAPHQL_RATE_LIMIT_COOLDOWN_SECONDS = 60
 
 PR_GRAPHQL_FIELDS = '''
     number
@@ -429,6 +430,22 @@ class GitHubClient:
         else:
             self._add_error("Failed to fetch PRs", repo_name)
 
+    def _rate_limit_cooldown_key(self) -> str:
+        return f"github_graphql_rate_limit_cooldown:{self.user.id}"
+
+    def _rate_limit_cooldown_active(self) -> bool:
+        return cache.get(self._rate_limit_cooldown_key()) is not None
+
+    def _start_rate_limit_cooldown(self, retry_after: Optional[str]) -> None:
+        """Pause further GraphQL calls until the secondary rate limit clears."""
+        seconds = GRAPHQL_RATE_LIMIT_COOLDOWN_SECONDS
+        if retry_after:
+            try:
+                seconds = max(seconds, int(retry_after))
+            except ValueError:
+                pass
+        cache.set(self._rate_limit_cooldown_key(), True, seconds)
+
     def _post_graphql(
         self,
         query: str,
@@ -444,6 +461,11 @@ class GitHubClient:
             return None
 
         repo_name = self._repo_label(owner, name)
+
+        if self._rate_limit_cooldown_active():
+            self._rate_limited_repos.add(repo_name)
+            return None
+
         headers = {
             'Authorization': f'Bearer {token}',
             'Accept': 'application/vnd.github+json',
@@ -525,6 +547,8 @@ class GitHubClient:
 
             # Handle non-200 HTTP response
             summary = self._summarize_response(response)
+            if response.status_code == 403 and 'rate limit' in summary.lower():
+                self._start_rate_limit_cooldown(response.headers.get('Retry-After'))
             self._handle_error(
                 owner or '',
                 name or '',
