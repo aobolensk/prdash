@@ -263,6 +263,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
             'pageTitle': page_title,
             'repoChanged': repo_changed,
             'staleData': stale_data,
+            'prCounts': pr_counts,
         }
         if not stale_data:
             triggers['refreshedAt'] = timezone.now().isoformat()

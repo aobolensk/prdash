@@ -19,7 +19,7 @@
                hx-target="#pr-content"
                hx-swap="innerHTML"
                hx-push-url="true">
-                My PRs{% if pr_counts.my_prs is not None %} <span class="sidebar-count">{{ pr_counts.my_prs }}</span>{% endif %}
+                My PRs <span class="sidebar-count" data-count="my_prs"{% if pr_counts.my_prs is None %} hidden{% endif %}>{{ pr_counts.my_prs }}</span>
             </a>
             <a href="{% url 'dashboard:author_pr_list' %}"
                class="sidebar-link {% if active_tab == 'author' or active_tab == 'author_merged' %}active{% endif %}"
@@ -39,7 +39,7 @@
                hx-target="#pr-content"
                hx-swap="innerHTML"
                hx-push-url="true">
-                Review Requests{% if pr_counts.review_requests is not None %} <span class="sidebar-count">{{ pr_counts.review_requests }}</span>{% endif %}
+                Review Requests <span class="sidebar-count" data-count="review_requests"{% if pr_counts.review_requests is None %} hidden{% endif %}>{{ pr_counts.review_requests }}</span>
             </a>
             <a href="{% if current_repo %}{% url 'dashboard:repo_assigned_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:assigned_list' %}{% endif %}"
                class="sidebar-link {% if active_tab == 'assigned' %}active{% endif %}"
@@ -49,7 +49,7 @@
                hx-target="#pr-content"
                hx-swap="innerHTML"
                hx-push-url="true">
-                Assigned{% if pr_counts.assigned is not None %} <span class="sidebar-count">{{ pr_counts.assigned }}</span>{% endif %}
+                Assigned <span class="sidebar-count" data-count="assigned"{% if pr_counts.assigned is None %} hidden{% endif %}>{{ pr_counts.assigned }}</span>
             </a>
         </div>
 

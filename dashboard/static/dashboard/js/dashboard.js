@@ -757,6 +757,16 @@ document.addEventListener('DOMContentLoaded', function() {
         el.hidden = !(evt.detail.value ?? evt.detail);
     });
 
+    document.body.addEventListener('prCounts', function(evt) {
+        const counts = evt.detail || {};
+        document.querySelectorAll('.sidebar-count[data-count]').forEach(function(el) {
+            const value = counts[el.dataset.count];
+            const hidden = value == null;
+            if (el.hidden !== hidden) el.hidden = hidden;
+            if (!hidden && el.textContent !== String(value)) el.textContent = value;
+        });
+    });
+
     prIncludeField = initPillField(
         document.getElementById('pr-search-field'),
         document.getElementById('pr-search-input'),
