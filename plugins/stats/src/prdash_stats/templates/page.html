@@ -17,49 +17,49 @@
             <div class="stats-controls">
                 <div class="time-filter">
                     <a href="?days=7"
-                       hx-get="{% url 'dashboard:stats_content' %}?days=7"
+                       hx-get="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='content' %}?days=7"
                        hx-target="#stats-content"
                        hx-swap="innerHTML"
                        hx-push-url="?days=7"
                        class="btn btn-small {% if days == 7 %}btn-primary{% else %}btn-secondary{% endif %}"
                        data-days="7">7d</a>
                     <a href="?days=14"
-                       hx-get="{% url 'dashboard:stats_content' %}?days=14"
+                       hx-get="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='content' %}?days=14"
                        hx-target="#stats-content"
                        hx-swap="innerHTML"
                        hx-push-url="?days=14"
                        class="btn btn-small {% if days == 14 %}btn-primary{% else %}btn-secondary{% endif %}"
                        data-days="14">14d</a>
                     <a href="?days=30"
-                       hx-get="{% url 'dashboard:stats_content' %}?days=30"
+                       hx-get="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='content' %}?days=30"
                        hx-target="#stats-content"
                        hx-swap="innerHTML"
                        hx-push-url="?days=30"
                        class="btn btn-small {% if days == 30 %}btn-primary{% else %}btn-secondary{% endif %}"
                        data-days="30">30d</a>
                     <a href="?days=90"
-                       hx-get="{% url 'dashboard:stats_content' %}?days=90"
+                       hx-get="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='content' %}?days=90"
                        hx-target="#stats-content"
                        hx-swap="innerHTML"
                        hx-push-url="?days=90"
                        class="btn btn-small {% if days == 90 %}btn-primary{% else %}btn-secondary{% endif %}"
                        data-days="90">90d</a>
                     <a href="?days=180"
-                       hx-get="{% url 'dashboard:stats_content' %}?days=180"
+                       hx-get="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='content' %}?days=180"
                        hx-target="#stats-content"
                        hx-swap="innerHTML"
                        hx-push-url="?days=180"
                        class="btn btn-small {% if days == 180 %}btn-primary{% else %}btn-secondary{% endif %}"
                        data-days="180">180d</a>
                     <a href="?days=365"
-                       hx-get="{% url 'dashboard:stats_content' %}?days=365"
+                       hx-get="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='content' %}?days=365"
                        hx-target="#stats-content"
                        hx-swap="innerHTML"
                        hx-push-url="?days=365"
                        class="btn btn-small {% if days == 365 %}btn-primary{% else %}btn-secondary{% endif %}"
                        data-days="365">365d</a>
                     <a href="?days=all"
-                       hx-get="{% url 'dashboard:stats_content' %}?days=all"
+                       hx-get="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='content' %}?days=all"
                        hx-target="#stats-content"
                        hx-swap="innerHTML"
                        hx-push-url="?days=all"
@@ -69,7 +69,7 @@
                 <div class="refresh-wrapper">
                     <span class="refresh-spinner htmx-indicator" id="stats-refresh-spinner"></span>
                     <button class="btn btn-secondary" id="stats-refresh-btn"
-                            hx-get="{% url 'dashboard:stats_content' %}?days={% if days == -1 %}all{% else %}{{ days }}{% endif %}"
+                            hx-get="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='content' %}?days={% if days == -1 %}all{% else %}{{ days }}{% endif %}"
                             hx-target="#stats-content"
                             hx-swap="innerHTML"
                             hx-indicator="#stats-refresh-spinner">
@@ -88,7 +88,7 @@
 
         <!-- Stats content loaded via HTMX -->
         <div id="stats-content"
-             hx-get="{% url 'dashboard:stats_content' %}?days={% if days == -1 %}all{% else %}{{ days }}{% endif %}"
+             hx-get="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='content' %}?days={% if days == -1 %}all{% else %}{{ days }}{% endif %}"
              hx-trigger="load"
              hx-swap="innerHTML">
             <!-- Loading skeleton -->
@@ -183,7 +183,7 @@ document.body.addEventListener('htmx:beforeRequest', function(event) {
             const days = clickedBtn.dataset.days;
             const refreshBtn = document.getElementById('stats-refresh-btn');
             if (refreshBtn && days) {
-                refreshBtn.setAttribute('hx-get', `{% url 'dashboard:stats_content' %}?days=${days}`);
+                refreshBtn.setAttribute('hx-get', `{% url 'dashboard:plugin_route' plugin_id=plugin_id route='content' %}?days=${days}`);
                 htmx.process(refreshBtn);
             }
         }

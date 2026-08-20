@@ -7,7 +7,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 
 from dashboard.models import PersonalAccessToken, TrackedRepository, UserPreferences
-from dashboard.views import _parse_days_param, _parse_repo_input
+from dashboard.views import _parse_repo_input
 
 
 class RepoInputParserTests(TestCase):
@@ -127,12 +127,6 @@ class AuthenticationRequiredTests(TestCase):
     def test_settings_requires_login(self):
         """Verify login required for settings."""
         response = self.client.get(reverse('dashboard:settings'))
-        self.assertEqual(response.status_code, 302)
-        self.assertIn('/accounts/login/', response.url)
-
-    def test_stats_requires_login(self):
-        """Verify login required for stats."""
-        response = self.client.get(reverse('dashboard:stats'))
         self.assertEqual(response.status_code, 302)
         self.assertIn('/accounts/login/', response.url)
 
@@ -563,27 +557,3 @@ class PATManagementTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(PersonalAccessToken.objects.filter(user=self.user).exists())
-
-
-class DaysParamParsingTests(TestCase):
-    """Tests for _parse_days_param function."""
-
-    def test_parse_days_param_valid_values(self):
-        """Test valid day values."""
-        self.assertEqual(_parse_days_param('7'), 7)
-        self.assertEqual(_parse_days_param('14'), 14)
-        self.assertEqual(_parse_days_param('30'), 30)
-        self.assertEqual(_parse_days_param('90'), 90)
-        self.assertEqual(_parse_days_param('180'), 180)
-        self.assertEqual(_parse_days_param('365'), 365)
-
-    def test_parse_days_param_all(self):
-        """Test 'all' returns -1."""
-        self.assertEqual(_parse_days_param('all'), -1)
-
-    def test_parse_days_param_invalid(self):
-        """Test invalid defaults to 30."""
-        self.assertEqual(_parse_days_param('invalid'), 30)
-        self.assertEqual(_parse_days_param('15'), 30)  # Not in allowed list
-        self.assertEqual(_parse_days_param(''), 30)
-        self.assertEqual(_parse_days_param(None), 30)

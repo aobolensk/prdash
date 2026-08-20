@@ -128,6 +128,8 @@ The extraction was performed in these increments:
 5. Move status polling, templates, and styles into `prdash-github-status`.
 6. Remove the core `show_github_status` field. Both plugins now start disabled so
    existing users must make the requested explicit activation choice.
+7. Move the Stats page, its HTMX partials, and `StatsService` into `prdash-stats`,
+   contributing its header nav icon through the existing `header.status` slot.
 
 The old reviewed and approved review-request URLs remain as redirects to the
 filter query form.

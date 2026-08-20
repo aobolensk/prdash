@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from django.core.cache import cache
 from django.utils import timezone
 
-from .github_client import GitHubClient, PullRequestInfo
+from dashboard.github_client import GitHubClient, PullRequestInfo
 
 
 @dataclass

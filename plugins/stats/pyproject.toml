@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prdash-stats"
+version = "1.0.0"
+description = "PR analytics plugin for prdash"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.entry-points."prdash.plugins"]
+stats = "prdash_stats.plugin:plugin"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+prdash_stats = ["templates/*.html"]

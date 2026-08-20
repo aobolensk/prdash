@@ -1,0 +1,9 @@
+{
+  "id": "stats",
+  "name": "Stats",
+  "version": "1.0.0",
+  "api_version": "1.1",
+  "description": "PR velocity, review, health, and collaboration analytics.",
+  "entrypoint": "prdash_stats.plugin:plugin",
+  "python_path": "src"
+}

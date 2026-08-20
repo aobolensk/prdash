@@ -1,0 +1,291 @@
+{% load dashboard_tags %}
+<!-- Quick Stats -->
+<div class="quick-stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{ quick_stats.open_count }}</div>
+        <div class="stat-label">Open PRs</div>
+    </div>
+    <div class="stat-card stat-card-success">
+        <div class="stat-value">{{ quick_stats.merged_count }}</div>
+        <div class="stat-label">Merged</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ quick_stats.avg_merge_time_hours|hours_display }}</div>
+        <div class="stat-label">Avg Merge Time</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ velocity_stats.avg_prs_per_week|floatformat:1 }}</div>
+        <div class="stat-label">PRs/Week</div>
+    </div>
+</div>
+
+<!-- Charts Row -->
+<div class="stats-row">
+    <!-- Velocity Chart -->
+    <div class="stats-section stats-section-wide">
+        <h2 class="stats-section-title">Velocity</h2>
+
+        <div class="chart-row">
+            <div class="chart-container">
+                <canvas id="velocityChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <canvas id="linesChart"></canvas>
+            </div>
+        </div>
+
+        <script type="application/json" id="velocityData">
+        {
+            "labels": [{% for period in velocity_stats.period_data %}"{{ period.period_start|date:'M j' }}"{% if not forloop.last %}, {% endif %}{% endfor %}],
+            "opened": [{% for period in velocity_stats.period_data %}{{ period.opened }}{% if not forloop.last %}, {% endif %}{% endfor %}],
+            "merged": [{% for period in velocity_stats.period_data %}{{ period.merged }}{% if not forloop.last %}, {% endif %}{% endfor %}],
+            "linesAdded": [{% for period in velocity_stats.period_data %}{{ period.lines_added }}{% if not forloop.last %}, {% endif %}{% endfor %}],
+            "linesRemoved": [{% for period in velocity_stats.period_data %}{{ period.lines_removed }}{% if not forloop.last %}, {% endif %}{% endfor %}]
+        }
+        </script>
+
+        <div class="velocity-summary">
+            <span class="summary-item">
+                <strong>{{ velocity_stats.total_lines_changed|floatformat:0 }}</strong> lines changed
+            </span>
+            <span class="summary-item">
+                <strong>{{ velocity_stats.avg_prs_per_period|floatformat:1 }}</strong> PRs/{% if velocity_stats.granularity == "day" %}day{% else %}week{% endif %} avg
+            </span>
+        </div>
+    </div>
+</div>
+
+<!-- Two Column Row -->
+<div class="stats-row stats-row-2col">
+    <!-- Review Activity -->
+    <div class="stats-section">
+        <h2 class="stats-section-title">Review Activity</h2>
+
+        <div class="review-summary">
+            <div class="review-stat">
+                <div class="review-stat-value">{{ review_stats.reviews_given }}</div>
+                <div class="review-stat-label">Reviews Given</div>
+            </div>
+            <div class="review-stat">
+                <div class="review-stat-value">{{ review_stats.reviews_received }}</div>
+                <div class="review-stat-label">Reviews Received</div>
+            </div>
+            <div class="review-stat has-tooltip">
+                <div class="review-stat-value">{{ review_stats.avg_turnaround_hours|hours_display }}</div>
+                <div class="review-stat-label">Avg Turnaround <span class="stat-help">?</span></div>
+                <div class="stat-tooltip">Average time from PR creation to first review</div>
+            </div>
+        </div>
+
+        {% if review_stats.top_reviewed_by %}
+        <div class="leaderboard">
+            <h3 class="leaderboard-title">Who Reviews Your PRs</h3>
+            <table class="leaderboard-table">
+                <tbody>
+                    {% for reviewer in review_stats.top_reviewed_by %}
+                    <tr>
+                        <td class="leaderboard-rank">{{ forloop.counter }}</td>
+                        <td class="leaderboard-user">
+                            {% if reviewer.avatar_url %}
+                            <img src="{{ reviewer.avatar_url }}" alt="" class="leaderboard-avatar">
+                            {% endif %}
+                            <span>{{ reviewer.username }}</span>
+                        </td>
+                        <td class="leaderboard-count">{{ reviewer.review_count }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="stats-empty">No review data available</p>
+        {% endif %}
+    </div>
+
+    <!-- Repository Breakdown -->
+    <div class="stats-section">
+        <h2 class="stats-section-title">Repository Breakdown</h2>
+
+        {% if repo_stats.repos %}
+        <div class="chart-container chart-container-small">
+            <canvas id="repoChart"></canvas>
+        </div>
+
+        <script type="application/json" id="repoData">
+        {
+            "labels": [{% for repo in repo_stats.repos|slice:":8" %}"{{ repo.full_name|truncatechars:20 }}"{% if not forloop.last %}, {% endif %}{% endfor %}],
+            "values": [{% for repo in repo_stats.repos|slice:":8" %}{{ repo.open_count|add:repo.merged_count }}{% if not forloop.last %}, {% endif %}{% endfor %}]
+        }
+        </script>
+
+        <div class="repo-list-stats">
+            {% for repo in repo_stats.repos %}
+            <div class="repo-stat-item">
+                <span class="repo-stat-name">{{ repo.full_name }}</span>
+                <span class="repo-stat-counts">
+                    <span class="repo-stat-open">{{ repo.open_count }} open</span>
+                    <span class="repo-stat-merged">{{ repo.merged_count }} merged</span>
+                </span>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="repo-totals">
+            <span><strong>{{ repo_stats.total_open }}</strong> total open</span>
+            <span><strong>{{ repo_stats.total_merged }}</strong> total merged</span>
+        </div>
+        {% else %}
+        <p class="stats-empty">No repository data available</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Two Column Row -->
+<div class="stats-row stats-row-2col">
+    <!-- PR Health -->
+    <div class="stats-section">
+        <h2 class="stats-section-title">PR Health</h2>
+
+        <div class="health-summary health-summary-clickable">
+            <button class="health-stat health-stat-warning" data-toggle="aging-section" type="button">
+                <div class="health-stat-value">{{ health_stats.aging_prs_count }}</div>
+                <div class="health-stat-label">Aging PRs (14d+)</div>
+                <span class="health-stat-icon">+</span>
+            </button>
+            <button class="health-stat health-stat-danger" data-toggle="failing-ci-section" type="button">
+                <div class="health-stat-value">{{ health_stats.failing_ci_count }}</div>
+                <div class="health-stat-label">Failing CI</div>
+                <span class="health-stat-icon">+</span>
+            </button>
+        </div>
+
+        <div id="aging-section" class="health-collapsible" style="display: none;">
+            {% if health_stats.aging_30_days or health_stats.aging_14_days or health_stats.aging_7_days %}
+            <div class="aging-list">
+                <h3 class="leaderboard-title">PRs by Age</h3>
+
+                {% for aging in health_stats.aging_30_days %}
+                <div class="aging-item">
+                    <span class="aging-badge aging-badge-danger">{{ aging.age_days }}d</span>
+                    <a href="{{ aging.pr.url }}" target="_blank" class="aging-title">{{ aging.pr.title|truncatechars:50 }}</a>
+                    <span class="aging-repo">{{ aging.pr.repo_full_name }}</span>
+                </div>
+                {% endfor %}
+
+                {% for aging in health_stats.aging_14_days %}
+                <div class="aging-item">
+                    <span class="aging-badge aging-badge-warning">{{ aging.age_days }}d</span>
+                    <a href="{{ aging.pr.url }}" target="_blank" class="aging-title">{{ aging.pr.title|truncatechars:50 }}</a>
+                    <span class="aging-repo">{{ aging.pr.repo_full_name }}</span>
+                </div>
+                {% endfor %}
+
+                {% for aging in health_stats.aging_7_days %}
+                <div class="aging-item">
+                    <span class="aging-badge">{{ aging.age_days }}d</span>
+                    <a href="{{ aging.pr.url }}" target="_blank" class="aging-title">{{ aging.pr.title|truncatechars:50 }}</a>
+                    <span class="aging-repo">{{ aging.pr.repo_full_name }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="stats-empty">No aging PRs - great job keeping things moving!</p>
+            {% endif %}
+        </div>
+
+        <div id="failing-ci-section" class="health-collapsible" style="display: none;">
+            {% if health_stats.failing_ci_prs %}
+            <div class="aging-list">
+                <h3 class="leaderboard-title">PRs with Failing CI</h3>
+                {% for pr in health_stats.failing_ci_prs %}
+                <div class="aging-item">
+                    <span class="aging-badge aging-badge-danger">CI</span>
+                    <a href="{{ pr.url }}" target="_blank" class="aging-title">{{ pr.title|truncatechars:50 }}</a>
+                    <span class="aging-repo">{{ pr.repo_full_name }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="stats-empty">No PRs with failing CI</p>
+            {% endif %}
+        </div>
+
+        <script>
+        (function() {
+            document.querySelectorAll('.health-stat[data-toggle]').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    var targetId = this.getAttribute('data-toggle');
+                    var target = document.getElementById(targetId);
+                    var icon = this.querySelector('.health-stat-icon');
+                    if (target) {
+                        if (target.style.display === 'none') {
+                            target.style.display = 'block';
+                            if (icon) icon.textContent = '−';
+                            this.classList.add('active');
+                        } else {
+                            target.style.display = 'none';
+                            if (icon) icon.textContent = '+';
+                            this.classList.remove('active');
+                        }
+                    }
+                });
+            });
+        })();
+        </script>
+    </div>
+
+    <!-- Collaboration -->
+    <div class="stats-section">
+        <h2 class="stats-section-title">Collaboration</h2>
+
+        <div class="collab-sections">
+            {% if collaboration_stats.who_reviews_you %}
+            <div class="leaderboard">
+                <h3 class="leaderboard-title">Top Reviewers of Your PRs</h3>
+                <table class="leaderboard-table">
+                    <tbody>
+                        {% for person in collaboration_stats.who_reviews_you %}
+                        <tr>
+                            <td class="leaderboard-rank">{{ forloop.counter }}</td>
+                            <td class="leaderboard-user">
+                                {% if person.avatar_url %}
+                                <img src="{{ person.avatar_url }}" alt="" class="leaderboard-avatar">
+                                {% endif %}
+                                <span>{{ person.username }}</span>
+                            </td>
+                            <td class="leaderboard-count">{{ person.count }} reviews</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+
+            {% if collaboration_stats.who_you_review %}
+            <div class="leaderboard">
+                <h3 class="leaderboard-title">Whose PRs You Review Most</h3>
+                <table class="leaderboard-table">
+                    <tbody>
+                        {% for person in collaboration_stats.who_you_review %}
+                        <tr>
+                            <td class="leaderboard-rank">{{ forloop.counter }}</td>
+                            <td class="leaderboard-user">
+                                {% if person.avatar_url %}
+                                <img src="{{ person.avatar_url }}" alt="" class="leaderboard-avatar">
+                                {% endif %}
+                                <span>{{ person.username }}</span>
+                            </td>
+                            <td class="leaderboard-count">{{ person.count }} reviews</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+
+            {% if not collaboration_stats.who_reviews_you and not collaboration_stats.who_you_review %}
+            <p class="stats-empty">No collaboration data available</p>
+            {% endif %}
+        </div>
+    </div>
+</div>

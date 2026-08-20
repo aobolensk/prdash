@@ -16,7 +16,6 @@ import requests
 from .models import TrackedRepository, PersonalAccessToken, UserPreferences, AUTO_REFRESH_CATEGORIES
 from .github_client import GitHubClient
 from .plugin_manager import plugin_manager
-from .stats_service import StatsService
 from prdash.plugin_api import (
     PR_LIST_PROCESS_HOOK,
     PR_LIST_QUERY_HOOK,
@@ -503,62 +502,6 @@ def toggle_repo(request, repo_id):
     repo.save()
     _invalidate_pr_results_cache(request.user)
     return _render_repo_list(request)
-
-
-def _parse_days_param(value: str) -> int:
-    """Parse the days parameter, returning -1 for 'all'."""
-    if value == 'all':
-        return -1
-    try:
-        days = int(value)
-        if days not in (7, 14, 30, 90, 180, 365):
-            return 30
-        return days
-    except (ValueError, TypeError):
-        return 30
-
-
-@login_required
-def stats(request):
-    """Stats and analytics page."""
-    repos = TrackedRepository.objects.filter(user=request.user)
-
-    days = _parse_days_param(request.GET.get('days', '30'))
-
-    context = {
-        'days': days,
-        'repos': repos,
-    }
-
-    return render(request, 'dashboard/stats.html', context)
-
-
-@login_required
-def stats_content(request):
-    """HTMX endpoint that returns the actual stats content."""
-    repos = TrackedRepository.objects.filter(user=request.user, enabled=True)
-    repo_tuples = [(repo.owner, repo.name) for repo in repos]
-
-    days = _parse_days_param(request.GET.get('days', '30'))
-
-    client = GitHubClient(request.user)
-    stats_service = StatsService(client)
-
-    # Fetch all stats
-    all_stats = stats_service.get_all_stats(repo_tuples, days)
-
-    context = {
-        'days': days,
-        'quick_stats': all_stats['quick'],
-        'velocity_stats': all_stats['velocity'],
-        'review_stats': all_stats['reviews'],
-        'health_stats': all_stats['health'],
-        'repo_stats': all_stats['repos'],
-        'collaboration_stats': all_stats['collaboration'],
-        'repos': repos,
-    }
-
-    return render(request, 'dashboard/partials/_stats_content.html', context)
 
 
 @login_required
