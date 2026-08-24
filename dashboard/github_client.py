@@ -44,6 +44,9 @@ PR_GRAPHQL_FIELDS = '''
     mergeable
     autoMergeRequest {
         enabledAt
+        enabledBy {
+            login
+        }
     }
     mergeQueueEntry {
         id
@@ -180,6 +183,7 @@ class PullRequestInfo:
     mergeable: Optional[str] = None
     merged_at: Optional[datetime] = None
     auto_merge_enabled: bool = False
+    auto_merge_enabled_by: Optional[str] = None
     is_queued: bool = False
     linked_issues: list[LinkedIssue] = None
 
@@ -816,6 +820,9 @@ class GitHubClient:
 
             auto_merge_request = pr_data.get('autoMergeRequest')
             auto_merge_enabled = auto_merge_request is not None and auto_merge_request.get('enabledAt') is not None
+            auto_merge_enabled_by = None
+            if auto_merge_enabled and auto_merge_request.get('enabledBy'):
+                auto_merge_enabled_by = auto_merge_request['enabledBy'].get('login')
             is_queued = pr_data.get('mergeQueueEntry') is not None
 
             linked_issues = [
@@ -846,6 +853,7 @@ class GitHubClient:
                 mergeable=mergeable,
                 merged_at=merged_at,
                 auto_merge_enabled=auto_merge_enabled,
+                auto_merge_enabled_by=auto_merge_enabled_by,
                 is_queued=is_queued,
                 linked_issues=linked_issues,
             )
