@@ -52,7 +52,8 @@
     display: none;
 }
 
-.pr-ci-rerun-track-item {
+.pr-ci-rerun-track-item,
+.pr-ci-rerun-update-branch-item {
     background: none;
     border: 0;
     border-radius: 4px;
@@ -65,7 +66,8 @@
     width: 100%;
 }
 
-.pr-ci-rerun-track-item:hover {
+.pr-ci-rerun-track-item:hover,
+.pr-ci-rerun-update-branch-item:hover {
     background: var(--color-bg-secondary);
 }
 
@@ -175,6 +177,20 @@
         return menu;
     }
 
+    function postAction(url, formData, errorContext) {
+        return fetch(url, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'X-CSRFToken': csrfToken() },
+            body: formData,
+        }).then(function(response) {
+            if (!response.ok) {
+                return { outcome: 'error', message: 'Server returned HTTP ' + response.status + ' while ' + errorContext + '.' };
+            }
+            return response.json();
+        });
+    }
+
     function attemptRerun(menu) {
         var formData = new FormData();
         formData.append('owner', menu.dataset.owner);
@@ -182,17 +198,15 @@
         (menu.dataset.runIds || '').split(',').filter(Boolean).forEach(function(runId) {
             formData.append('run_id', runId);
         });
-        return fetch(menu.dataset.url, {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: { 'X-CSRFToken': csrfToken() },
-            body: formData,
-        }).then(function(response) {
-            if (!response.ok) {
-                return { outcome: 'error', message: 'Server returned HTTP ' + response.status + ' while retrying.' };
-            }
-            return response.json();
-        });
+        return postAction(menu.dataset.url, formData, 'retrying');
+    }
+
+    function updateBranch(menu) {
+        var formData = new FormData();
+        formData.append('owner', menu.dataset.owner);
+        formData.append('repository', menu.dataset.repository);
+        formData.append('pr_number', menu.dataset.key.split('#')[1]);
+        return postAction(menu.dataset.updateBranchUrl, formData, 'updating the branch');
     }
 
     function finishRequest(key, menu) {
@@ -275,6 +289,21 @@
                     startTracking(menuEl);
                 }
                 menuEl.hidden = true;
+                return;
+            }
+
+            var updateBranchItem = evt.target.closest('.pr-ci-rerun-update-branch-item');
+            if (updateBranchItem) {
+                var updateBranchMenu = updateBranchItem.closest('.pr-ci-rerun-menu');
+                updateBranchMenu.hidden = true;
+                updateBranch(updateBranchMenu).then(function(result) {
+                    window.showToast(result.message, result.outcome === 'success' ? 'success' : 'error');
+                    if (result.outcome === 'success') {
+                        htmx.trigger(document.body, 'manualRefresh');
+                    }
+                }).catch(function() {
+                    window.showToast('Lost connection while updating the branch.', 'error');
+                });
                 return;
             }
 

@@ -25,11 +25,13 @@
         </button>
         <div class="pr-ci-rerun-menu" hidden
              data-url="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='rerun-track' %}"
+             data-update-branch-url="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='update-branch' %}"
              data-owner="{{ pr.repo_owner }}"
              data-repository="{{ pr.repo_name }}"
              data-run-ids="{% for run_id in pr.ci_status.failed_workflow_run_ids %}{{ run_id }}{% if not forloop.last %},{% endif %}{% endfor %}"
              data-key="{{ pr.repo_owner }}/{{ pr.repo_name }}#{{ pr.number }}">
             <button type="button" class="pr-ci-rerun-track-item">Track and retry when available</button>
+            <button type="button" class="pr-ci-rerun-update-branch-item">Update branch</button>
         </div>
     </div>
 </div>
