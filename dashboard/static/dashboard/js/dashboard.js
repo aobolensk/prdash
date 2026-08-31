@@ -40,41 +40,88 @@ function prMaxTypos(len) {
     return 3;
 }
 
-// Sellers approximate-substring DP: find the lowest-edit-distance contiguous
-// window of `text` matching `token`, tracking each column's origin so we can
-// recover the matched span for highlighting. Returns {start, end, d} or null.
+// Sellers approximate-substring DP in O(n) space: cheaply test whether a
+// match exists before paying for the full alignment table below.
+function prFuzzyBestDistance(text, token) {
+    const n = text.length, m = token.length;
+    let prev = new Array(n + 1).fill(0);
+    for (let i = 1; i <= m; i++) {
+        const cur = new Array(n + 1);
+        cur[0] = i;
+        for (let j = 1; j <= n; j++) {
+            const cost = token[i - 1] === text[j - 1] ? 0 : 1;
+            let v = prev[j - 1] + cost;
+            const up = prev[j] + 1;
+            if (up < v) v = up;
+            const left = cur[j - 1] + 1;
+            if (left < v) v = left;
+            cur[j] = v;
+        }
+        prev = cur;
+    }
+    let bestD = Infinity;
+    for (let j = 1; j <= n; j++) {
+        if (prev[j] < bestD) bestD = prev[j];
+    }
+    return bestD;
+}
+
+// Full O(n*m) table + backtrack to recover the alignment, for highlighting.
+// Returns {start, end, d, typo} or null; typo[k] is true when
+// text[start + k] is a mismatch rather than an exact match.
 function prFuzzyWindow(text, token, maxD) {
     const n = text.length, m = token.length;
     if (m === 0) return null;
-    let prev = new Array(n + 1).fill(0);
-    let prevO = new Array(n + 1);
-    for (let j = 0; j <= n; j++) prevO[j] = j;
+    const dp = [new Array(n + 1).fill(0)];
     for (let i = 1; i <= m; i++) {
-        const cur = new Array(n + 1), curO = new Array(n + 1);
-        cur[0] = i; curO[0] = 0;
+        const prevRow = dp[i - 1];
+        const row = new Array(n + 1);
+        row[0] = i;
         for (let j = 1; j <= n; j++) {
             const cost = token[i - 1] === text[j - 1] ? 0 : 1;
-            let v = prev[j - 1] + cost, o = prevO[j - 1];
-            const up = prev[j] + 1;
-            if (up < v) { v = up; o = prevO[j]; }
-            const left = cur[j - 1] + 1;
-            if (left < v) { v = left; o = curO[j - 1]; }
-            cur[j] = v; curO[j] = o;
+            let v = prevRow[j - 1] + cost;
+            const up = prevRow[j] + 1;
+            if (up < v) v = up;
+            const left = row[j - 1] + 1;
+            if (left < v) v = left;
+            row[j] = v;
         }
-        prev = cur; prevO = curO;
+        dp.push(row);
     }
     let bestJ = -1, bestD = Infinity;
     for (let j = 1; j <= n; j++) {
-        if (prev[j] <= bestD) { bestD = prev[j]; bestJ = j; }
+        if (dp[m][j] <= bestD) { bestD = dp[m][j]; bestJ = j; }
     }
-    if (bestJ === -1 || bestD > maxD) return null;
-    return { start: prevO[bestJ], end: bestJ, d: bestD };
+    if (bestD > maxD) return null;
+
+    // Prefer a diagonal step over up/left on ties, matching the forward
+    // pass's tie-break, so alignment favors exact matches.
+    const typo = [];
+    let i = m, j = bestJ;
+    while (i > 0) {
+        if (j > 0) {
+            const cost = token[i - 1] === text[j - 1] ? 0 : 1;
+            if (dp[i][j] === dp[i - 1][j - 1] + cost) {
+                typo.push(cost === 1);
+                i--; j--;
+                continue;
+            }
+        }
+        if (dp[i][j] === dp[i - 1][j] + 1) {
+            i--;
+            continue;
+        }
+        typo.push(true);
+        j--;
+    }
+    typo.reverse();
+    return { start: j, end: bestJ, d: bestD, typo: typo };
 }
 
 function prTokenMatches(token, haystack) {
     if (haystack.indexOf(token) !== -1) return true;
     const maxD = prMaxTypos(token.length);
-    return maxD > 0 && prFuzzyWindow(haystack, token, maxD) !== null;
+    return maxD > 0 && prFuzzyBestDistance(haystack, token) <= maxD;
 }
 
 // A pill token (kind 'repo'/'label') must match its dedicated field exactly;
@@ -125,7 +172,7 @@ function prFieldTokens(field) {
 
 function prClearHighlights(root) {
     const parents = new Set();
-    root.querySelectorAll('mark.pr-hl').forEach(mark => {
+    root.querySelectorAll('mark.pr-hl, mark.pr-hl-typo').forEach(mark => {
         const parent = mark.parentNode;
         parent.replaceChild(document.createTextNode(mark.textContent), mark);
         parents.add(parent);
@@ -133,6 +180,8 @@ function prClearHighlights(root) {
     parents.forEach(p => p.normalize());
 }
 
+// marks: 0 none, 1 typo, 2 exact per char. Exact wins on overlap so an
+// unrelated fuzzy match can't downgrade a char another token matched exactly.
 function prHighlightTextNode(node, tokens, fuzzyTokens) {
     const text = node.nodeValue;
     if (!text.trim()) return;
@@ -141,11 +190,13 @@ function prHighlightTextNode(node, tokens, fuzzyTokens) {
     // string length (locale-specific casing), positions no longer map
     // back onto the original text, so skip highlighting this node.
     if (lower.length !== text.length) return;
-    const intervals = [];
+    const marks = new Array(text.length).fill(0);
+    let any = false;
     for (const token of tokens) {
         let from = 0, idx, found = false;
         while ((idx = lower.indexOf(token, from)) !== -1) {
-            intervals.push([idx, idx + token.length]);
+            for (let k = idx; k < idx + token.length; k++) marks[k] = 2;
+            any = true;
             from = idx + Math.max(1, token.length);
             found = true;
         }
@@ -156,29 +207,44 @@ function prHighlightTextNode(node, tokens, fuzzyTokens) {
             const maxD = prMaxTypos(token.length);
             if (maxD > 0) {
                 const w = prFuzzyWindow(lower, token, maxD);
-                if (w) intervals.push([w.start, w.end]);
+                if (w) {
+                    for (let k = 0; k < w.typo.length; k++) {
+                        const v = w.typo[k] ? 1 : 2;
+                        if (v > marks[w.start + k]) marks[w.start + k] = v;
+                    }
+                    any = true;
+                }
             }
         }
     }
-    if (!intervals.length) return;
-    intervals.sort((a, b) => a[0] - b[0]);
-    const merged = [];
-    for (const iv of intervals) {
-        const last = merged[merged.length - 1];
-        if (last && iv[0] <= last[1]) last[1] = Math.max(last[1], iv[1]);
-        else merged.push(iv.slice());
-    }
+    if (!any) return;
     const frag = document.createDocumentFragment();
     let pos = 0;
-    for (const [s, e] of merged) {
-        if (s > pos) frag.appendChild(document.createTextNode(text.slice(pos, s)));
-        const mark = document.createElement('mark');
-        mark.className = 'pr-hl';
-        mark.textContent = text.slice(s, e);
-        frag.appendChild(mark);
-        pos = e;
+    while (pos < text.length) {
+        const level = marks[pos];
+        let end = pos + 1;
+        while (end < text.length && marks[end] === level) end++;
+        if (level === 0) {
+            frag.appendChild(document.createTextNode(text.slice(pos, end)));
+        } else {
+            const mark = document.createElement('mark');
+            mark.className = level === 2 ? 'pr-hl' : 'pr-hl-typo';
+            mark.textContent = text.slice(pos, end);
+            // Zero the shared edge so adjacent exact+typo marks of one match don't show a seam.
+            if (pos > 0 && marks[pos - 1] !== 0) {
+                mark.style.paddingLeft = '0';
+                mark.style.borderTopLeftRadius = '0';
+                mark.style.borderBottomLeftRadius = '0';
+            }
+            if (end < text.length && marks[end] !== 0) {
+                mark.style.paddingRight = '0';
+                mark.style.borderTopRightRadius = '0';
+                mark.style.borderBottomRightRadius = '0';
+            }
+            frag.appendChild(mark);
+        }
+        pos = end;
     }
-    if (pos < text.length) frag.appendChild(document.createTextNode(text.slice(pos)));
     node.parentNode.replaceChild(frag, node);
 }
 

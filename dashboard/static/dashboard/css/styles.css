@@ -1200,6 +1200,26 @@ mark.pr-hl {
     color: inherit;
 }
 
+mark.pr-hl-typo {
+    /* Hatched instead of solid so the distinction is a pattern, not a second color. */
+    --pr-hl-typo-alpha: 0.4;
+    background-color: transparent;
+    background-image: repeating-linear-gradient(
+        135deg,
+        rgba(210, 153, 34, var(--pr-hl-typo-alpha)) 0px,
+        rgba(210, 153, 34, var(--pr-hl-typo-alpha)) 2px,
+        transparent 2px,
+        transparent 4px
+    );
+    color: inherit;
+    padding: 0 1px;
+    border-radius: 2px;
+}
+
+[data-theme="dark"] mark.pr-hl-typo {
+    --pr-hl-typo-alpha: 0.45;
+}
+
 @keyframes spin {
     to {
         transform: rotate(360deg);
