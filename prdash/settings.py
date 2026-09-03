@@ -10,8 +10,9 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
-from decouple import config
+from decouple import config, Csv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -186,5 +187,11 @@ SOCIALACCOUNT_PROVIDERS = {
 # explicitly enables discovered plugins from the dashboard settings page.
 PRDASH_PLUGIN_PATHS = [
     BASE_DIR / 'plugins',
+]
+# Extra plugin roots
+PRDASH_PLUGIN_PATHS += [
+    Path(entry).expanduser()
+    for entry in config('PRDASH_PLUGIN_PATHS', default='', cast=Csv(delimiter=os.pathsep))
+    if entry
 ]
 PRDASH_PLUGIN_CONFIG = {}
