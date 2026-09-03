@@ -95,8 +95,23 @@ a:hover {
 }
 
 .user-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     color: var(--header-text);
     opacity: 0.9;
+    text-decoration: none;
+}
+
+.user-info:hover {
+    opacity: 1;
+    text-decoration: underline;
+}
+
+.user-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
 }
 
 /* Theme toggle */

@@ -1,5 +1,9 @@
+from allauth.socialaccount.models import SocialAccount
 from django import template
+from django.core.cache import cache
 from django.utils import timezone
+
+from dashboard.github_client import GITHUB_PROVIDER, USERNAME_CACHE_TTL_SECONDS
 
 register = template.Library()
 
@@ -47,6 +51,32 @@ def time_ago(value):
     else:
         y = int(years)
         return f"{y} year{'s' if y != 1 else ''} ago"
+
+
+@register.simple_tag
+def github_account_info(user):
+    """Get the user's GitHub avatar/profile URLs from SocialAccount.extra_data (cached).
+
+    Returns None if the user has no linked GitHub SocialAccount (e.g. PAT-only auth).
+    """
+    cache_key = f"github_account_info:{user.id}"
+    cached = cache.get(cache_key, "__missing__")
+    if cached != "__missing__":
+        return cached
+
+    info = None
+    extra_data = SocialAccount.objects.filter(
+        user=user,
+        provider=GITHUB_PROVIDER,
+    ).only('extra_data').values_list('extra_data', flat=True).first()
+    if extra_data:
+        info = {
+            'avatar_url': extra_data.get('avatar_url'),
+            'profile_url': extra_data.get('html_url'),
+        }
+
+    cache.set(cache_key, info, USERNAME_CACHE_TTL_SECONDS)
+    return info
 
 
 @register.filter
