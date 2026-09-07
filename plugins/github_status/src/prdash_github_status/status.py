@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 import logging
 
 import requests
-from django.core.cache import cache
+
+from prdash.plugin_cache import cache_add, cache_get, cache_set
 
 logger = logging.getLogger(__name__)
 
@@ -63,15 +64,15 @@ class GitHubStatus:
 
 def get_github_status():
     """Return cached health information for tracked GitHub components."""
-    cached = cache.get(CACHE_KEY)
+    cached = cache_get(CACHE_KEY)
     if cached is not None:
         return cached
 
-    if not cache.add(FETCH_LOCK_KEY, True, FETCH_LOCK_TTL):
+    if not cache_add(FETCH_LOCK_KEY, True, FETCH_LOCK_TTL):
         return GitHubStatus(known=False)
 
     status = _fetch_github_status()
-    cache.set(CACHE_KEY, status, CACHE_TTL)
+    cache_set(CACHE_KEY, status, CACHE_TTL)
     return status
 
 

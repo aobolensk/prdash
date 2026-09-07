@@ -2,13 +2,14 @@ import json
 import re
 
 import requests
-from django.http import HttpResponse, HttpResponseNotAllowed, JsonResponse
 
-from dashboard.github_client import GITHUB_API_VERSION, GitHubClient
 from prdash.plugin_api import (
+    GITHUB_API_VERSION,
     HEAD_SLOT,
     PLUGIN_API_VERSION,
+    PluginJsonResponse,
     PluginMetadata,
+    PluginNoContent,
     TemplateResource,
     UIContribution,
 )
@@ -29,6 +30,7 @@ class GitHubActionsRerunFailedJobsPlugin:
     )
 
     def initialize(self, registrar):
+        self.registrar = registrar
         registrar.register_ui(UIContribution(
             slot=HEAD_SLOT,
             template=TemplateResource(PACKAGE, 'templates/head.html'),
@@ -44,39 +46,33 @@ class GitHubActionsRerunFailedJobsPlugin:
     def shutdown(self):
         pass
 
-    @staticmethod
-    def rerun(request, config):
+    def rerun(self, request, config):
         if request.method != 'POST':
-            return HttpResponseNotAllowed(['POST'])
+            return PluginJsonResponse({'error': 'Method not allowed'}, status=405)
 
-        outcome, message = GitHubActionsRerunFailedJobsPlugin._handle_rerun(request)
-        return GitHubActionsRerunFailedJobsPlugin._toast(
-            message, 'success' if outcome == 'success' else 'error'
-        )
+        outcome, message = self._handle_rerun(request)
+        return self._toast(message, 'success' if outcome == 'success' else 'error')
 
-    @staticmethod
-    def rerun_track(request, config):
+    def rerun_track(self, request, config):
         if request.method != 'POST':
-            return HttpResponseNotAllowed(['POST'])
+            return PluginJsonResponse({'error': 'Method not allowed'}, status=405)
 
-        outcome, message = GitHubActionsRerunFailedJobsPlugin._handle_rerun(request)
-        return JsonResponse({'outcome': outcome, 'message': message})
+        outcome, message = self._handle_rerun(request)
+        return PluginJsonResponse({'outcome': outcome, 'message': message})
 
-    @staticmethod
-    def update_branch(request, config):
+    def update_branch(self, request, config):
         if request.method != 'POST':
-            return HttpResponseNotAllowed(['POST'])
+            return PluginJsonResponse({'error': 'Method not allowed'}, status=405)
 
-        outcome, message = GitHubActionsRerunFailedJobsPlugin._handle_update_branch(request)
-        return JsonResponse({'outcome': outcome, 'message': message})
+        outcome, message = self._handle_update_branch(request)
+        return PluginJsonResponse({'outcome': outcome, 'message': message})
 
-    @staticmethod
-    def _handle_update_branch(request):
+    def _handle_update_branch(self, request):
         parsed, error = GitHubActionsRerunFailedJobsPlugin._parse_update_branch_request(request)
         if error:
             return 'error', error
 
-        token = GitHubClient(request.user)._get_token()
+        token = self.registrar.resolve_github_token(request.user_id)
         if not token:
             return 'error', 'GitHub authentication is unavailable.'
 
@@ -86,7 +82,7 @@ class GitHubActionsRerunFailedJobsPlugin:
     @staticmethod
     def _parse_update_branch_request(request):
         owner, repository, error = GitHubActionsRerunFailedJobsPlugin._parse_owner_repository(request)
-        pr_number = request.POST.get('pr_number', '')
+        pr_number = request.form_params.get('pr_number', '')
         if error or not pr_number.isdigit():
             return None, 'Could not determine the pull request to update.'
         return (owner, repository, pr_number), None
@@ -105,13 +101,12 @@ class GitHubActionsRerunFailedJobsPlugin:
 
         return 'success', 'Branch update requested.'
 
-    @staticmethod
-    def _handle_rerun(request):
+    def _handle_rerun(self, request):
         parsed, error = GitHubActionsRerunFailedJobsPlugin._parse_request(request)
         if error:
             return 'error', error
 
-        token = GitHubClient(request.user)._get_token()
+        token = self.registrar.resolve_github_token(request.user_id)
         if not token:
             return 'error', 'GitHub authentication is unavailable.'
 
@@ -120,8 +115,8 @@ class GitHubActionsRerunFailedJobsPlugin:
 
     @staticmethod
     def _parse_owner_repository(request):
-        owner = request.POST.get('owner', '')
-        repository = request.POST.get('repository', '')
+        owner = request.form_params.get('owner', '')
+        repository = request.form_params.get('repository', '')
         if not REPOSITORY_PART_PATTERN.fullmatch(owner) or not REPOSITORY_PART_PATTERN.fullmatch(repository):
             return None, None, 'Invalid repository.'
         return owner, repository, None
@@ -129,7 +124,7 @@ class GitHubActionsRerunFailedJobsPlugin:
     @staticmethod
     def _parse_request(request):
         owner, repository, error = GitHubActionsRerunFailedJobsPlugin._parse_owner_repository(request)
-        run_ids = request.POST.getlist('run_id')
+        run_ids = list(request.form_lists.get('run_id', ()))
         if error or not run_ids or any(not run_id.isdigit() for run_id in run_ids):
             return None, 'Could not determine failed workflow runs.'
         return (owner, repository, run_ids), None
@@ -187,14 +182,14 @@ class GitHubActionsRerunFailedJobsPlugin:
 
     @staticmethod
     def _toast(message, toast_type='error'):
-        response = HttpResponse(status=204)
-        response['HX-Trigger'] = json.dumps({
-            'githubActionsRerunFailedJobsToast': {
-                'message': message,
-                'type': toast_type,
-            },
+        return PluginNoContent(headers={
+            'HX-Trigger': json.dumps({
+                'githubActionsRerunFailedJobsToast': {
+                    'message': message,
+                    'type': toast_type,
+                },
+            }),
         })
-        return response
 
 
 plugin = GitHubActionsRerunFailedJobsPlugin()

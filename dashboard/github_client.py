@@ -13,11 +13,12 @@ from django.core.cache import cache
 from github import RateLimitExceededException
 from urllib3.exceptions import MaxRetryError
 
+from prdash.plugin_api import GITHUB_API_VERSION
+
 
 logger = logging.getLogger(__name__)
 
 GITHUB_GRAPHQL_URL = 'https://api.github.com/graphql'
-GITHUB_API_VERSION = '2022-11-28'
 GITHUB_PROVIDER = 'github'
 USERNAME_CACHE_TTL_SECONDS = 86400
 GRAPHQL_PR_BATCH_SIZE = 25

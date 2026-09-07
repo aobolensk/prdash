@@ -120,7 +120,6 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
     current_username = client.get_username()
     plugin_context = PullRequestListContext(
         request=request,
-        client=client,
         active_tab=active_tab,
         current_username=current_username,
         current_repo=(owner, repo) if owner and repo else None,

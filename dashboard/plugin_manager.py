@@ -1,21 +1,35 @@
-"""Discovery and runtime isolation for prdash plugins."""
+"""Discovery and process isolation for prdash plugins.
 
-from contextlib import contextmanager
+Each enabled plugin runs in its own subprocess (prdash/plugin_worker.py),
+started here and driven over a small JSON-over-pipes protocol
+(prdash/plugin_protocol.py). The worker process never imports Django or this
+package, so a plugin cannot read another plugin's (or another user's) data by
+importing Django models directly: the only way in is the narrow, per-plugin
+scoped callback surface implemented in _handle_callback below.
+"""
+
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-from importlib import import_module, metadata, resources
+from dataclasses import asdict
+from importlib import metadata
 import json
 import logging
 from pathlib import Path
 import re
+import subprocess
 import sys
-from threading import RLock
-from typing import Any
+from threading import RLock, Thread
 
 from django.conf import settings
 from django.db import OperationalError, ProgrammingError, transaction
 from django.db.models import Max
-from django.http import Http404, HttpResponse, HttpResponseServerError
+from django.http import (
+    Http404,
+    HttpResponse,
+    HttpResponsePermanentRedirect,
+    HttpResponseRedirect,
+    HttpResponseServerError,
+    JsonResponse,
+)
 from django.template import engines
 from django.utils.safestring import mark_safe
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
@@ -23,12 +37,14 @@ from packaging.version import InvalidVersion, Version
 
 from prdash.plugin_api import (
     PLUGIN_API_VERSION,
+    PR_LIST_PROCESS_HOOK,
+    PR_LIST_QUERY_HOOK,
+    PluginDependency,
     PluginMetadata,
-    PluginTemplateResponse,
     PluginUserData,
-    TemplateResource,
-    UIContribution,
+    PullRequestQuery,
 )
+from prdash.plugin_protocol import ProtocolError, read_message, write_message
 
 logger = logging.getLogger(__name__)
 
@@ -36,97 +52,55 @@ ENTRY_POINT_GROUP = 'prdash.plugins'
 SOURCE_MANIFEST = 'prdash-plugin.json'
 IDENTIFIER_PATTERN = re.compile(r'^[a-z0-9][a-z0-9_-]*$')
 
+DEFAULT_CALL_TIMEOUT = getattr(settings, 'PRDASH_PLUGIN_CALL_TIMEOUT', 10.0)
+SHUTDOWN_TIMEOUT = 5.0
+
+_SAFE_REQUEST_HEADERS = {
+    'HX-Request', 'HX-Target', 'HX-Trigger', 'Content-Type', 'Accept', 'Sec-Fetch-Mode',
+}
+
 
 class PluginActivationError(RuntimeError):
     """A user-specific activation problem, such as a disabled dependency."""
 
 
-@dataclass
+class PluginCallError(RuntimeError):
+    """A plugin worker failed to complete a call (crashed, timed out, or errored)."""
+
+
 class PluginDescriptor:
-    """Metadata available without importing plugin implementation code."""
+    """Metadata available without starting a plugin's worker process."""
 
-    plugin_id: str
-    name: str
-    version: str
-    description: str
-    entrypoint: str
-    source: str
-    api_version: str | None = None
-    python_path: Path | None = None
-    entry_point: Any = None
-    load_error: str | None = None
-
-
-@dataclass
-class _Registration:
-    hooks: list[tuple[str, int, Any]] = field(default_factory=list)
-    ui: list[UIContribution] = field(default_factory=list)
-    routes: dict[str, Any] = field(default_factory=dict)
-    services: dict[str, Any] = field(default_factory=dict)
+    def __init__(
+        self, plugin_id, name, version, description, entrypoint, source,
+        *, api_version=None, python_path=None, load_error=None,
+    ):
+        self.plugin_id = plugin_id
+        self.name = name
+        self.version = version
+        self.description = description
+        self.entrypoint = entrypoint
+        self.source = source
+        self.api_version = api_version
+        self.python_path = python_path
+        self.load_error = load_error
 
 
-@dataclass
-class _LoadedPlugin:
-    descriptor: PluginDescriptor
-    plugin: Any
-    registration: _Registration
+class _WorkerHandle:
+    """A running plugin worker process and its registration manifest."""
 
+    def __init__(self, plugin_id, popen):
+        self.plugin_id = plugin_id
+        self.popen = popen
+        self.lock = RLock()
+        self.metadata = None
+        self.manifest = None
+        self.dead = False
+        self._next_id = 0
 
-class _Registrar:
-    def __init__(self, manager, plugin_id, registration):
-        self._manager = manager
-        self._plugin_id = plugin_id
-        self._registration = registration
-
-    @property
-    def deployment_config(self):
-        plugin_config = getattr(settings, 'PRDASH_PLUGIN_CONFIG', {})
-        return dict(plugin_config.get(self._plugin_id, {}))
-
-    def register_hook(self, name, callback, *, priority=100):
-        if not name or not callable(callback):
-            raise ValueError('Plugin hooks require a name and callable')
-        self._registration.hooks.append((name, priority, callback))
-
-    def register_ui(self, contribution):
-        if not isinstance(contribution, UIContribution):
-            raise TypeError('UI contributions must use UIContribution')
-        self._registration.ui.append(contribution)
-
-    def register_route(self, name, callback):
-        if not IDENTIFIER_PATTERN.fullmatch(name) or not callable(callback):
-            raise ValueError('Plugin routes require a simple name and callable')
-        if name in self._registration.routes:
-            raise ValueError(f'Duplicate plugin route: {name}')
-        self._registration.routes[name] = callback
-
-    def register_service(self, name, service):
-        if not name:
-            raise ValueError('Plugin services require a name')
-        if name in self._registration.services:
-            raise ValueError(f'Duplicate plugin service: {name}')
-        self._registration.services[name] = service
-
-    def get_user_config(self, user):
-        return self._manager.get_user_config(user, self._plugin_id)
-
-    def update_user_config(self, user, values):
-        self._manager.update_user_config(user, self._plugin_id, values)
-
-    def list_user_data(self, user, collection):
-        return self._manager.list_user_data(user, self._plugin_id, collection)
-
-    def get_user_data(self, user, collection, key):
-        return self._manager.get_user_data(user, self._plugin_id, collection, key)
-
-    def set_user_data(self, user, collection, key, value):
-        return self._manager.set_user_data(user, self._plugin_id, collection, key, value)
-
-    def delete_user_data(self, user, collection, key):
-        return self._manager.delete_user_data(user, self._plugin_id, collection, key)
-
-    def reorder_user_data(self, user, collection, keys):
-        self._manager.reorder_user_data(user, self._plugin_id, collection, keys)
+    def next_call_id(self):
+        self._next_id += 1
+        return self._next_id
 
 
 class PluginManager:
@@ -135,10 +109,12 @@ class PluginManager:
     def __init__(self):
         self.descriptors: dict[str, PluginDescriptor] = {}
         self.discovery_errors: list[str] = []
-        self._loaded: dict[str, _LoadedPlugin] = {}
+        self._workers: dict[str, _WorkerHandle] = {}
         self._loading: set[str] = set()
         self._activation_errors: dict[tuple[frozenset[str], str], str] = {}
         self._lock = RLock()
+
+    # -- Discovery -----------------------------------------------------
 
     def discover(self):
         """Discover source manifests and installed entry points without loading plugins."""
@@ -187,7 +163,6 @@ class PluginManager:
                 description=dist_metadata.get('Summary', ''),
                 entrypoint=entry_point.value,
                 source=f'Python distribution {dist_metadata.get("Name", entry_point.name)}',
-                entry_point=entry_point,
             )
             self._add_descriptor(descriptor, source_precedence=False)
 
@@ -209,36 +184,185 @@ class PluginManager:
             return True
         return required.split('.', 1)[0] == PLUGIN_API_VERSION.split('.', 1)[0]
 
-    @contextmanager
-    def _source_import_path(self, descriptor):
-        if descriptor.python_path is None:
-            yield
+    # -- Worker process lifecycle ---------------------------------------
+
+    @staticmethod
+    def _spawn_worker(descriptor):
+        popen = subprocess.Popen(
+            [sys.executable, '-m', 'prdash.plugin_worker'],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        PluginManager._drain_stderr(descriptor.plugin_id, popen.stderr)
+        return _WorkerHandle(descriptor.plugin_id, popen)
+
+    @staticmethod
+    def _drain_stderr(plugin_id, stderr):
+        def run():
+            for line in iter(stderr.readline, b''):
+                logger.warning('Plugin %s stderr: %s', plugin_id, line.decode('utf-8', errors='replace').rstrip())
+            stderr.close()
+
+        Thread(target=run, daemon=True).start()
+
+    def _terminate_worker(self, worker):
+        if worker.popen.poll() is not None:
             return
-
-        path = str(descriptor.python_path)
-        sys.path.insert(0, path)
         try:
-            yield
+            with worker.lock:
+                worker.dead = True
+                try:
+                    self._call(worker, 'shutdown', {}, timeout=SHUTDOWN_TIMEOUT)
+                except PluginCallError:
+                    pass
         finally:
+            worker.popen.terminate()
             try:
-                sys.path.remove(path)
-            except ValueError:
-                pass
+                worker.popen.wait(timeout=SHUTDOWN_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                worker.popen.kill()
+                worker.popen.wait(timeout=SHUTDOWN_TIMEOUT)
+
+    def _call(self, worker, op, params, timeout=DEFAULT_CALL_TIMEOUT):
+        with worker.lock:
+            if worker.dead:
+                raise PluginCallError('Plugin worker is no longer running')
+            call_id = worker.next_call_id()
+            try:
+                write_message(worker.popen.stdin, {
+                    'type': 'call', 'id': call_id, 'op': op, 'params': params,
+                })
+                while True:
+                    message = read_message(worker.popen.stdout, timeout=timeout)
+                    msg_type = message.get('type')
+                    if msg_type == 'result':
+                        if message.get('id') != call_id:
+                            raise ProtocolError('Plugin worker response id mismatch')
+                        if not message.get('ok', False):
+                            raise PluginCallError(message.get('error') or 'Plugin call failed')
+                        return message.get('result', {})
+                    if msg_type == 'callback':
+                        self._service_callback(worker, message)
+                        continue
+                    raise ProtocolError(f'Unexpected plugin worker message type: {msg_type!r}')
+            except (ProtocolError, OSError) as error:
+                worker.dead = True
+                raise PluginCallError(str(error)) from error
+
+    def _service_callback(self, worker, message):
+        callback_id = message.get('id')
+        try:
+            result = self._handle_callback(worker, message.get('op'), message.get('params') or {})
+            write_message(worker.popen.stdin, {
+                'type': 'callback_result', 'id': callback_id, 'ok': True, 'result': result,
+            })
+        except Exception as error:
+            write_message(worker.popen.stdin, {
+                'type': 'callback_result', 'id': callback_id, 'ok': False,
+                'error': str(error) or error.__class__.__name__,
+            })
+
+    def _handle_callback(self, worker, op, params):
+        """Execute one plugin-worker callback, scoped to that worker's own plugin_id."""
+        plugin_id = worker.plugin_id
+        if op == 'get_user_config':
+            user = self._get_user(params['user_id'])
+            return {'config': self.get_user_config(user, plugin_id)}
+        if op == 'update_user_config':
+            user = self._get_user(params['user_id'])
+            self.update_user_config(user, plugin_id, params['values'])
+            return {}
+        if op == 'list_user_data':
+            user = self._get_user(params['user_id'])
+            items = self.list_user_data(user, plugin_id, params['collection'])
+            return {'items': [self._user_data_to_dict(item) for item in items]}
+        if op == 'get_user_data':
+            user = self._get_user(params['user_id'])
+            item = self.get_user_data(user, plugin_id, params['collection'], params['key'])
+            return {'item': self._user_data_to_dict(item) if item else None}
+        if op == 'set_user_data':
+            user = self._get_user(params['user_id'])
+            item = self.set_user_data(
+                user, plugin_id, params['collection'], params['key'], params['value']
+            )
+            return {'item': self._user_data_to_dict(item)}
+        if op == 'delete_user_data':
+            user = self._get_user(params['user_id'])
+            deleted = self.delete_user_data(user, plugin_id, params['collection'], params['key'])
+            return {'deleted': deleted}
+        if op == 'reorder_user_data':
+            user = self._get_user(params['user_id'])
+            self.reorder_user_data(user, plugin_id, params['collection'], params['keys'])
+            return {}
+        if op == 'resolve_github_token':
+            user = self._get_user(params['user_id'])
+            from .github_client import GitHubClient
+            return {'token': GitHubClient(user)._get_token()}
+        if op == 'list_tracked_repositories':
+            user = self._get_user(params['user_id'])
+            from .models import TrackedRepository
+            repos = TrackedRepository.objects.filter(user=user)
+            if params.get('enabled_only'):
+                repos = repos.filter(enabled=True)
+            return {'repos': [
+                {'owner': repo.owner, 'name': repo.name, 'enabled': repo.enabled}
+                for repo in repos
+            ]}
+        if op == 'call_service':
+            user = self._get_user(params['user_id'])
+            result = self.get_service(user, params['plugin_id'], params['name'], params.get('args', {}))
+            return {'result': result}
+        if op == 'get_username':
+            from .github_client import GitHubClient
+            user = self._get_user(params['user_id'])
+            return {'username': GitHubClient(user).get_username()}
+        if op == 'fetch_open_prs':
+            from .github_client import GitHubClient
+            user = self._get_user(params['user_id'])
+            repos = [tuple(repo) for repo in params['repos']]
+            prs = GitHubClient(user).get_all_user_prs(repos, params.get('author'))
+            return {'prs': [asdict(pr) for pr in prs]}
+        if op == 'fetch_merged_prs':
+            from .github_client import GitHubClient
+            user = self._get_user(params['user_id'])
+            repos = [tuple(repo) for repo in params['repos']]
+            prs = GitHubClient(user).get_all_merged_prs(repos, params.get('author'))
+            return {'prs': [asdict(pr) for pr in prs]}
+        if op == 'fetch_reviews_for_stats':
+            from .github_client import GitHubClient
+            user = self._get_user(params['user_id'])
+            repos = [tuple(repo) for repo in params['repos']]
+            return GitHubClient(user).get_reviews_for_stats(repos, params['username'], params.get('days', 30))
+        raise ValueError(f'Unknown plugin callback: {op}')
 
     @staticmethod
-    def _load_object(target):
-        module_name, separator, attribute = target.partition(':')
-        if not separator or not module_name or not attribute:
-            raise ValueError(f'Invalid plugin entry point: {target}')
-        return getattr(import_module(module_name), attribute)
+    def _get_user(user_id):
+        from django.contrib.auth.models import User
+        return User.objects.get(pk=user_id)
 
     @staticmethod
-    def _materialize(candidate):
-        if isinstance(candidate, type):
-            return candidate()
-        if callable(candidate) and not hasattr(candidate, 'initialize'):
-            return candidate()
-        return candidate
+    def _user_data_to_dict(item):
+        return {
+            'key': item.key,
+            'value': item.value,
+            'created_at': item.created_at,
+            'updated_at': item.updated_at,
+        }
+
+    @staticmethod
+    def _metadata_from_manifest(data):
+        return PluginMetadata(
+            plugin_id=data['plugin_id'],
+            name=data['name'],
+            version=data['version'],
+            api_version=data['api_version'],
+            description=data.get('description', ''),
+            dependencies=tuple(
+                PluginDependency(dep['plugin_id'], dep['version'])
+                for dep in data.get('dependencies', ())
+            ),
+        )
 
     def load(self, plugin_id, enabled_plugin_ids):
         """Load and initialize one explicitly enabled plugin."""
@@ -258,19 +382,19 @@ class PluginManager:
                 )
                 return None
 
-            loaded = self._loaded.get(plugin_id)
-            if loaded is not None:
+            worker = self._workers.get(plugin_id)
+            if worker is not None and worker.dead:
+                self._workers.pop(plugin_id, None)
+                worker = None
+            if worker is not None:
                 try:
-                    self._validate_dependencies(
-                        loaded.plugin.metadata,
-                        enabled_plugin_ids,
-                    )
-                    for dependency in loaded.plugin.metadata.dependencies:
+                    self._validate_dependencies(worker.metadata, enabled_plugin_ids)
+                    for dependency in worker.metadata.dependencies:
                         if self.load(dependency.plugin_id, enabled_plugin_ids) is None:
                             raise PluginActivationError(
                                 f'Dependency {dependency.plugin_id!r} could not be loaded'
                             )
-                    return loaded
+                    return worker
                 except PluginActivationError as error:
                     self._activation_errors[activation_key] = str(error)
                     return None
@@ -281,18 +405,21 @@ class PluginManager:
                 )
                 return None
 
-            plugin = None
+            worker = None
             initialization_started = False
             self._loading.add(plugin_id)
             try:
-                with self._source_import_path(descriptor):
-                    candidate = (
-                        descriptor.entry_point.load()
-                        if descriptor.entry_point is not None
-                        else self._load_object(descriptor.entrypoint)
-                    )
-                plugin = self._materialize(candidate)
-                plugin_metadata = plugin.metadata
+                worker = self._spawn_worker(descriptor)
+                initialization_started = True
+                manifest = self._call(worker, 'initialize', {
+                    'plugin_id': plugin_id,
+                    'entrypoint': descriptor.entrypoint,
+                    'python_path': str(descriptor.python_path) if descriptor.python_path else None,
+                    'deployment_config': dict(
+                        getattr(settings, 'PRDASH_PLUGIN_CONFIG', {}).get(plugin_id, {})
+                    ),
+                })
+                plugin_metadata = self._metadata_from_manifest(manifest['metadata'])
                 self._validate_metadata(descriptor, plugin_metadata)
                 descriptor.name = plugin_metadata.name
                 descriptor.description = plugin_metadata.description
@@ -300,19 +427,16 @@ class PluginManager:
                 self._validate_dependencies(plugin_metadata, enabled_plugin_ids)
 
                 for dependency in plugin_metadata.dependencies:
-                    dependency_plugin = self.load(dependency.plugin_id, enabled_plugin_ids)
-                    if dependency_plugin is None:
+                    dependency_worker = self.load(dependency.plugin_id, enabled_plugin_ids)
+                    if dependency_worker is None:
                         raise PluginActivationError(
                             f'Dependency {dependency.plugin_id!r} could not be loaded'
                         )
 
-                registration = _Registration()
-                registrar = _Registrar(self, plugin_id, registration)
-                initialization_started = True
-                plugin.initialize(registrar)
-                loaded = _LoadedPlugin(descriptor, plugin, registration)
-                self._loaded[plugin_id] = loaded
-                return loaded
+                worker.metadata = plugin_metadata
+                worker.manifest = manifest
+                self._workers[plugin_id] = worker
+                return worker
             except PluginActivationError as error:
                 self._activation_errors[activation_key] = str(error)
                 return None
@@ -322,14 +446,8 @@ class PluginManager:
                 return None
             finally:
                 self._loading.discard(plugin_id)
-                if initialization_started and plugin_id not in self._loaded:
-                    try:
-                        plugin.shutdown()
-                    except Exception:
-                        logger.exception(
-                            'Failed to clean up plugin %s after initialization error',
-                            plugin_id,
-                        )
+                if initialization_started and plugin_id not in self._workers and worker is not None:
+                    self._terminate_worker(worker)
 
     def _validate_metadata(self, descriptor, plugin_metadata):
         if not isinstance(plugin_metadata, PluginMetadata):
@@ -377,19 +495,21 @@ class PluginManager:
                     )
 
     def unload(self, plugin_id):
-        """Shut down a loaded plugin and remove all process-local registrations."""
+        """Shut down a loaded plugin's worker process and forget it."""
         with self._lock:
-            loaded = self._loaded.pop(plugin_id, None)
-            if loaded is None:
+            worker = self._workers.pop(plugin_id, None)
+            if worker is None:
                 return
             try:
-                loaded.plugin.shutdown()
+                self._terminate_worker(worker)
             except Exception:
                 logger.exception('Failed to shut down plugin %s', plugin_id)
 
     def _shutdown_all(self):
-        for plugin_id in list(self._loaded):
+        for plugin_id in list(self._workers):
             self.unload(plugin_id)
+
+    # -- Per-user configuration and data ---------------------------------
 
     @staticmethod
     def _state_model():
@@ -432,15 +552,15 @@ class PluginManager:
         }
 
     def _activate_user_plugins(self, user, request=None):
-        """Return user state, enabled ids, and plugins loaded for this activation."""
+        """Return user state, enabled ids, and workers loaded for this activation."""
         states = self._state_map(user, request)
         enabled_ids = self._enabled_ids(user, request)
-        active_plugins = {}
+        active_workers = {}
         for plugin_id in enabled_ids:
-            loaded = self.load(plugin_id, enabled_ids)
-            if loaded is not None:
-                active_plugins[plugin_id] = loaded
-        return states, enabled_ids, active_plugins
+            worker = self.load(plugin_id, enabled_ids)
+            if worker is not None:
+                active_workers[plugin_id] = worker
+        return states, enabled_ids, active_workers
 
     def configure_user(self, user, enabled_plugin_ids):
         """Persist the explicit enabled set and update this process registry."""
@@ -465,7 +585,7 @@ class PluginManager:
         for plugin_id in selected:
             self.load(plugin_id, selected)
 
-        for plugin_id in set(self._loaded) - selected:
+        for plugin_id in set(self._workers) - selected:
             if not state_model.objects.filter(plugin_id=plugin_id, enabled=True).exists():
                 self.unload(plugin_id)
 
@@ -487,7 +607,7 @@ class PluginManager:
                 'description': descriptor.description,
                 'source': descriptor.source,
                 'enabled': bool(state and state.enabled),
-                'loaded': descriptor.plugin_id in self._loaded,
+                'loaded': descriptor.plugin_id in self._workers,
                 'error': descriptor.load_error or activation_error,
             })
         return statuses
@@ -601,124 +721,223 @@ class PluginManager:
             if changed_rows:
                 model.objects.bulk_update(changed_rows, ['position'])
 
+    # -- Request-facing serialization -------------------------------------
+
+    @staticmethod
+    def _request_info_dict(request):
+        if request is None:
+            return None
+        cache_name = '_prdash_plugin_request_info'
+        cached = getattr(request, cache_name, None)
+        if cached is not None:
+            return cached
+        info = PluginManager._build_request_info_dict(request)
+        setattr(request, cache_name, info)
+        return info
+
+    @staticmethod
+    def _build_request_info_dict(request):
+        user = getattr(request, 'user', None)
+        authenticated = bool(user and getattr(user, 'is_authenticated', False))
+        body = ''
+        if request.method in ('POST', 'PUT', 'PATCH'):
+            body = request.body.decode('utf-8', errors='replace')
+        return {
+            'method': request.method,
+            'path': request.path,
+            'query_params': {key: value for key, value in request.GET.items()},
+            'form_params': {key: value for key, value in request.POST.items()},
+            'form_lists': {key: values for key, values in request.POST.lists()},
+            'body': body,
+            'headers': {
+                key: value for key, value in request.headers.items()
+                if key in _SAFE_REQUEST_HEADERS
+            },
+            'user_id': user.id if authenticated else None,
+            'username': getattr(user, 'username', '') if user else '',
+            'is_authenticated': authenticated,
+        }
+
+    @staticmethod
+    def _hook_value_to_json(name, value):
+        if name == PR_LIST_QUERY_HOOK:
+            return asdict(value)
+        if name == PR_LIST_PROCESS_HOOK:
+            return [asdict(pr) for pr in value]
+        return value
+
+    @staticmethod
+    def _hook_value_from_json(name, value):
+        if name == PR_LIST_QUERY_HOOK:
+            return PullRequestQuery(**value)
+        if name == PR_LIST_PROCESS_HOOK:
+            from .github_client import CIStatus, LinkedIssue, PullRequestInfo, ReviewStatus
+
+            def _build(item):
+                item = dict(item)
+                item['ci_status'] = CIStatus(**item['ci_status'])
+                item['review_status'] = ReviewStatus(**item['review_status'])
+                item['linked_issues'] = [
+                    LinkedIssue(**linked) for linked in item.get('linked_issues', [])
+                ]
+                return PullRequestInfo(**item)
+
+            return [_build(item) for item in value]
+        return value
+
+    def _hook_context_to_json(self, hook_context):
+        current_repo = hook_context.current_repo
+        return {
+            'request': self._request_info_dict(hook_context.request),
+            'active_tab': hook_context.active_tab,
+            'current_username': hook_context.current_username,
+            'current_repo': list(current_repo) if current_repo else None,
+            'query_defaults': dict(hook_context.query_defaults),
+            'query': asdict(hook_context.query) if hook_context.query is not None else None,
+        }
+
+    # -- Hook / route / UI / service dispatch ------------------------------
+
     def run_hook(self, name, value, hook_context, user, request=None):
         """Run enabled hook callbacks in order and isolate individual failures."""
-        states, _, active_plugins = self._activate_user_plugins(user, request)
+        states, _, active_workers = self._activate_user_plugins(user, request)
 
-        callbacks = []
-        for plugin_id, loaded in active_plugins.items():
+        entries = []
+        for plugin_id, worker in active_workers.items():
             config = dict(states[plugin_id].config)
-            for index, (hook_name, priority, callback) in enumerate(
-                loaded.registration.hooks
-            ):
-                if hook_name == name:
-                    callbacks.append((priority, plugin_id, index, callback, config))
+            for hook in worker.manifest['hooks']:
+                if hook['name'] == name:
+                    entries.append((hook['priority'], plugin_id, config, worker))
 
-        for _, plugin_id, _, callback, config in sorted(
-            callbacks,
-            key=lambda item: item[:3],
-        ):
+        context_payload = self._hook_context_to_json(hook_context)
+        payload_value = self._hook_value_to_json(name, value)
+        for _priority, plugin_id, config, worker in sorted(entries, key=lambda item: item[:2]):
             try:
-                result = callback(value, hook_context, config)
-                if result is not None:
-                    value = result
-            except Exception:
+                result = self._call(worker, 'invoke_hook', {
+                    'name': name,
+                    'value': payload_value,
+                    'context': context_payload,
+                    'config': config,
+                })
+                new_value = result.get('value')
+                if new_value is not None:
+                    payload_value = new_value
+            except PluginCallError:
                 logger.exception('Plugin %s failed in hook %s', plugin_id, name)
-        return value
+        return self._hook_value_from_json(name, payload_value)
 
     def render_slot(self, slot, template_context, **extra_context):
         """Render enabled UI contributions for one template slot."""
         request = template_context.get('request')
         user = getattr(request, 'user', None)
-        states, _, active_plugins = self._activate_user_plugins(user, request)
+        states, _, active_workers = self._activate_user_plugins(user, request)
 
         contributions = []
-        for plugin_id, loaded in active_plugins.items():
-            for index, contribution in enumerate(loaded.registration.ui):
-                if contribution.slot == slot:
-                    contributions.append((
-                        contribution.order,
-                        plugin_id,
-                        index,
-                        contribution,
-                    ))
+        for plugin_id, worker in active_workers.items():
+            for index, ui in enumerate(worker.manifest['ui']):
+                if ui['slot'] == slot:
+                    contributions.append((ui['order'], plugin_id, index, ui, worker))
 
         base_context = template_context.flatten()
         base_context.update(extra_context)
+        request_info = self._request_info_dict(request)
         rendered = []
-        for _, plugin_id, _, contribution in sorted(
-            contributions,
-            key=lambda item: item[:3],
-        ):
+        for _order, plugin_id, index, ui, worker in sorted(contributions, key=lambda item: item[:3]):
+            config = dict(states[plugin_id].config)
             context = dict(base_context)
             context['plugin_id'] = plugin_id
-            context['plugin_config'] = dict(states[plugin_id].config)
+            context['plugin_config'] = config
             try:
-                if contribution.context_provider is not None:
-                    contribution_context = contribution.context_provider(
-                        request,
-                        context['plugin_config'],
-                    )
-                    if not isinstance(contribution_context, Mapping):
+                if ui['has_context_provider']:
+                    result = self._call(worker, 'invoke_ui_context', {
+                        'index': index,
+                        'request': request_info,
+                        'config': config,
+                    })
+                    provided = result.get('context', {})
+                    if not isinstance(provided, Mapping):
                         raise TypeError('Plugin UI context providers must return a mapping')
-                    context.update(contribution_context)
-                rendered.append(self._render_resource(
-                    contribution.template,
-                    context,
-                    request,
-                ))
+                    context.update(provided)
+                template = engines['django'].from_string(ui['template_source'])
+                rendered.append(template.render(context, request))
             except Exception:
                 logger.exception('Plugin %s failed to render slot %s', plugin_id, slot)
         return mark_safe(''.join(rendered))
-
-    @staticmethod
-    def _render_resource(template_resource, context, request):
-        if not isinstance(template_resource, TemplateResource):
-            raise TypeError('Plugin templates must use TemplateResource')
-        source = resources.files(template_resource.package).joinpath(
-            template_resource.path
-        ).read_text(encoding='utf-8')
-        template = engines['django'].from_string(source)
-        return template.render(context, request)
 
     def dispatch(self, request, plugin_id, route):
         """Dispatch a request to an enabled plugin route."""
         enabled_ids = self._enabled_ids(request.user, request)
         if plugin_id not in enabled_ids:
             raise Http404
-        loaded = self.load(plugin_id, enabled_ids)
-        if loaded is None:
+        worker = self.load(plugin_id, enabled_ids)
+        if worker is None:
             return HttpResponseServerError('')
-        callback = loaded.registration.routes.get(route)
-        if callback is None:
+        if route not in worker.manifest['routes']:
             raise Http404
         config = dict(self._state_map(request.user, request)[plugin_id].config)
         try:
-            response = callback(request, config)
-            if isinstance(response, PluginTemplateResponse):
-                context = dict(response.context)
-                context['plugin_id'] = plugin_id
-                context['plugin_config'] = config
-                content = self._render_resource(response.template, context, request)
-                return HttpResponse(content, status=response.status)
-            if isinstance(response, HttpResponse):
-                return response
-            raise TypeError('Plugin routes must return HttpResponse or PluginTemplateResponse')
+            result = self._call(worker, 'invoke_route', {
+                'route': route,
+                'request': self._request_info_dict(request),
+                'config': config,
+            })
+            return self._response_from_payload(
+                result.get('response', {}), plugin_id, config, request,
+            )
         except Http404:
             raise
         except Exception:
             logger.exception('Plugin %s failed in route %s', plugin_id, route)
             return HttpResponseServerError('')
 
-    def get_service(self, user, plugin_id, name, request=None):
-        """Return an enabled plugin service by its scoped name."""
+    @staticmethod
+    def _response_from_payload(response, plugin_id, config, request):
+        response_type = response.get('type')
+        if response_type == 'not_found':
+            raise Http404
+        if response_type == 'template':
+            context = dict(response.get('context', {}))
+            for key, nested in response.get('nested', {}).items():
+                nested_template = engines['django'].from_string(nested['source'])
+                context[key] = nested_template.render(dict(nested['context']), request)
+            context['plugin_id'] = plugin_id
+            context['plugin_config'] = config
+            template = engines['django'].from_string(response['source'])
+            content = template.render(context, request)
+            return HttpResponse(content, status=response.get('status', 200))
+        if response_type == 'json':
+            http_response = JsonResponse(response.get('data'), status=response.get('status', 200), safe=False)
+            for key, value in response.get('headers', {}).items():
+                http_response[key] = value
+            return http_response
+        if response_type == 'redirect':
+            response_class = (
+                HttpResponsePermanentRedirect if response.get('permanent') else HttpResponseRedirect
+            )
+            return response_class(response['url'])
+        if response_type == 'no_content':
+            http_response = HttpResponse(status=response.get('status', 204))
+            for key, value in response.get('headers', {}).items():
+                http_response[key] = value
+            return http_response
+        raise TypeError(f'Unknown plugin route response type: {response_type!r}')
+
+    def get_service(self, user, plugin_id, name, args=None, request=None):
+        """Call an enabled plugin service by its scoped name and return its result."""
         enabled_ids = self._enabled_ids(user, request)
         if plugin_id not in enabled_ids:
             return None
-        loaded = self.load(plugin_id, enabled_ids)
-        if loaded is None:
+        worker = self.load(plugin_id, enabled_ids)
+        if worker is None:
             return None
-        return loaded.registration.services.get(name)
+        if name not in worker.manifest['services']:
+            return None
+        try:
+            result = self._call(worker, 'invoke_service', {'name': name, 'args': args or {}})
+            return result.get('result')
+        except PluginCallError:
+            logger.exception('Service %s on plugin %s failed', name, plugin_id)
+            return None
 
 
 plugin_manager = PluginManager()

@@ -1,18 +1,18 @@
 import functools
 import json
 import re
-from importlib import resources
 
 import requests
-from django.http import HttpResponse, HttpResponseNotAllowed
-from django.template import engines
 
-from dashboard.github_client import GITHUB_API_VERSION, GitHubClient
 from prdash.plugin_api import (
+    GITHUB_API_VERSION,
     HEAD_SLOT,
     PLUGIN_API_VERSION,
     PR_CARD_ACTIONS_SLOT,
+    NestedTemplate,
+    PluginJsonResponse,
     PluginMetadata,
+    PluginNoContent,
     PluginTemplateResponse,
     TemplateResource,
     UIContribution,
@@ -34,6 +34,7 @@ class GitHubPRPreviewPlugin:
     )
 
     def initialize(self, registrar):
+        self.registrar = registrar
         registrar.register_ui(UIContribution(
             slot=HEAD_SLOT,
             template=TemplateResource(PACKAGE, 'templates/head.html'),
@@ -53,7 +54,7 @@ class GitHubPRPreviewPlugin:
 
     @staticmethod
     def _request_values(request):
-        values = request.POST if request.method == 'POST' else request.GET
+        values = request.form_params if request.method == 'POST' else request.query_params
         owner = values.get('owner', '')
         repository = values.get('repository', '')
         number = values.get('number', '')
@@ -197,14 +198,14 @@ class GitHubPRPreviewPlugin:
 
     def preview(self, request, config):
         if request.method != 'GET':
-            return HttpResponseNotAllowed(['GET'])
+            return PluginJsonResponse({'error': 'Method not allowed'}, status=405)
         fragment_only = request.headers.get('Sec-Fetch-Mode') != 'navigate'
-        respond = functools.partial(self._preview_response, fragment_only, request)
+        respond = functools.partial(self._preview_response, fragment_only)
         values = self._request_values(request)
         if values is None:
             return respond({'error': 'Could not determine this pull request.'})
         owner, repository, number = values
-        token = GitHubClient(request.user)._get_token()
+        token = self.registrar.resolve_github_token(request.user_id)
         if not token:
             return respond({'error': 'GitHub authentication is unavailable.'})
 
@@ -274,20 +275,20 @@ class GitHubPRPreviewPlugin:
 
     def comment(self, request, config):
         if request.method != 'POST':
-            return HttpResponseNotAllowed(['POST'])
+            return PluginJsonResponse({'error': 'Method not allowed'}, status=405)
         values = self._request_values(request)
-        path = request.POST.get('path', '')
-        body = request.POST.get('body', '').strip()
-        line = request.POST.get('line', '')
-        side = request.POST.get('side', '')
-        commit_id = request.POST.get('commit_id', '')
+        path = request.form_params.get('path', '')
+        body = request.form_params.get('body', '').strip()
+        line = request.form_params.get('line', '')
+        side = request.form_params.get('side', '')
+        commit_id = request.form_params.get('commit_id', '')
         if (
             values is None or not path or not body or not line.isdigit()
             or int(line) < 1 or side not in {'LEFT', 'RIGHT'} or not commit_id
         ):
             return self._toast('Enter a comment for a changed line.')
         owner, repository, number = values
-        token = GitHubClient(request.user)._get_token()
+        token = self.registrar.resolve_github_token(request.user_id)
         if not token:
             return self._toast('GitHub authentication is unavailable.')
         try:
@@ -313,14 +314,14 @@ class GitHubPRPreviewPlugin:
 
     def reply(self, request, config):
         if request.method != 'POST':
-            return HttpResponseNotAllowed(['POST'])
+            return PluginJsonResponse({'error': 'Method not allowed'}, status=405)
         values = self._request_values(request)
-        comment_id = request.POST.get('comment_id', '')
-        body = request.POST.get('body', '').strip()
+        comment_id = request.form_params.get('comment_id', '')
+        body = request.form_params.get('body', '').strip()
         if values is None or not comment_id.isdigit() or int(comment_id) < 1 or not body:
             return self._toast('Enter a reply to this comment.')
         owner, repository, number = values
-        token = GitHubClient(request.user)._get_token()
+        token = self.registrar.resolve_github_token(request.user_id)
         if not token:
             return self._toast('GitHub authentication is unavailable.')
         try:
@@ -338,12 +339,12 @@ class GitHubPRPreviewPlugin:
 
     def _put_action(self, request, path_suffix, expected_status, error_message, success_message):
         if request.method != 'POST':
-            return HttpResponseNotAllowed(['POST'])
+            return PluginJsonResponse({'error': 'Method not allowed'}, status=405)
         values = self._request_values(request)
         if values is None:
             return self._toast('Could not determine this pull request.')
         owner, repository, number = values
-        token = GitHubClient(request.user)._get_token()
+        token = self.registrar.resolve_github_token(request.user_id)
         if not token:
             return self._toast('GitHub authentication is unavailable.')
         try:
@@ -370,41 +371,28 @@ class GitHubPRPreviewPlugin:
             'GitHub could not merge this pull request.', 'Pull request merged.',
         )
 
-    @staticmethod
-    def _render(template_resource, context, request):
-        source = resources.files(template_resource.package).joinpath(
-            template_resource.path
-        ).read_text(encoding='utf-8')
-        return engines['django'].from_string(source).render(context, request)
-
-    @staticmethod
-    @functools.lru_cache(maxsize=1)
-    def _rendered_head():
-        return GitHubPRPreviewPlugin._render(TemplateResource(PACKAGE, 'templates/head.html'), {}, None)
-
-    def _preview_response(self, fragment_only, request, context):
+    def _preview_response(self, fragment_only, context):
         if fragment_only:
             return PluginTemplateResponse(
                 template=TemplateResource(PACKAGE, 'templates/preview.html'),
                 context=context,
             )
-        page_context = dict(context)
-        page_context['plugin_id'] = self.metadata.plugin_id
-        body = self._render(TemplateResource(PACKAGE, 'templates/preview.html'), page_context, request)
-        page = self._render(TemplateResource(PACKAGE, 'templates/page.html'), {
-            'head': self._rendered_head(),
-            'body': body,
-            'pull_request': context.get('pull_request'),
-        }, request)
-        return HttpResponse(page)
+        return PluginTemplateResponse(
+            template=TemplateResource(PACKAGE, 'templates/page.html'),
+            context={'pull_request': context.get('pull_request')},
+            nested={
+                'head': NestedTemplate(TemplateResource(PACKAGE, 'templates/head.html')),
+                'body': NestedTemplate(TemplateResource(PACKAGE, 'templates/preview.html'), context),
+            },
+        )
 
     @staticmethod
     def _toast(message, toast_type='error'):
-        response = HttpResponse(status=204)
-        response['HX-Trigger'] = json.dumps({
-            'githubPRPreviewToast': {'message': message, 'type': toast_type},
+        return PluginNoContent(headers={
+            'HX-Trigger': json.dumps({
+                'githubPRPreviewToast': {'message': message, 'type': toast_type},
+            }),
         })
-        return response
 
 
 plugin = GitHubPRPreviewPlugin()

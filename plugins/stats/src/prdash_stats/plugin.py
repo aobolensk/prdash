@@ -8,9 +8,6 @@ from prdash.plugin_api import (
     UIContribution,
 )
 
-from dashboard.github_client import GitHubClient
-from dashboard.models import TrackedRepository
-
 from .stats_service import StatsService
 
 
@@ -40,6 +37,7 @@ class StatsPlugin:
     )
 
     def initialize(self, registrar):
+        self.registrar = registrar
         registrar.register_ui(UIContribution(
             slot=HEAD_SLOT,
             template=TemplateResource(PACKAGE, 'templates/head.html'),
@@ -54,22 +52,19 @@ class StatsPlugin:
     def shutdown(self):
         pass
 
-    @staticmethod
-    def page(request, config):
-        repos = TrackedRepository.objects.filter(user=request.user)
-        days = _parse_days_param(request.GET.get('days', '30'))
+    def page(self, request, config):
+        repos = self.registrar.list_tracked_repositories(request.user_id)
+        days = _parse_days_param(request.query_params.get('days', '30'))
         return PluginTemplateResponse(
             template=TemplateResource(PACKAGE, 'templates/page.html'),
             context={'days': days, 'repos': repos},
         )
 
-    @staticmethod
-    def content(request, config):
-        repos = TrackedRepository.objects.filter(user=request.user, enabled=True)
-        repo_tuples = [(repo.owner, repo.name) for repo in repos]
-        days = _parse_days_param(request.GET.get('days', '30'))
-        client = GitHubClient(request.user)
-        stats_service = StatsService(client)
+    def content(self, request, config):
+        repos = self.registrar.list_tracked_repositories(request.user_id, enabled_only=True)
+        repo_tuples = [(repo['owner'], repo['name']) for repo in repos]
+        days = _parse_days_param(request.query_params.get('days', '30'))
+        stats_service = StatsService(self.registrar, request.user_id)
         all_stats = stats_service.get_all_stats(repo_tuples, days)
         return PluginTemplateResponse(
             template=TemplateResource(PACKAGE, 'templates/content.html'),

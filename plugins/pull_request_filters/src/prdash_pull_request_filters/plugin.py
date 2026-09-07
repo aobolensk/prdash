@@ -7,6 +7,10 @@ from prdash.plugin_api import (
     TemplateResource,
     UIContribution,
 )
+from prdash.plugin_pr_filters import (
+    filter_prs_approved_by_user,
+    filter_prs_reviewed_not_approved_by_user,
+)
 
 
 FILTER_KEYS = ('ci', 'review', 'my_review', 'draft', 'conflicts')
@@ -40,19 +44,20 @@ class PullRequestFiltersPlugin:
     @staticmethod
     def prepare_query(query, context, config):
         defaults = context.query_defaults
+        query_params = context.request.query_params
         parameters = {
-            'ci': context.request.GET.get('ci', defaults.get('ci', '')),
-            'review': context.request.GET.get('review', defaults.get('review', '')),
-            'my_review': context.request.GET.get(
+            'ci': query_params.get('ci', defaults.get('ci', '')),
+            'review': query_params.get('review', defaults.get('review', '')),
+            'my_review': query_params.get(
                 'my_review',
                 defaults.get('my_review', ''),
             ),
-            'draft': context.request.GET.get('draft', defaults.get('draft', '')),
-            'conflicts': context.request.GET.get(
+            'draft': query_params.get('draft', defaults.get('draft', '')),
+            'conflicts': query_params.get(
                 'conflicts',
                 defaults.get('conflicts', ''),
             ),
-            'sort': context.request.GET.get(
+            'sort': query_params.get(
                 'sort',
                 defaults.get('sort', 'updated_desc'),
             ),
@@ -92,12 +97,12 @@ class PullRequestFiltersPlugin:
         if context.current_repo and context.active_tab == 'review_requests':
             my_review = parameters.get('my_review')
             if my_review == 'approved' and context.current_username:
-                pull_requests = context.client.filter_prs_approved_by_user(
+                pull_requests = filter_prs_approved_by_user(
                     pull_requests,
                     context.current_username,
                 )
             elif my_review == 'reviewed' and context.current_username:
-                pull_requests = context.client.filter_prs_reviewed_not_approved_by_user(
+                pull_requests = filter_prs_reviewed_not_approved_by_user(
                     pull_requests,
                     context.current_username,
                 )
@@ -112,47 +117,47 @@ class PullRequestFiltersPlugin:
             pull_requests = [
                 pull_request
                 for pull_request in pull_requests
-                if pull_request.ci_status.state == ci
+                if pull_request['ci_status']['state'] == ci
             ]
         if review:
             pull_requests = [
                 pull_request
                 for pull_request in pull_requests
-                if pull_request.review_status.state == review
+                if pull_request['review_status']['state'] == review
             ]
         if draft == 'ready':
             pull_requests = [
-                pull_request for pull_request in pull_requests if not pull_request.draft
+                pull_request for pull_request in pull_requests if not pull_request['draft']
             ]
         elif draft == 'draft':
             pull_requests = [
-                pull_request for pull_request in pull_requests if pull_request.draft
+                pull_request for pull_request in pull_requests if pull_request['draft']
             ]
         if conflicts == 'has':
             pull_requests = [
                 pull_request
                 for pull_request in pull_requests
-                if pull_request.mergeable == 'CONFLICTING'
+                if pull_request['mergeable'] == 'CONFLICTING'
             ]
         elif conflicts == 'none':
             pull_requests = [
                 pull_request
                 for pull_request in pull_requests
-                if pull_request.mergeable == 'MERGEABLE'
+                if pull_request['mergeable'] == 'MERGEABLE'
             ]
 
         sort_keys = {
             'updated': lambda pull_request: (
-                pull_request.updated_at,
-                pull_request.repo_owner,
-                pull_request.repo_name,
-                pull_request.number,
+                pull_request['updated_at'],
+                pull_request['repo_owner'],
+                pull_request['repo_name'],
+                pull_request['number'],
             ),
             'created': lambda pull_request: (
-                pull_request.created_at,
-                pull_request.repo_owner,
-                pull_request.repo_name,
-                pull_request.number,
+                pull_request['created_at'],
+                pull_request['repo_owner'],
+                pull_request['repo_name'],
+                pull_request['number'],
             ),
         }
         sort_field = sort.replace('_desc', '').replace('_asc', '')

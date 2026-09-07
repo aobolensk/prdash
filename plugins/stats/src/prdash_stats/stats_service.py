@@ -2,12 +2,9 @@
 import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 
-from django.core.cache import cache
-from django.utils import timezone
-
-from dashboard.github_client import GitHubClient, PullRequestInfo
+from prdash.plugin_cache import cache_get as _cache_get, cache_set as _cache_set
 
 
 @dataclass
@@ -64,7 +61,7 @@ class ReviewStats:
 @dataclass
 class AgingPR:
     """A PR with age info."""
-    pr: PullRequestInfo
+    pr: dict
     age_days: int = 0
 
 
@@ -126,10 +123,11 @@ class StatsService:
 
     CACHE_TTL = 300  # 5 minutes
 
-    def __init__(self, client: GitHubClient):
-        self.client = client
-        self.username = client.get_username()
-        self._pr_cache: dict[str, list[PullRequestInfo]] = {}
+    def __init__(self, registrar, user_id):
+        self.registrar = registrar
+        self.user_id = user_id
+        self.username = registrar.get_username(user_id) or ''
+        self._pr_cache: dict[str, list[dict]] = {}
         self._reviews_cache: dict[str, dict] = {}
 
     def _repos_hash(self, repos: list[tuple[str, str]]) -> str:
@@ -144,9 +142,8 @@ class StatsService:
     def _get_cutoff_date(self, days: int) -> datetime:
         """Get cutoff date; days=-1 means all time (epoch)."""
         if days == -1:
-            import datetime as _dt
-            return datetime.min.replace(tzinfo=_dt.timezone.utc)
-        return timezone.now() - timedelta(days=days)
+            return datetime.min.replace(tzinfo=dt_timezone.utc)
+        return datetime.now(dt_timezone.utc) - timedelta(days=days)
 
     def _get_week_start(self, dt: datetime) -> datetime:
         """Get the Monday of the week for a date."""
@@ -159,7 +156,7 @@ class StatsService:
         self,
         repos: list[tuple[str, str]],
         days: int,
-    ) -> list[PullRequestInfo]:
+    ) -> list[dict]:
         """Get PRs for stats computation with caching."""
         cache_key = f"prs_stats:{self.username}:{self._repos_hash(repos)}:{days}"
         if cache_key in self._pr_cache:
@@ -169,13 +166,13 @@ class StatsService:
         cutoff_date = self._get_cutoff_date(days)
 
         # Get open PRs
-        open_prs = self.client.get_all_user_prs(repos)
+        open_prs = self.registrar.fetch_open_prs(self.user_id, repos)
         all_prs.extend(open_prs)
 
         # Get merged PRs
-        merged_prs = self.client.get_all_merged_prs(repos)
+        merged_prs = self.registrar.fetch_merged_prs(self.user_id, repos)
         # Filter to date range
-        merged_prs = [pr for pr in merged_prs if pr.merged_at and pr.merged_at >= cutoff_date]
+        merged_prs = [pr for pr in merged_prs if pr['merged_at'] and pr['merged_at'] >= cutoff_date]
         all_prs.extend(merged_prs)
 
         self._pr_cache[cache_key] = all_prs
@@ -187,14 +184,14 @@ class StatsService:
         if cache_key in self._reviews_cache:
             return self._reviews_cache[cache_key]
 
-        reviews_data = self.client.get_reviews_for_stats(repos, self.username, days)
+        reviews_data = self.registrar.fetch_reviews_for_stats(self.user_id, repos, self.username, days)
         self._reviews_cache[cache_key] = reviews_data
         return reviews_data
 
     def get_quick_stats(self, repos: list[tuple[str, str]], days: int = 30) -> QuickStats:
         """Get quick summary statistics."""
         cache_key = self._get_cache_key("quick", repos, days)
-        cached = cache.get(cache_key)
+        cached = _cache_get(cache_key)
         if cached:
             return cached
 
@@ -207,10 +204,10 @@ class StatsService:
         merge_time_count = 0
 
         for pr in prs:
-            if pr.merged_at:
-                if pr.merged_at >= cutoff_date:
+            if pr['merged_at']:
+                if pr['merged_at'] >= cutoff_date:
                     merged_count += 1
-                    merge_time = pr.merged_at - pr.created_at
+                    merge_time = pr['merged_at'] - pr['created_at']
                     total_merge_time += merge_time
                     merge_time_count += 1
             else:
@@ -225,7 +222,7 @@ class StatsService:
             merged_count=merged_count,
             avg_merge_time_hours=avg_merge_hours
         )
-        cache.set(cache_key, stats, self.CACHE_TTL)
+        _cache_set(cache_key, stats, self.CACHE_TTL)
         return stats
 
     def _get_day_start(self, dt: datetime) -> datetime:
@@ -235,17 +232,17 @@ class StatsService:
     def get_velocity_stats(self, repos: list[tuple[str, str]], days: int = 90) -> VelocityStats:
         """Get PR velocity statistics over time."""
         cache_key = self._get_cache_key("velocity", repos, days)
-        cached = cache.get(cache_key)
+        cached = _cache_get(cache_key)
         if cached:
             return cached
 
         prs = self.get_prs_for_stats(repos, days)
-        now = timezone.now()
+        now = datetime.now(dt_timezone.utc)
 
         if days == -1:
             if prs:
-                earliest_dates = [pr.created_at for pr in prs]
-                earliest_dates.extend(pr.merged_at for pr in prs if pr.merged_at)
+                earliest_dates = [pr['created_at'] for pr in prs]
+                earliest_dates.extend(pr['merged_at'] for pr in prs if pr['merged_at'])
                 cutoff_date = min(earliest_dates)
             else:
                 cutoff_date = self._get_cutoff_date(days)
@@ -273,23 +270,23 @@ class StatsService:
 
         for pr in prs:
             # Count opened PRs
-            if pr.created_at >= cutoff_date:
+            if pr['created_at'] >= cutoff_date:
                 if use_daily:
-                    period_start = self._get_day_start(pr.created_at)
+                    period_start = self._get_day_start(pr['created_at'])
                 else:
-                    period_start = self._get_week_start(pr.created_at)
+                    period_start = self._get_week_start(pr['created_at'])
                 if period_start in periods:
                     periods[period_start].opened += 1
-                    periods[period_start].lines_added += pr.additions
-                    periods[period_start].lines_removed += pr.deletions
-                    total_lines += pr.additions + pr.deletions
+                    periods[period_start].lines_added += pr['additions']
+                    periods[period_start].lines_removed += pr['deletions']
+                    total_lines += pr['additions'] + pr['deletions']
 
             # Count merged PRs
-            if pr.merged_at and pr.merged_at >= cutoff_date:
+            if pr['merged_at'] and pr['merged_at'] >= cutoff_date:
                 if use_daily:
-                    period_start = self._get_day_start(pr.merged_at)
+                    period_start = self._get_day_start(pr['merged_at'])
                 else:
-                    period_start = self._get_week_start(pr.merged_at)
+                    period_start = self._get_week_start(pr['merged_at'])
                 if period_start in periods:
                     periods[period_start].merged += 1
 
@@ -304,13 +301,13 @@ class StatsService:
             total_lines_changed=total_lines,
             granularity=granularity
         )
-        cache.set(cache_key, stats, self.CACHE_TTL)
+        _cache_set(cache_key, stats, self.CACHE_TTL)
         return stats
 
     def get_review_stats(self, repos: list[tuple[str, str]], days: int = 30) -> ReviewStats:
         """Get review activity statistics."""
         cache_key = self._get_cache_key("reviews", repos, days)
-        cached = cache.get(cache_key)
+        cached = _cache_get(cache_key)
         if cached:
             return cached
 
@@ -335,19 +332,19 @@ class StatsService:
             avg_turnaround_hours=avg_turnaround,
             top_reviewed_by=top_reviewed_by
         )
-        cache.set(cache_key, stats, self.CACHE_TTL)
+        _cache_set(cache_key, stats, self.CACHE_TTL)
         return stats
 
     def get_health_stats(self, repos: list[tuple[str, str]], days: int = -1) -> HealthStats:
         """Get PR health statistics."""
         cache_key = self._get_cache_key("health", repos, 0)
-        cached = cache.get(cache_key)
+        cached = _cache_get(cache_key)
         if cached:
             return cached
 
         all_prs = self.get_prs_for_stats(repos, days)
-        open_prs = [pr for pr in all_prs if not pr.merged_at]
-        now = timezone.now()
+        open_prs = [pr for pr in all_prs if not pr['merged_at']]
+        now = datetime.now(dt_timezone.utc)
 
         aging_7: list[AgingPR] = []
         aging_14: list[AgingPR] = []
@@ -355,7 +352,7 @@ class StatsService:
         failing_ci_prs = []
 
         for pr in open_prs:
-            age = now - pr.created_at
+            age = now - pr['created_at']
             age_days = age.days
             aging_pr = AgingPR(pr=pr, age_days=age_days)
 
@@ -367,7 +364,7 @@ class StatsService:
                 aging_7.append(aging_pr)
 
             # Collect failing CI PRs
-            if pr.ci_status.state in ('failure', 'error'):
+            if pr['ci_status']['state'] in ('failure', 'error'):
                 failing_ci_prs.append(pr)
 
         # Sort by age descending
@@ -384,13 +381,13 @@ class StatsService:
             aging_14_count=len(aging_14),
             aging_30_count=len(aging_30),
         )
-        cache.set(cache_key, stats, self.CACHE_TTL)
+        _cache_set(cache_key, stats, self.CACHE_TTL)
         return stats
 
     def get_repo_stats(self, repos: list[tuple[str, str]], days: int = 30) -> RepoStats:
         """Get per-repository statistics."""
         cache_key = self._get_cache_key("repos", repos, days)
-        cached = cache.get(cache_key)
+        cached = _cache_get(cache_key)
         if cached:
             return cached
 
@@ -402,13 +399,13 @@ class StatsService:
             repo_data[(owner, name)] = RepoData(owner=owner, name=name)
 
         for pr in prs:
-            key = (pr.repo_owner, pr.repo_name)
+            key = (pr['repo_owner'], pr['repo_name'])
             if key not in repo_data:
-                repo_data[key] = RepoData(owner=pr.repo_owner, name=pr.repo_name)
+                repo_data[key] = RepoData(owner=pr['repo_owner'], name=pr['repo_name'])
 
             rd = repo_data[key]
-            if pr.merged_at:
-                if pr.merged_at >= cutoff_date:
+            if pr['merged_at']:
+                if pr['merged_at'] >= cutoff_date:
                     rd.merged_count += 1
             else:
                 rd.open_count += 1
@@ -427,13 +424,13 @@ class StatsService:
             total_open=total_open,
             total_merged=total_merged
         )
-        cache.set(cache_key, stats, self.CACHE_TTL)
+        _cache_set(cache_key, stats, self.CACHE_TTL)
         return stats
 
     def get_collaboration_stats(self, repos: list[tuple[str, str]], days: int = 30) -> CollaborationStats:
         """Get collaboration statistics."""
         cache_key = self._get_cache_key("collab", repos, days)
-        cached = cache.get(cache_key)
+        cached = _cache_get(cache_key)
         if cached:
             return cached
 
@@ -461,7 +458,7 @@ class StatsService:
             who_reviews_you=who_reviews_you,
             who_you_review=who_you_review
         )
-        cache.set(cache_key, stats, self.CACHE_TTL)
+        _cache_set(cache_key, stats, self.CACHE_TTL)
         return stats
 
     def get_all_stats(self, repos: list[tuple[str, str]], days: int = 30) -> dict:

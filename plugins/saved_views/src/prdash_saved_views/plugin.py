@@ -2,12 +2,11 @@
 
 import json
 
-from django.http import HttpResponseNotAllowed, JsonResponse
-
 from prdash.plugin_api import (
     HEAD_SLOT,
     PLUGIN_API_VERSION,
     PR_LIST_FILTERS_SLOT,
+    PluginJsonResponse,
     PluginMetadata,
     TemplateResource,
     UIContribution,
@@ -55,7 +54,7 @@ class SavedViewsPlugin:
 
     def categories_context(self, request, config):
         categories = []
-        for item in self.registrar.list_user_data(request.user, CATEGORY_COLLECTION):
+        for item in self.registrar.list_user_data(request.user_id, CATEGORY_COLLECTION):
             try:
                 query = self._validate_query(item.value['query'])
             except (KeyError, TypeError, ValueError):
@@ -71,8 +70,10 @@ class SavedViewsPlugin:
         if request.method == 'PUT':
             return self.order_categories(request)
         if request.method in ('GET', 'HEAD'):
-            return JsonResponse({'categories': self.categories_context(request, config)['saved_search_categories']})
-        return HttpResponseNotAllowed(['GET', 'POST', 'PUT', 'DELETE'])
+            return PluginJsonResponse({
+                'categories': self.categories_context(request, config)['saved_search_categories'],
+            })
+        return PluginJsonResponse({'error': 'Method not allowed'}, status=405)
 
     def save_category(self, request):
         try:
@@ -80,25 +81,25 @@ class SavedViewsPlugin:
             name = self._validate_category_name(payload.get('name'))
             query = self._validate_query(payload.get('query'))
         except ValueError as error:
-            return JsonResponse({'error': str(error)}, status=400)
+            return PluginJsonResponse({'error': str(error)}, status=400)
 
         self.registrar.set_user_data(
-            request.user,
+            request.user_id,
             CATEGORY_COLLECTION,
             name,
             {'query': query},
         )
-        return JsonResponse({'category': {'name': name, 'query': query}})
+        return PluginJsonResponse({'category': {'name': name, 'query': query}})
 
     def delete_category(self, request):
         try:
             payload = self._parse_payload(request)
             name = self._validate_category_name(payload.get('name'))
         except ValueError as error:
-            return JsonResponse({'error': str(error)}, status=400)
+            return PluginJsonResponse({'error': str(error)}, status=400)
 
-        deleted = self.registrar.delete_user_data(request.user, CATEGORY_COLLECTION, name)
-        return JsonResponse({'deleted': deleted})
+        deleted = self.registrar.delete_user_data(request.user_id, CATEGORY_COLLECTION, name)
+        return PluginJsonResponse({'deleted': deleted})
 
     def order_categories(self, request):
         try:
@@ -107,10 +108,10 @@ class SavedViewsPlugin:
             if not isinstance(names, list):
                 raise ValueError('Category order is required')
             names = [self._validate_category_name(name) for name in names]
-            self.registrar.reorder_user_data(request.user, CATEGORY_COLLECTION, names)
+            self.registrar.reorder_user_data(request.user_id, CATEGORY_COLLECTION, names)
         except ValueError as error:
-            return JsonResponse({'error': str(error)}, status=400)
-        return JsonResponse({'ordered': True})
+            return PluginJsonResponse({'error': str(error)}, status=400)
+        return PluginJsonResponse({'ordered': True})
 
     @staticmethod
     def _parse_payload(request):

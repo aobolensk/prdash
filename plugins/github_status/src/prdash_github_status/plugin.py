@@ -14,6 +14,15 @@ from .status import get_github_status
 PACKAGE = 'prdash_github_status'
 
 
+def _status_context(status):
+    return {
+        'known': status.known,
+        'healthy': status.healthy,
+        'outage': status.outage,
+        'degraded_components': [str(component) for component in status.degraded_components],
+    }
+
+
 class GitHubStatusPlugin:
     metadata = PluginMetadata(
         plugin_id='github-status',
@@ -33,7 +42,7 @@ class GitHubStatusPlugin:
             template=TemplateResource(PACKAGE, 'templates/header.html'),
         ))
         registrar.register_route('status', self.status)
-        registrar.register_service('status', get_github_status)
+        registrar.register_service('status', lambda args: _status_context(get_github_status()))
 
     def shutdown(self):
         pass
@@ -42,7 +51,7 @@ class GitHubStatusPlugin:
     def status(request, config):
         return PluginTemplateResponse(
             template=TemplateResource(PACKAGE, 'templates/status.html'),
-            context={'status': get_github_status()},
+            context={'status': _status_context(get_github_status())},
         )
 
 
