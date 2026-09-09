@@ -12,7 +12,6 @@ import sys
 from typing import Mapping
 
 from prdash.plugin_api import (
-    PR_LIST_PROCESS_HOOK,
     PR_LIST_QUERY_HOOK,
     PluginJsonResponse,
     PluginNoContent,
