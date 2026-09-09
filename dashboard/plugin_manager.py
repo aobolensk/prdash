@@ -53,6 +53,7 @@ SOURCE_MANIFEST = 'prdash-plugin.json'
 IDENTIFIER_PATTERN = re.compile(r'^[a-z0-9][a-z0-9_-]*$')
 
 DEFAULT_CALL_TIMEOUT = getattr(settings, 'PRDASH_PLUGIN_CALL_TIMEOUT', 10.0)
+DEFAULT_ROUTE_TIMEOUT = getattr(settings, 'PRDASH_PLUGIN_ROUTE_TIMEOUT', 120.0)
 SHUTDOWN_TIMEOUT = 5.0
 
 _SAFE_REQUEST_HEADERS = {
@@ -880,7 +881,7 @@ class PluginManager:
                 'route': route,
                 'request': self._request_info_dict(request),
                 'config': config,
-            })
+            }, timeout=DEFAULT_ROUTE_TIMEOUT)
             return self._response_from_payload(
                 result.get('response', {}), plugin_id, config, request,
             )
