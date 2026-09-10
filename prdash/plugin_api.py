@@ -108,6 +108,14 @@ class PluginNoContent:
 
 
 @dataclass(frozen=True)
+class PluginStreamChunk:
+    """Progress event a route generator may yield before returning its final response; kind/data are opaque to the host."""
+
+    kind: str
+    data: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class RequestInfo:
     """A serializable snapshot of the parts of a request plugin code may use."""
 
@@ -156,6 +164,7 @@ class PullRequestListContext:
 
 
 Hook = Callable[[Any, Any, Mapping[str, Any]], Any]
+# May also be a generator function yielding PluginStreamChunk values before returning its response.
 Route = Callable[[RequestInfo, Mapping[str, Any]], Any]
 UIContextProvider = Callable[[RequestInfo, Mapping[str, Any]], Mapping[str, Any]]
 

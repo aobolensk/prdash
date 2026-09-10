@@ -225,6 +225,25 @@ class PluginManager:
                 worker.popen.kill()
                 worker.popen.wait(timeout=SHUTDOWN_TIMEOUT)
 
+    def _call_loop(self, worker, call_id, timeout):
+        """Yield stream_chunks, result via StopIteration.value. Timeout resets per message: max-silence, not total."""
+        while True:
+            message = read_message(worker.popen.stdout, timeout=timeout)
+            msg_type = message.get('type')
+            if msg_type == 'result':
+                if message.get('id') != call_id:
+                    raise ProtocolError('Plugin worker response id mismatch')
+                if not message.get('ok', False):
+                    raise PluginCallError(message.get('error') or 'Plugin call failed')
+                return message.get('result', {})
+            if msg_type == 'callback':
+                self._service_callback(worker, message)
+                continue
+            if msg_type == 'stream_chunk':
+                yield message.get('chunk', {})
+                continue
+            raise ProtocolError(f'Unexpected plugin worker message type: {msg_type!r}')
+
     def _call(self, worker, op, params, timeout=DEFAULT_CALL_TIMEOUT):
         with worker.lock:
             if worker.dead:
@@ -234,19 +253,34 @@ class PluginManager:
                 write_message(worker.popen.stdin, {
                     'type': 'call', 'id': call_id, 'op': op, 'params': params,
                 })
+                loop = self._call_loop(worker, call_id, timeout)
                 while True:
-                    message = read_message(worker.popen.stdout, timeout=timeout)
-                    msg_type = message.get('type')
-                    if msg_type == 'result':
-                        if message.get('id') != call_id:
-                            raise ProtocolError('Plugin worker response id mismatch')
-                        if not message.get('ok', False):
-                            raise PluginCallError(message.get('error') or 'Plugin call failed')
-                        return message.get('result', {})
-                    if msg_type == 'callback':
-                        self._service_callback(worker, message)
-                        continue
-                    raise ProtocolError(f'Unexpected plugin worker message type: {msg_type!r}')
+                    try:
+                        next(loop)
+                    except StopIteration as stop:
+                        return stop.value
+            except (ProtocolError, OSError) as error:
+                worker.dead = True
+                raise PluginCallError(str(error)) from error
+
+    def _call_streaming(self, worker, op, params, timeout=DEFAULT_CALL_TIMEOUT):
+        """Like _call, but yields ('chunk', dict) per chunk then ('result', dict); holds worker.lock until the caller fully consumes or closes it."""
+        with worker.lock:
+            if worker.dead:
+                raise PluginCallError('Plugin worker is no longer running')
+            call_id = worker.next_call_id()
+            try:
+                write_message(worker.popen.stdin, {
+                    'type': 'call', 'id': call_id, 'op': op, 'params': params,
+                })
+                loop = self._call_loop(worker, call_id, timeout)
+                while True:
+                    try:
+                        chunk = next(loop)
+                    except StopIteration as stop:
+                        yield ('result', stop.value)
+                        return
+                    yield ('chunk', chunk)
             except (ProtocolError, OSError) as error:
                 worker.dead = True
                 raise PluginCallError(str(error)) from error
@@ -891,11 +925,43 @@ class PluginManager:
             logger.exception('Plugin %s failed in route %s', plugin_id, route)
             return HttpResponseServerError('')
 
+    def dispatch_stream(self, request, plugin_id, route):
+        """Yield {'chunk': {...}} dicts, then exactly one {'final': True, 'response'/'error': ...} dict; all JSON serializable for SSE relay."""
+        enabled_ids = self._enabled_ids(request.user, request)
+        if plugin_id not in enabled_ids:
+            raise Http404
+        worker = self.load(plugin_id, enabled_ids)
+        if worker is None:
+            yield {'final': True, 'error': 'Plugin worker is not available'}
+            return
+        if route not in worker.manifest['routes']:
+            raise Http404
+        config = dict(self._state_map(request.user, request)[plugin_id].config)
+        try:
+            for kind, payload in self._call_streaming(worker, 'invoke_route', {
+                'route': route,
+                'request': self._request_info_dict(request),
+                'config': config,
+            }, timeout=DEFAULT_ROUTE_TIMEOUT):
+                if kind == 'chunk':
+                    yield {'chunk': payload}
+                else:
+                    response = self._stream_final_payload(
+                        payload.get('response', {}), plugin_id, config, request,
+                    )
+                    yield {'final': True, 'response': response}
+        except Http404:
+            raise
+        except Exception:
+            logger.exception('Plugin %s failed in stream route %s', plugin_id, route)
+            yield {'final': True, 'error': 'stream_failed'}
+
     @staticmethod
-    def _response_from_payload(response, plugin_id, config, request):
+    def _render_payload(response, plugin_id, config, request):
+        """Shared by _response_from_payload and _stream_final_payload; headers are excluded here since they only apply to real HttpResponse objects."""
         response_type = response.get('type')
         if response_type == 'not_found':
-            raise Http404
+            return {'type': 'not_found'}
         if response_type == 'template':
             context = dict(response.get('context', {}))
             for key, nested in response.get('nested', {}).items():
@@ -905,23 +971,44 @@ class PluginManager:
             context['plugin_config'] = config
             template = engines['django'].from_string(response['source'])
             content = template.render(context, request)
-            return HttpResponse(content, status=response.get('status', 200))
+            return {'type': 'html', 'content': content, 'status': response.get('status', 200)}
         if response_type == 'json':
-            http_response = JsonResponse(response.get('data'), status=response.get('status', 200), safe=False)
+            return {'type': 'json', 'data': response.get('data'), 'status': response.get('status', 200)}
+        if response_type == 'redirect':
+            return {
+                'type': 'redirect', 'url': response['url'], 'permanent': response.get('permanent', False),
+            }
+        if response_type == 'no_content':
+            return {'type': 'no_content', 'status': response.get('status', 204)}
+        raise TypeError(f'Unknown plugin route response type: {response_type!r}')
+
+    @classmethod
+    def _stream_final_payload(cls, response, plugin_id, config, request):
+        return cls._render_payload(response, plugin_id, config, request)
+
+    @classmethod
+    def _response_from_payload(cls, response, plugin_id, config, request):
+        rendered = cls._render_payload(response, plugin_id, config, request)
+        response_type = rendered['type']
+        if response_type == 'not_found':
+            raise Http404
+        if response_type == 'html':
+            return HttpResponse(rendered['content'], status=rendered['status'])
+        if response_type == 'json':
+            http_response = JsonResponse(rendered['data'], status=rendered['status'], safe=False)
             for key, value in response.get('headers', {}).items():
                 http_response[key] = value
             return http_response
         if response_type == 'redirect':
             response_class = (
-                HttpResponsePermanentRedirect if response.get('permanent') else HttpResponseRedirect
+                HttpResponsePermanentRedirect if rendered['permanent'] else HttpResponseRedirect
             )
-            return response_class(response['url'])
+            return response_class(rendered['url'])
         if response_type == 'no_content':
-            http_response = HttpResponse(status=response.get('status', 204))
+            http_response = HttpResponse(status=rendered['status'])
             for key, value in response.get('headers', {}).items():
                 http_response[key] = value
             return http_response
-        raise TypeError(f'Unknown plugin route response type: {response_type!r}')
 
     def get_service(self, user, plugin_id, name, args=None, request=None):
         """Call an enabled plugin service by its scoped name and return its result."""

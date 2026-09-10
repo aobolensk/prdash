@@ -10,6 +10,11 @@ urlpatterns = [
         views.plugin_route,
         name='plugin_route',
     ),
+    path(
+        'plugins/<slug:plugin_id>/<slug:route>/stream/',
+        views.plugin_route_stream,
+        name='plugin_route_stream',
+    ),
     path('prs/', views.pr_list, name='pr_list'),
     path('prs/merged/', views.merged_pr_list, name='merged_pr_list'),
     path('prs/by-author/', views.author_pr_list, name='author_pr_list'),

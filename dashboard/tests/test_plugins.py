@@ -990,3 +990,92 @@ class ReferencePluginIntegrationTests(TestCase):
 
         self.assertEqual(query.parameters['draft'], 'ready')
         self.assertTrue(query.affects_count)
+
+
+_STREAM_PLUGIN_SOURCE = '''
+from prdash.plugin_api import PluginJsonResponse, PluginMetadata, PluginStreamChunk
+
+
+class StreamPlugin:
+    metadata = PluginMetadata(
+        plugin_id='stream-plugin',
+        name='Stream Plugin',
+        version='1.0.0',
+        api_version='2.0',
+    )
+
+    def initialize(self, registrar):
+        registrar.register_route('progress', self.progress)
+        registrar.register_route('plain', self.plain)
+
+    def shutdown(self):
+        pass
+
+    @staticmethod
+    def progress(request, config):
+        yield PluginStreamChunk(kind='step', data={'label': 'first'})
+        yield PluginStreamChunk(kind='step', data={'label': 'second'})
+        return PluginJsonResponse({'done': True})
+
+    @staticmethod
+    def plain(request, config):
+        return PluginJsonResponse({'ok': True})
+'''
+
+
+class PluginStreamingRuntimeTests(TestCase):
+    """Exercises the real worker subprocess, unlike PluginRuntimeTests above (stale _load_object mocking predating the subprocess isolation refactor)."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='streamuser', password='testpass')
+        self.factory = RequestFactory()
+
+        tempdir = TemporaryDirectory()
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name)
+        plugin_dir = root / 'stream-plugin'
+        plugin_dir.mkdir()
+        (plugin_dir / 'stream_plugin.py').write_text(_STREAM_PLUGIN_SOURCE, encoding='utf-8')
+        manifest = {
+            'id': 'stream-plugin',
+            'name': 'Stream Plugin',
+            'version': '1.0.0',
+            'api_version': '2.0',
+            'entrypoint': 'stream_plugin:StreamPlugin',
+        }
+        (plugin_dir / 'prdash-plugin.json').write_text(json.dumps(manifest), encoding='utf-8')
+
+        self._override = override_settings(PRDASH_PLUGIN_PATHS=[str(root)])
+        self._override.enable()
+        self.addCleanup(self._override.disable)
+
+        self.manager = PluginManager()
+        self.manager.discover()
+        self.addCleanup(self.manager._shutdown_all)
+        self.manager.configure_user(self.user, {'stream-plugin'})
+
+    def _request(self):
+        request = self.factory.post('/plugins/stream-plugin/progress/')
+        request.user = self.user
+        return request
+
+    def test_generator_route_streams_chunks_then_final_response(self):
+        events = list(self.manager.dispatch_stream(self._request(), 'stream-plugin', 'progress'))
+
+        self.assertEqual(
+            [event['chunk'] for event in events if 'chunk' in event],
+            [{'kind': 'step', 'data': {'label': 'first'}}, {'kind': 'step', 'data': {'label': 'second'}}],
+        )
+        final = events[-1]
+        self.assertTrue(final.get('final'))
+        self.assertEqual(final['response'], {'type': 'json', 'data': {'done': True}, 'status': 200})
+
+    def test_non_generator_route_still_works_via_dispatch(self):
+        response = self.manager.dispatch(self._request(), 'stream-plugin', 'plain')
+
+        self.assertEqual(json.loads(response.content), {'ok': True})
+
+    def test_non_generator_route_also_works_via_dispatch_stream(self):
+        events = list(self.manager.dispatch_stream(self._request(), 'stream-plugin', 'plain'))
+
+        self.assertEqual(events, [{'final': True, 'response': {'type': 'json', 'data': {'ok': True}, 'status': 200}}])

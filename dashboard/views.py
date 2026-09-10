@@ -1,5 +1,5 @@
 from django.shortcuts import render, redirect, get_object_or_404
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse, StreamingHttpResponse
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
 from django.core.cache import cache
@@ -623,3 +623,19 @@ def save_plugins(request):
 def plugin_route(request, plugin_id, route):
     """Dispatch a request to a route registered by an enabled plugin."""
     return plugin_manager.dispatch(request, plugin_id, route)
+
+
+@login_required
+def plugin_route_stream(request, plugin_id, route):
+    """Dispatch a request to a plugin route, relaying its progress chunks over SSE."""
+    def event_stream():
+        try:
+            for event in plugin_manager.dispatch_stream(request, plugin_id, route):
+                yield f'data: {json.dumps(event)}\n\n'
+        except Http404:
+            yield f'data: {json.dumps({"final": True, "error": "not_found"})}\n\n'
+
+    response = StreamingHttpResponse(event_stream(), content_type='text/event-stream')
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'
+    return response

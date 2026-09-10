@@ -8,6 +8,7 @@ using the framing defined in prdash.plugin_protocol.
 
 from dataclasses import asdict, dataclass, field, is_dataclass
 from importlib import import_module, resources
+import inspect
 import sys
 from typing import Mapping
 
@@ -16,6 +17,7 @@ from prdash.plugin_api import (
     PluginJsonResponse,
     PluginNoContent,
     PluginRedirect,
+    PluginStreamChunk,
     PluginTemplateResponse,
     PluginUserData,
     PullRequestListContext,
@@ -305,14 +307,27 @@ def _serialize_response(response):
     )
 
 
-def _invoke_route(registration, params):
+def _invoke_route(registration, params, emit_chunk):
     callback = registration.routes.get(params['route'])
     if callback is None:
         return {'response': {'type': 'not_found'}}
     request = _build_request_info(params['request'])
     config = params.get('config', {})
     response = callback(request, config)
+    if inspect.isgenerator(response):
+        response = _drain_stream(response, emit_chunk)
     return {'response': _serialize_response(response)}
+
+
+def _drain_stream(generator, emit_chunk):
+    while True:
+        try:
+            chunk = next(generator)
+        except StopIteration as stop:
+            return stop.value
+        if not isinstance(chunk, PluginStreamChunk):
+            raise TypeError('Streaming plugin routes must yield PluginStreamChunk values')
+        emit_chunk({'kind': chunk.kind, 'data': dict(chunk.data)})
 
 
 def _invoke_ui_context(registration, params):
@@ -352,6 +367,10 @@ def main():
         call_id = message['id']
         op = message['op']
         params = message.get('params', {})
+
+        def emit_chunk(chunk, _call_id=call_id):
+            write_message(stdout, {'type': 'stream_chunk', 'id': _call_id, 'chunk': chunk})
+
         try:
             if op == 'initialize':
                 plugin, registration = _initialize(conn, params)
@@ -359,7 +378,7 @@ def main():
             elif op == 'invoke_hook':
                 result = _invoke_hook(registration, params)
             elif op == 'invoke_route':
-                result = _invoke_route(registration, params)
+                result = _invoke_route(registration, params, emit_chunk)
             elif op == 'invoke_ui_context':
                 result = _invoke_ui_context(registration, params)
             elif op == 'invoke_service':
