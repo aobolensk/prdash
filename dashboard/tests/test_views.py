@@ -91,6 +91,18 @@ class RepoInputParserTests(TestCase):
         self.assertEqual(owner, 'owner')
         self.assertEqual(name, 'dotgit')
 
+    def test_https_url_with_dot_in_repo_name(self):
+        """Test HTTPS URL where the repo name itself contains a dot."""
+        owner, name = _parse_repo_input('https://github.com/foo/bar.baz')
+        self.assertEqual(owner, 'foo')
+        self.assertEqual(name, 'bar.baz')
+
+    def test_https_url_with_leading_dot_repo_name(self):
+        """Test HTTPS URL for a repo name starting with a dot."""
+        owner, name = _parse_repo_input('https://github.com/foo/.github')
+        self.assertEqual(owner, 'foo')
+        self.assertEqual(name, '.github')
+
 
 class HomeViewTests(TestCase):
     """Tests for home view."""

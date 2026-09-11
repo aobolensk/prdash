@@ -79,7 +79,7 @@ def _parse_repo_input(repo_input):
     repo_input = repo_input.strip()
 
     # GitHub URL patterns
-    url_pattern = r'github\.com[:/]([^/]+)/([^/\.]+?)(?:\.git)?/?$'
+    url_pattern = r'github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$'
     match = re.search(url_pattern, repo_input)
     if match:
         return match.group(1).strip(), match.group(2).strip()
