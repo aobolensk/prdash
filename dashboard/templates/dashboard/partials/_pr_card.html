@@ -108,6 +108,7 @@
                 {% if pr.mergeable == 'CONFLICTING' %}
                     <span class="pr-conflicts">&#9888; Conflicts</span>
                 {% endif %}
+                {% plugin_slot 'pr_card.badges' pr=pr %}
                 {% if pr.linked_issues or pr.branch_name %}
                     <span class="pr-branch-group">
                         {% if pr.linked_issues %}
