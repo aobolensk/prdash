@@ -3,6 +3,12 @@
 
 {% block title %}{{ page_title }}{% endblock %}
 
+{% block header_left %}
+    <button type="button" id="sidebar-toggle" class="btn btn-icon" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+    </button>
+{% endblock %}
+
 {% block content %}
 <div class="dashboard-layout"
      id="dashboard-layout"
@@ -15,45 +21,53 @@
                class="sidebar-link {% if active_tab == 'open' or active_tab == 'merged' %}active{% endif %}"
                data-tab="my_prs"
                data-url-all="{% url 'dashboard:pr_list' %}"
+               title="My PRs"
                hx-get="{% if current_repo %}{% url 'dashboard:repo_pr_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:pr_list' %}{% endif %}"
                hx-target="#pr-content"
                hx-swap="innerHTML"
                hx-push-url="true">
-                My PRs <span class="sidebar-count" data-count="my_prs"{% if pr_counts.my_prs is None %} hidden{% endif %}>{{ pr_counts.my_prs }}</span>
+                <svg class="sidebar-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M13 6h3a2 2 0 0 1 2 2v7"></path><line x1="6" y1="9" x2="6" y2="21"></line></svg>
+                <span class="sidebar-label">My PRs <span class="sidebar-count" data-count="my_prs"{% if pr_counts.my_prs is None %} hidden{% endif %}>{{ pr_counts.my_prs }}</span></span>
             </a>
             <a href="{% url 'dashboard:author_pr_list' %}"
                class="sidebar-link {% if active_tab == 'author' or active_tab == 'author_merged' %}active{% endif %}"
                data-tab="author_prs"
                data-url-all="{% url 'dashboard:author_pr_list' %}"
+               title="PRs by Author"
                hx-get="{% url 'dashboard:author_pr_list' %}"
                hx-target="#pr-content"
                hx-swap="innerHTML"
                hx-push-url="true">
-                PRs by Author
+                <svg class="sidebar-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                <span class="sidebar-label">PRs by Author</span>
             </a>
             <a href="{% if current_repo %}{% url 'dashboard:repo_review_requests_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:review_requests_list' %}{% endif %}"
                class="sidebar-link {% if active_tab == 'review_requests' %}active{% endif %}"
                data-tab="review_requests"
                data-url-all="{% url 'dashboard:review_requests_list' %}"
+               title="Review Requests"
                hx-get="{% if current_repo %}{% url 'dashboard:repo_review_requests_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:review_requests_list' %}{% endif %}"
                hx-target="#pr-content"
                hx-swap="innerHTML"
                hx-push-url="true">
-                Review Requests <span class="sidebar-count" data-count="review_requests"{% if pr_counts.review_requests is None %} hidden{% endif %}>{{ pr_counts.review_requests }}</span>
+                <svg class="sidebar-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                <span class="sidebar-label">Review Requests <span class="sidebar-count" data-count="review_requests"{% if pr_counts.review_requests is None %} hidden{% endif %}>{{ pr_counts.review_requests }}</span></span>
             </a>
             <a href="{% if current_repo %}{% url 'dashboard:repo_assigned_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:assigned_list' %}{% endif %}"
                class="sidebar-link {% if active_tab == 'assigned' %}active{% endif %}"
                data-tab="assigned"
                data-url-all="{% url 'dashboard:assigned_list' %}"
+               title="Assigned"
                hx-get="{% if current_repo %}{% url 'dashboard:repo_assigned_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:assigned_list' %}{% endif %}"
                hx-target="#pr-content"
                hx-swap="innerHTML"
                hx-push-url="true">
-                Assigned <span class="sidebar-count" data-count="assigned"{% if pr_counts.assigned is None %} hidden{% endif %}>{{ pr_counts.assigned }}</span>
+                <svg class="sidebar-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
+                <span class="sidebar-label">Assigned <span class="sidebar-count" data-count="assigned"{% if pr_counts.assigned is None %} hidden{% endif %}>{{ pr_counts.assigned }}</span></span>
             </a>
         </div>
 
-        <div class="sidebar-section">
+        <div class="sidebar-section sidebar-repos-section">
             <h2 class="sidebar-title">Repositories</h2>
             <form hx-post="{% url 'dashboard:add_repo' %}"
                   hx-target="#repo-list"

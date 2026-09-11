@@ -781,6 +781,25 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // Sidebar collapse toggle
+    const dashboardLayout = document.getElementById('dashboard-layout');
+    const sidebarToggle = document.getElementById('sidebar-toggle');
+
+    if (dashboardLayout) {
+        if (localStorage.getItem('sidebarCollapsed') === 'true') {
+            dashboardLayout.classList.add('sidebar-collapsed');
+        }
+    }
+
+    if (sidebarToggle && dashboardLayout) {
+        sidebarToggle.addEventListener('click', () => {
+            const collapsed = dashboardLayout.classList.toggle('sidebar-collapsed');
+            localStorage.setItem('sidebarCollapsed', collapsed);
+            sidebarToggle.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+            sidebarToggle.setAttribute('title', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+        });
+    }
+
     // HTMX swap fix: ensure content stays after swap
     document.body.addEventListener('htmx:afterSwap', function(evt) {
         if (evt.detail.target.innerHTML.length === 0 && evt.detail.xhr && evt.detail.xhr.responseText.length > 0) {

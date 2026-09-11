@@ -14,7 +14,10 @@
 <body>
     <header class="header">
         <div class="header-content">
-            <a href="{% url 'dashboard:home' %}" class="logo">PR Dashboard</a>
+            <div class="header-left">
+                {% block header_left %}{% endblock %}
+                <a href="{% url 'dashboard:home' %}" class="logo">PR Dashboard</a>
+            </div>
             <div class="header-actions">
                 <button id="theme-toggle" class="theme-toggle" aria-label="Toggle theme">
                     <span class="theme-icon-light">&#9728;</span>
