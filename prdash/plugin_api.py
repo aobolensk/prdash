@@ -109,7 +109,8 @@ class PluginNoContent:
 
 @dataclass(frozen=True)
 class PluginStreamChunk:
-    """Progress event a route generator may yield before returning its final response; kind/data are opaque to the host."""
+    """Progress event a route generator may yield before returning its final response; kind/data are opaque to
+    the host."""
 
     kind: str
     data: Mapping[str, Any] = field(default_factory=dict)

@@ -264,7 +264,8 @@ class PluginManager:
                 raise PluginCallError(str(error)) from error
 
     def _call_streaming(self, worker, op, params, timeout=DEFAULT_CALL_TIMEOUT):
-        """Like _call, but yields ('chunk', dict) per chunk then ('result', dict); holds worker.lock until the caller fully consumes or closes it."""
+        """Like _call, but yields ('chunk', dict) per chunk then ('result', dict); holds worker.lock until the
+        caller fully consumes or closes it."""
         with worker.lock:
             if worker.dead:
                 raise PluginCallError('Plugin worker is no longer running')
@@ -926,7 +927,8 @@ class PluginManager:
             return HttpResponseServerError('')
 
     def dispatch_stream(self, request, plugin_id, route):
-        """Yield {'chunk': {...}} dicts, then exactly one {'final': True, 'response'/'error': ...} dict; all JSON serializable for SSE relay."""
+        """Yield {'chunk': {...}} dicts, then exactly one {'final': True, 'response'/'error': ...} dict; all JSON
+        serializable for SSE relay."""
         enabled_ids = self._enabled_ids(request.user, request)
         if plugin_id not in enabled_ids:
             raise Http404
@@ -958,7 +960,8 @@ class PluginManager:
 
     @staticmethod
     def _render_payload(response, plugin_id, config, request):
-        """Shared by _response_from_payload and _stream_final_payload; headers are excluded here since they only apply to real HttpResponse objects."""
+        """Shared by _response_from_payload and _stream_final_payload; headers are excluded here since they only
+        apply to real HttpResponse objects."""
         response_type = response.get('type')
         if response_type == 'not_found':
             return {'type': 'not_found'}

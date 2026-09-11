@@ -1024,7 +1024,8 @@ class StreamPlugin:
 
 
 class PluginStreamingRuntimeTests(TestCase):
-    """Exercises the real worker subprocess, unlike PluginRuntimeTests above (stale _load_object mocking predating the subprocess isolation refactor)."""
+    """Exercises the real worker subprocess, unlike PluginRuntimeTests above (stale _load_object mocking predating
+    the subprocess isolation refactor)."""
 
     def setUp(self):
         self.user = User.objects.create_user(username='streamuser', password='testpass')
