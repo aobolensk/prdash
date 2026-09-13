@@ -1089,6 +1089,11 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     document.addEventListener('keydown', function(evt) {
+        if (evt.key === 'Enter' && !evt.isComposing && evt.target.id === 'author-picker-input') {
+            evt.preventDefault();
+            evt.target.form.requestSubmit();
+            return;
+        }
         if (evt.key === 'Escape') {
             const bar = document.getElementById('pr-search-bar');
             if (bar && !bar.hidden) {
