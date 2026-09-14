@@ -800,6 +800,20 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // Position collapsed sidebar tooltips relative to the viewport, since the
+    // sidebar's own overflow-y:auto clips any absolutely-positioned overflow.
+    document.querySelectorAll('.sidebar-link').forEach(function(link) {
+        const label = link.querySelector('.sidebar-label');
+        if (!label) {
+            return;
+        }
+        link.addEventListener('mouseenter', () => {
+            const rect = link.getBoundingClientRect();
+            label.style.left = (rect.right + 12) + 'px';
+            label.style.top = (rect.top + rect.height / 2) + 'px';
+        });
+    });
+
     // HTMX swap fix: ensure content stays after swap
     document.body.addEventListener('htmx:afterSwap', function(evt) {
         if (evt.detail.target.innerHTML.length === 0 && evt.detail.xhr && evt.detail.xhr.responseText.length > 0) {

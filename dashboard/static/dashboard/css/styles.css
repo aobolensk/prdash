@@ -335,7 +335,6 @@ a:hover {
     padding-right: 12px;
 }
 
-.sidebar-collapsed .sidebar-label,
 .sidebar-collapsed .sidebar-title,
 .sidebar-collapsed .sidebar-repos-section {
     display: none;
@@ -343,6 +342,33 @@ a:hover {
 
 .sidebar-collapsed .sidebar-link {
     justify-content: center;
+}
+
+.sidebar-collapsed .sidebar-label {
+    position: fixed;
+    padding: 6px 10px;
+    background-color: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    box-shadow: 0 2px 8px var(--color-shadow);
+    color: var(--color-text);
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-50%) translateX(-4px);
+    transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
+    z-index: 20;
+}
+
+.sidebar-collapsed .sidebar-link:hover .sidebar-label {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(-50%) translateX(0);
+}
+
+.sidebar-collapsed .sidebar-link.active .sidebar-count {
+    background-color: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
 }
 
 .sidebar-icon {
