@@ -275,6 +275,8 @@ const PR_SUGGEST_MAX_ITEMS = 8;
 // they're unaffected.
 const PR_SINGLETON_PILL_KINDS = ['repo', 'author'];
 
+const PR_UNDO_STACK_LIMIT = 100;
+
 function prCollectUniqueCandidates(elements, kind, getName, candidates) {
     const seen = new Set();
     elements.forEach(function(el) {
@@ -339,6 +341,7 @@ function prAddPill(field, kind, value) {
     pill.el = prCreatePillElement(field, pill);
     field.pills.push(pill);
     field.fieldEl.insertBefore(pill.el, field.inputEl);
+    prCommitUndoSnapshot(field);
     applyPrSearch();
 }
 
@@ -349,6 +352,48 @@ function prRemovePill(field, pill) {
     if (idx === -1) return;
     field.pills.splice(idx, 1);
     pill.el.remove();
+    prCommitUndoSnapshot(field);
+    applyPrSearch();
+}
+
+// Owned undo/redo: native undo only tracks the input's text, not the pills.
+function prCommitUndoSnapshot(field) {
+    const snapshot = prSearchFieldState(field);
+    const top = field.undoStack[field.undoStack.length - 1];
+    if (top && JSON.stringify(top) === JSON.stringify(snapshot)) return;
+    field.undoStack.push(snapshot);
+    if (field.undoStack.length > PR_UNDO_STACK_LIMIT) field.undoStack.shift();
+    field.redoStack = [];
+}
+
+function prFlushUndoTimer(field) {
+    clearTimeout(field.undoTimer);
+    field.undoTimer = null;
+    prCommitUndoSnapshot(field);
+}
+
+function prScheduleUndoSnapshot(field) {
+    clearTimeout(field.undoTimer);
+    field.undoTimer = setTimeout(function() {
+        field.undoTimer = null;
+        prCommitUndoSnapshot(field);
+    }, 500);
+}
+
+function prUndoField(field) {
+    prFlushUndoTimer(field);
+    if (field.undoStack.length < 2) return;
+    field.redoStack.push(field.undoStack.pop());
+    prSetSearchFieldState(field, field.undoStack[field.undoStack.length - 1]);
+    applyPrSearch();
+}
+
+function prRedoField(field) {
+    prFlushUndoTimer(field);
+    if (!field.redoStack.length) return;
+    const next = field.redoStack.pop();
+    field.undoStack.push(next);
+    prSetSearchFieldState(field, next);
     applyPrSearch();
 }
 
@@ -498,6 +543,16 @@ function prCommitSuggestion(field, candidate) {
 
 function prHandleFieldKeydown(field, evt) {
     const suggestOpen = field.suggestions.length > 0 && !field.suggestEl.hidden;
+    const key = evt.key.toLowerCase();
+    if ((evt.ctrlKey || evt.metaKey) && !evt.altKey && (key === 'z' || key === 'y')) {
+        evt.preventDefault();
+        if (key === 'y' || evt.shiftKey) {
+            prRedoField(field);
+        } else {
+            prUndoField(field);
+        }
+        return;
+    }
     if (evt.key === 'Escape') {
         evt.preventDefault();
         if (suggestOpen) {
@@ -543,10 +598,15 @@ function initPillField(fieldEl, inputEl, suggestEl, isExclude) {
         isExclude: !!isExclude,
         pills: [],
         suggestions: [],
-        activeIndex: -1
+        activeIndex: -1,
+        undoStack: [],
+        redoStack: [],
+        undoTimer: null
     };
+    prCommitUndoSnapshot(field);
     inputEl.addEventListener('input', function() {
         prUpdateSuggestions(field);
+        prScheduleUndoSnapshot(field);
         applyPrSearch();
     });
     inputEl.addEventListener('keydown', function(evt) {
