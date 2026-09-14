@@ -1102,6 +1102,16 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    // Without this, an hx-trigger="load" region stays on its loading skeleton forever on failure.
+    function showLoadFailure(evt) {
+        const target = evt.detail.target;
+        if (target && target.getAttribute('hx-trigger') === 'load') {
+            target.innerHTML = '<div class="alert alert-error">Failed to load content. Please try refreshing.</div>';
+        }
+    }
+    document.body.addEventListener('htmx:responseError', showLoadFailure);
+    document.body.addEventListener('htmx:sendError', showLoadFailure);
+
     document.addEventListener('keydown', function(evt) {
         if (evt.key === 'Enter' && !evt.isComposing && evt.target.id === 'author-picker-input') {
             evt.preventDefault();

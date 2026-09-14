@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from importlib import import_module, resources
 import inspect
 import sys
+import threading
 from typing import Mapping
 
 from prdash.plugin_api import (
@@ -42,16 +43,19 @@ class _Connection:
         self._stdin = stdin
         self._stdout = stdout
         self._next_id = 0
+        self._lock = threading.Lock()
 
     def callback(self, op, params):
-        self._next_id += 1
-        write_message(self._stdout, {
-            'type': 'callback',
-            'id': self._next_id,
-            'op': op,
-            'params': params,
-        })
-        message = read_message(self._stdin)
+        # Unsynchronized concurrent callers interleave frames on the shared pipe and hang.
+        with self._lock:
+            self._next_id += 1
+            write_message(self._stdout, {
+                'type': 'callback',
+                'id': self._next_id,
+                'op': op,
+                'params': params,
+            })
+            message = read_message(self._stdin)
         if message.get('type') != 'callback_result':
             raise ProtocolError(f'Expected callback_result, got {message.get("type")!r}')
         if not message.get('ok', False):
