@@ -6,7 +6,7 @@ than a convention. All communication with the host happens over stdin/stdout
 using the framing defined in prdash.plugin_protocol.
 """
 
-from dataclasses import asdict, dataclass, field, is_dataclass
+from dataclasses import asdict, dataclass, field, fields as dataclass_fields, is_dataclass
 from importlib import import_module, resources
 import inspect
 import sys
@@ -279,17 +279,36 @@ def _read_template_source(template):
     return resources.files(template.package).joinpath(template.path).read_text(encoding='utf-8')
 
 
+def _to_serializable(value):
+    # dataclasses.asdict() only walks declared fields, silently dropping @property
+    # values plugin authors commonly use for derived data (e.g. a full_name property).
+    if is_dataclass(value) and not isinstance(value, type):
+        result = {f.name: _to_serializable(getattr(value, f.name)) for f in dataclass_fields(value)}
+        for name, _ in inspect.getmembers(type(value), lambda member: isinstance(member, property)):
+            result[name] = _to_serializable(getattr(value, name))
+        return result
+    if isinstance(value, (list, tuple)):
+        return [_to_serializable(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _to_serializable(item) for key, item in value.items()}
+    return value
+
+
+def _template_context(context):
+    return {key: _to_serializable(value) for key, value in context.items()}
+
+
 def _serialize_response(response):
     if isinstance(response, PluginTemplateResponse):
         return {
             'type': 'template',
             'source': _read_template_source(response.template),
-            'context': dict(response.context),
+            'context': _template_context(response.context),
             'status': response.status,
             'nested': {
                 key: {
                     'source': _read_template_source(nested.template),
-                    'context': dict(nested.context),
+                    'context': _template_context(nested.context),
                 }
                 for key, nested in response.nested.items()
             },

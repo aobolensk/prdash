@@ -168,7 +168,7 @@
                 <div class="aging-item">
                     <span class="aging-badge aging-badge-danger">{{ aging.age_days }}d</span>
                     <a href="{{ aging.pr.url }}" target="_blank" class="aging-title">{{ aging.pr.title|truncatechars:50 }}</a>
-                    <span class="aging-repo">{{ aging.pr.repo_full_name }}</span>
+                    <span class="aging-repo">{{ aging.pr.repo_owner }}/{{ aging.pr.repo_name }}</span>
                 </div>
                 {% endfor %}
 
@@ -176,7 +176,7 @@
                 <div class="aging-item">
                     <span class="aging-badge aging-badge-warning">{{ aging.age_days }}d</span>
                     <a href="{{ aging.pr.url }}" target="_blank" class="aging-title">{{ aging.pr.title|truncatechars:50 }}</a>
-                    <span class="aging-repo">{{ aging.pr.repo_full_name }}</span>
+                    <span class="aging-repo">{{ aging.pr.repo_owner }}/{{ aging.pr.repo_name }}</span>
                 </div>
                 {% endfor %}
 
@@ -184,7 +184,7 @@
                 <div class="aging-item">
                     <span class="aging-badge">{{ aging.age_days }}d</span>
                     <a href="{{ aging.pr.url }}" target="_blank" class="aging-title">{{ aging.pr.title|truncatechars:50 }}</a>
-                    <span class="aging-repo">{{ aging.pr.repo_full_name }}</span>
+                    <span class="aging-repo">{{ aging.pr.repo_owner }}/{{ aging.pr.repo_name }}</span>
                 </div>
                 {% endfor %}
             </div>
@@ -201,7 +201,7 @@
                 <div class="aging-item">
                     <span class="aging-badge aging-badge-danger">CI</span>
                     <a href="{{ pr.url }}" target="_blank" class="aging-title">{{ pr.title|truncatechars:50 }}</a>
-                    <span class="aging-repo">{{ pr.repo_full_name }}</span>
+                    <span class="aging-repo">{{ pr.repo_owner }}/{{ pr.repo_name }}</span>
                 </div>
                 {% endfor %}
             </div>
