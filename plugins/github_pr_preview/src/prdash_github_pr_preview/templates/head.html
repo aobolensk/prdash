@@ -73,7 +73,7 @@
         if (replyButton) replyButton.nextElementSibling.classList.add('is-open');
     });
 
-    document.body.addEventListener('githubPRPreviewToast', function(event) {
+    document.addEventListener('githubPRPreviewToast', function(event) {
         const toast = event.detail.value || event.detail;
         window.showToast(toast.message, toast.type);
     });
