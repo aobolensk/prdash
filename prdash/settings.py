@@ -27,12 +27,13 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-!raeprbkuk44__yr(=^m=
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=True, cast=bool)
 
-ALLOWED_HOSTS = ['127.0.0.1', 'localhost']
+ALLOWED_HOSTS = ['127.0.0.1', 'localhost', 'wsl.localhost']
 
 # CSRF settings for development
 CSRF_TRUSTED_ORIGINS = [
     'http://127.0.0.1:8000',
     'http://localhost:8000',
+    'http://wsl.localhost:8000',
 ]
 
 
