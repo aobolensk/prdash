@@ -22,6 +22,7 @@ GITHUB_GRAPHQL_URL = 'https://api.github.com/graphql'
 GITHUB_PROVIDER = 'github'
 USERNAME_CACHE_TTL_SECONDS = 86400
 GRAPHQL_PR_BATCH_SIZE = 25
+GRAPHQL_REVIEW_PAGE_SIZE = 100
 GRAPHQL_RETRY_ATTEMPTS = 2
 GRAPHQL_RETRY_BACKOFF_SECONDS = 0.5
 GRAPHQL_TIMEOUT_SECONDS = 20
@@ -111,6 +112,10 @@ PR_GRAPHQL_FIELDS = '''
     }
     reviewDecision
     reviews(first: 100) {
+        pageInfo {
+            hasNextPage
+            endCursor
+        }
         nodes {
             author {
                 login
@@ -123,6 +128,10 @@ PR_GRAPHQL_FIELDS = '''
         totalCount
     }
     reviewThreads(first: 100) {
+        pageInfo {
+            hasNextPage
+            endCursor
+        }
         nodes {
             comments {
                 totalCount
@@ -692,6 +701,7 @@ class GitHubClient:
                 if not pr_data:
                     continue
 
+                self._paginate_pr_review_connections(pr_data, owner, name)
                 pr_info = self._parse_pr_from_graphql(pr_data, owner, name)
                 if pr_info:
                     result.append(pr_info)
@@ -779,11 +789,89 @@ class GitHubClient:
             if not pr_node:
                 continue
 
+            self._paginate_pr_review_connections(pr_node, owner, name)
             pr_info = self._parse_pr_from_graphql(pr_node, owner, name)
             if pr_info:
                 result.append(pr_info)
 
         return result
+
+    def _paginate_pr_review_connections(self, pr_data: dict, owner: str, name: str) -> None:
+        """Append remaining review and review-thread pages to a PR response."""
+        number = pr_data.get('number')
+        if not number:
+            return
+
+        reviews = pr_data.get('reviews')
+        review_threads = pr_data.get('reviewThreads')
+        review_cursor = self._next_cursor(reviews)
+        thread_cursor = self._next_cursor(review_threads)
+
+        while review_cursor or thread_cursor:
+            review_field = ''
+            if review_cursor:
+                review_field = f'''
+                    reviews(first: {GRAPHQL_REVIEW_PAGE_SIZE}, after: "{review_cursor}") {{
+                        pageInfo {{ hasNextPage endCursor }}
+                        nodes {{
+                            author {{ login avatarUrl }}
+                            state
+                            submittedAt
+                        }}
+                    }}
+                '''
+
+            thread_field = ''
+            if thread_cursor:
+                thread_field = f'''
+                    reviewThreads(first: {GRAPHQL_REVIEW_PAGE_SIZE}, after: "{thread_cursor}") {{
+                        pageInfo {{ hasNextPage endCursor }}
+                        nodes {{
+                            comments {{ totalCount }}
+                        }}
+                    }}
+                '''
+
+            query = f'''
+                query {{
+                    repository(owner: "{owner}", name: "{name}") {{
+                        pullRequest(number: {number}) {{
+                            {review_field}
+                            {thread_field}
+                        }}
+                    }}
+                }}
+            '''
+            data = self._post_graphql(
+                query,
+                owner=owner,
+                name=name,
+                operation='PR review pagination GraphQL query',
+            )
+            if data is None:
+                break
+
+            page_pr = data.get('data', {}).get('repository', {}).get('pullRequest')
+            if not page_pr:
+                break
+
+            if review_cursor:
+                page = page_pr.get('reviews', {})
+                reviews.setdefault('nodes', []).extend(page.get('nodes', []))
+                review_cursor = self._next_cursor(page)
+
+            if thread_cursor:
+                page = page_pr.get('reviewThreads', {})
+                review_threads.setdefault('nodes', []).extend(page.get('nodes', []))
+                thread_cursor = self._next_cursor(page)
+
+    @staticmethod
+    def _next_cursor(connection: Optional[dict]) -> Optional[str]:
+        """Return the cursor for a connection with another page."""
+        page_info = (connection or {}).get('pageInfo', {})
+        if page_info.get('hasNextPage'):
+            return page_info.get('endCursor')
+        return None
 
     def _parse_pr_from_graphql(
         self, pr_data: dict, owner: str, name: str
@@ -1664,12 +1752,18 @@ class GitHubClient:
                     "%s hit the %d-result cap for %s/%s; review stats may be truncated",
                     operation, MAX_SEARCH_RESULTS, owner, name,
                 )
+            for pr in nodes:
+                self._paginate_pr_review_connections(pr, owner, name)
             return nodes
 
         received_fields = '''
             number
             createdAt
             reviews(first: 100) {
+                pageInfo {
+                    hasNextPage
+                    endCursor
+                }
                 nodes {
                     author { login avatarUrl }
                     state
@@ -1682,6 +1776,10 @@ class GitHubClient:
             number
             author { login avatarUrl }
             reviews(first: 100) {
+                pageInfo {
+                    hasNextPage
+                    endCursor
+                }
                 nodes {
                     author { login }
                     state

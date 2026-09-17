@@ -5,7 +5,9 @@ from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.test import Client, TestCase
 from django.urls import reverse
+from django.utils import timezone
 
+from dashboard.github_client import CIStatus, PullRequestInfo, ReviewStatus
 from dashboard.models import PersonalAccessToken, TrackedRepository, UserPreferences
 from dashboard.views import _parse_repo_input
 
@@ -349,13 +351,25 @@ class HTMXResponseTests(TestCase):
         """Verify the current page is an editable page-number input."""
         UserPreferences.objects.create(user=self.user, pr_list_page_size=25)
         mock_client = MagicMock()
+        now = timezone.now()
         mock_client.get_all_user_prs.return_value = [
-            {
-                'number': number,
-                'title': f'PR {number}',
-                'url': f'https://github.com/owner/repo/pull/{number}',
-                'repo_full_name': 'owner/repo',
-            }
+            PullRequestInfo(
+                number=number,
+                title=f'PR {number}',
+                url=f'https://github.com/owner/repo/pull/{number}',
+                repo_owner='owner',
+                repo_name='repo',
+                author='testuser',
+                author_avatar='',
+                created_at=now,
+                updated_at=now,
+                labels=[],
+                ci_status=CIStatus(state='unknown'),
+                review_status=ReviewStatus(state='not_reviewed'),
+                draft=False,
+                additions=0,
+                deletions=0,
+            )
             for number in range(1, 27)
         ]
         mock_client.get_username.return_value = 'testuser'

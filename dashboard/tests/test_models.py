@@ -1,5 +1,5 @@
 from django.contrib.auth.models import User
-from django.db import IntegrityError
+from django.db import IntegrityError, connection
 from django.test import TestCase
 
 from dashboard.models import PersonalAccessToken, PluginConfiguration, PluginUserData, TrackedRepository
@@ -36,7 +36,12 @@ class PersonalAccessTokenModelTests(TestCase):
         """Verify the token is not stored in plaintext in the database."""
         PersonalAccessToken.objects.create(user=self.user, token='ghp_testtoken123456')
 
-        raw_value = PersonalAccessToken.objects.values_list('token', flat=True).get(user=self.user)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f'SELECT token FROM {PersonalAccessToken._meta.db_table} WHERE user_id = %s',
+                [self.user.id],
+            )
+            raw_value = cursor.fetchone()[0]
 
         self.assertNotEqual(raw_value, 'ghp_testtoken123456')
         self.assertNotIn('ghp_testtoken123456', raw_value)

@@ -420,6 +420,121 @@ class GitHubClientReviewStatusParsingTests(TestCase):
         self.assertEqual(status.state, 'approved')
 
 
+class GitHubClientReviewPaginationTests(TestCase):
+    """Tests that review connections are not truncated at the first page."""
+
+    @staticmethod
+    def _review(login, state, submitted_at):
+        return {
+            'author': {'login': login},
+            'state': state,
+            'submittedAt': submitted_at,
+        }
+
+    @patch.object(GitHubClient, '_post_graphql')
+    def test_pr_review_and_thread_connections_are_paginated(self, mock_post_graphql):
+        client = GitHubClient(user=None)
+        pr_data = {
+            'number': 42,
+            'reviews': {
+                'nodes': [self._review('reviewer1', 'APPROVED', '2024-01-01T10:00:00Z')],
+                'pageInfo': {'hasNextPage': True, 'endCursor': 'review_cursor_1'},
+            },
+            'comments': {'totalCount': 2},
+            'reviewThreads': {
+                'nodes': [{'comments': {'totalCount': 3}}],
+                'pageInfo': {'hasNextPage': True, 'endCursor': 'thread_cursor_1'},
+            },
+        }
+        mock_post_graphql.side_effect = [
+            {
+                'data': {
+                    'repository': {
+                        'pullRequest': {
+                            'reviews': {
+                                'nodes': [self._review(
+                                    'reviewer2', 'CHANGES_REQUESTED', '2024-01-01T11:00:00Z'
+                                )],
+                                'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                            },
+                            'reviewThreads': {
+                                'nodes': [{'comments': {'totalCount': 4}}],
+                                'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                            },
+                        }
+                    }
+                }
+            },
+        ]
+
+        client._paginate_pr_review_connections(pr_data, 'owner', 'repo')
+        status = client._parse_review_status_from_graphql(pr_data)
+
+        self.assertEqual(status.state, 'changes_requested')
+        self.assertEqual(status.comment_count, 9)
+        query = mock_post_graphql.call_args.args[0]
+        self.assertIn('after: "review_cursor_1"', query)
+        self.assertIn('after: "thread_cursor_1"', query)
+
+    @patch.object(GitHubClient, '_post_graphql')
+    def test_review_stats_include_reviews_after_first_page(self, mock_post_graphql):
+        client = GitHubClient(user=None)
+        client._get_token = MagicMock(return_value='token')
+
+        def response_for_query(query, **kwargs):
+            if 'reviewed-by:testuser' in query:
+                nodes = []
+            elif 'pullRequest(number: 1)' in query:
+                return {
+                    'data': {
+                        'repository': {
+                            'pullRequest': {
+                                'reviews': {
+                                    'nodes': [self._review(
+                                        'reviewer2', 'APPROVED', '2024-01-01T02:00:00Z'
+                                    )],
+                                    'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                                },
+                            }
+                        }
+                    }
+                }
+            else:
+                nodes = [{
+                    'number': 1,
+                    'createdAt': '2024-01-01T00:00:00Z',
+                    'reviews': {
+                        'nodes': [self._review(
+                            'reviewer1', 'COMMENTED', '2024-01-01T01:00:00Z'
+                        )],
+                        'pageInfo': {'hasNextPage': True, 'endCursor': 'stats_cursor'},
+                    },
+                }]
+            return {
+                'data': {
+                    'search': {
+                        'nodes': nodes,
+                        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                    }
+                }
+            }
+
+        mock_post_graphql.side_effect = response_for_query
+
+        stats = client.get_reviews_for_stats([('owner', 'repo')], 'testuser')
+
+        self.assertEqual(stats['reviews_received'], 2)
+        self.assertEqual(
+            {reviewer['username'] for reviewer in stats['top_reviewed_by']},
+            {'reviewer1', 'reviewer2'},
+        )
+        pagination_call = next(
+            call for call in mock_post_graphql.call_args_list
+            if 'pullRequest(number: 1)' in call.args[0]
+        )
+        self.assertIn('after: "stats_cursor"', pagination_call.args[0])
+
+
 class GitHubClientReviewStateFilterTests(TestCase):
     """Tests for filtering PRs by a user's review state."""
 

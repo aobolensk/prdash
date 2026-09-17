@@ -29,6 +29,7 @@ from django.http import (
     HttpResponseRedirect,
     HttpResponseServerError,
     JsonResponse,
+    RawPostDataException,
 )
 from django.template import engines
 from django.utils.safestring import mark_safe
@@ -212,12 +213,12 @@ class PluginManager:
             return
         try:
             with worker.lock:
-                worker.dead = True
                 try:
                     self._call(worker, 'shutdown', {}, timeout=SHUTDOWN_TIMEOUT)
                 except PluginCallError:
                     pass
         finally:
+            worker.dead = True
             worker.popen.terminate()
             try:
                 worker.popen.wait(timeout=SHUTDOWN_TIMEOUT)
@@ -777,7 +778,10 @@ class PluginManager:
         authenticated = bool(user and getattr(user, 'is_authenticated', False))
         body = ''
         if request.method in ('POST', 'PUT', 'PATCH'):
-            body = request.body.decode('utf-8', errors='replace')
+            try:
+                body = request.body.decode('utf-8', errors='replace')
+            except RawPostDataException:
+                pass
         return {
             'method': request.method,
             'path': request.path,
