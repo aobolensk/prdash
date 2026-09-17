@@ -798,8 +798,37 @@ function formatTimestampTitles(root = document) {
     });
 }
 
+function buildPluginSettingsNav() {
+    const nav = document.getElementById('settings-nav-plugins');
+    if (!nav) return;
+    nav.innerHTML = '';
+    document.querySelectorAll('#plugin-settings-container .plugin-settings-section').forEach(function(section) {
+        const link = document.createElement('a');
+        link.href = '#' + section.id;
+        link.className = 'sidebar-link sidebar-link-sub';
+        link.textContent = section.dataset.pluginName || section.id;
+        nav.appendChild(link);
+    });
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     formatTimestampTitles();
+    buildPluginSettingsNav();
+
+    // replaceState avoids polluting the back-stack that "Back to Dashboard" walks with history.back().
+    const settingsNav = document.querySelector('.settings-nav');
+    if (settingsNav) {
+        settingsNav.addEventListener('click', function(e) {
+            const link = e.target.closest('a[href^="#"]');
+            if (!link) return;
+            const href = link.getAttribute('href');
+            const target = document.getElementById(href.slice(1));
+            if (!target) return;
+            e.preventDefault();
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            history.replaceState(null, '', href);
+        });
+    }
     const initialLastUpdated = document.querySelector('.last-updated[data-updated]');
     if (initialLastUpdated) syncClockOffset(initialLastUpdated);
     formatLastUpdated();
@@ -892,6 +921,9 @@ document.addEventListener('DOMContentLoaded', function() {
         const target = evt.detail.target;
         if (target && target.id === 'pr-content') {
             syncPrSearchState();
+        }
+        if (target && target.id === 'plugin-settings-container') {
+            buildPluginSettingsNav();
         }
     });
 

@@ -4,13 +4,21 @@
 
 {% block content %}
 <div class="settings-layout">
+    <nav class="settings-nav">
+        <div class="sidebar-title">Categories</div>
+        <a href="#settings-pat" class="sidebar-link">Personal Access Token</a>
+        <a href="#settings-preferences" class="sidebar-link">Dashboard Preferences</a>
+        <a href="#settings-plugins" class="sidebar-link">Plugins</a>
+        <div id="settings-nav-plugins" class="settings-nav-subsection"></div>
+    </nav>
+
     <div class="settings-container">
         <div class="settings-header">
             <h1>Settings</h1>
             <a href="{% url 'dashboard:pr_list' %}" class="btn btn-secondary" id="back-to-dashboard-link">Back to Dashboard</a>
         </div>
 
-        <div class="settings-section">
+        <div class="settings-section" id="settings-pat">
             <h2>Personal Access Token <span class="settings-optional">(optional)</span></h2>
             <p class="settings-description">
                 Only needed for enterprise repos requiring SSO or additional permissions.
@@ -40,7 +48,7 @@
             </div>
         </div>
 
-        <div class="settings-section">
+        <div class="settings-section" id="settings-preferences">
             <h2>Dashboard Preferences</h2>
             <p class="settings-description">
                 Configure how the PR dashboard behaves.
@@ -51,7 +59,7 @@
             </div>
         </div>
 
-        <div class="settings-section">
+        <div class="settings-section" id="settings-plugins">
             <h2>Plugins</h2>
             <p class="settings-description">
                 Discovered plugins stay inactive until you enable them.

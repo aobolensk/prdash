@@ -32,6 +32,7 @@ from django.http import (
     RawPostDataException,
 )
 from django.template import engines
+from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
@@ -866,8 +867,9 @@ class PluginManager:
                 logger.exception('Plugin %s failed in hook %s', plugin_id, name)
         return self._hook_value_from_json(name, payload_value)
 
-    def render_slot(self, slot, template_context, **extra_context):
-        """Render enabled UI contributions for one template slot."""
+    def render_slot(self, slot, template_context, wrap=False, **extra_context):
+        """Render enabled UI contributions for one template slot
+        wrap=True tags each in an id/data-plugin-name container."""
         request = template_context.get('request')
         user = getattr(request, 'user', None)
         states, _, active_workers = self._activate_user_plugins(user, request)
@@ -899,7 +901,15 @@ class PluginManager:
                         raise TypeError('Plugin UI context providers must return a mapping')
                     context.update(provided)
                 template = engines['django'].from_string(ui['template_source'])
-                rendered.append(template.render(context, request))
+                output = template.render(context, request)
+                if wrap:
+                    output = format_html(
+                        '<div class="plugin-settings-section" id="plugin-settings-{}" data-plugin-name="{}">{}</div>',
+                        plugin_id,
+                        self.descriptors[plugin_id].name,
+                        mark_safe(output),
+                    )
+                rendered.append(output)
             except Exception:
                 logger.exception('Plugin %s failed to render slot %s', plugin_id, slot)
         return mark_safe(''.join(rendered))
