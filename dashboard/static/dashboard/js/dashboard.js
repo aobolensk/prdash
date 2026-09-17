@@ -895,6 +895,11 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    document.body.addEventListener('click', function(evt) {
+        const copyButton = evt.target.closest('.btn-copy-branch');
+        if (copyButton) copyBranchName(copyButton.dataset.branchName);
+    });
+
     // Browser back/forward restores a cached #pr-content snapshot (with any
     // baked-in highlights/hidden cards) without firing afterSwap, so
     // reconcile the search state here too.
