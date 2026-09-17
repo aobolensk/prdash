@@ -58,13 +58,13 @@ class PluginDiscoveryTests(TestCase):
             description='',
             entrypoint='unused:plugin',
             source='test',
-            api_version='2.0',
+            api_version='1.0',
         )
 
         loaded = manager.load('example', {'example'})
 
         self.assertIsNone(loaded)
-        self.assertIn('Requires plugin API 2.0', manager.descriptors['example'].load_error)
+        self.assertIn('Requires plugin API 1.0', manager.descriptors['example'].load_error)
 
 
 class _HookPlugin:

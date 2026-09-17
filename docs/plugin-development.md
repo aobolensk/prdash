@@ -1,15 +1,19 @@
 # Plugin development
 
-A plugin is a Python object with metadata, `initialize`, and `shutdown`. The same
-object can be loaded from a local source manifest or an installed wheel entry
-point.
+A plugin is a Python object with metadata, `initialize`, and `shutdown`, loaded
+inside its own worker subprocess from a local source manifest or an installed
+wheel entry point. Set `PluginMetadata.api_version` to `2.0`. For source plugins,
+set the manifest `api_version` to the same value.
 
 ## Minimal plugin
 
 ```python
-from django.http import HttpResponse
-
-from prdash.plugin_api import PLUGIN_API_VERSION, PluginMetadata
+from prdash.plugin_api import (
+    PLUGIN_API_VERSION,
+    PluginJsonResponse,
+    PluginMetadata,
+    RequestInfo,
+)
 
 
 class ExamplePlugin:
@@ -24,21 +28,50 @@ class ExamplePlugin:
     def initialize(self, registrar):
         self.registrar = registrar
         registrar.register_route('hello', self.hello)
-        registrar.register_service('message', 'hello')
+        registrar.register_service('message', self.message)
 
     def shutdown(self):
         pass
 
-    def hello(self, request, config):
-        return HttpResponse('hello')
+    def hello(self, request: RequestInfo, config):
+        if request.user_id is None:
+            return PluginJsonResponse({'error': 'Authentication required'}, status=401)
+        return PluginJsonResponse({'message': 'hello', 'username': request.username})
+
+    @staticmethod
+    def message(args):
+        return {'message': 'hello'}
 
 
 plugin = ExamplePlugin()
 ```
 
-Route callbacks receive the Django request and the current user configuration.
-Hook callbacks receive `(value, context, config)` and return the next value. A hook
-failure leaves the previous value in place.
+Route callbacks receive `(request, config)`, where `request` is a `RequestInfo`
+snapshot and `config` is the plugin configuration for the current user. They do
+not receive Django request or response objects. Return a plugin API response such as
+`PluginJsonResponse`, `PluginTemplateResponse`, `PluginRedirect`, or
+`PluginNoContent`. Service handlers receive their JSON-compatible argument
+mapping. Hook callbacks receive `(value, context, config)` and return the next
+value. A hook failure leaves the previous value in place.
+For pull request list hooks, `context` is a `PullRequestListContext`. Its
+`request` field is also a `RequestInfo`; the other fields describe the active
+tab, username, repository, query defaults, and current query.
+
+`RequestInfo` contains:
+
+| Field | Contents |
+| --- | --- |
+| `method`, `path` | HTTP method and path. |
+| `query_params` | Query parameter values as strings. Repeated keys are collapsed to the last value. |
+| `form_params` | POST form values as strings, with repeated keys collapsed to the last value. |
+| `form_lists` | POST form values as lists, preserving repeated keys. |
+| `body` | Decoded request body text for POST, PUT, or PATCH requests, otherwise an empty string. Use this to parse JSON request bodies. |
+| `headers` | Only `HX-Request`, `HX-Target`, `HX-Trigger`, `Content-Type`, `Accept`, and `Sec-Fetch-Mode`. |
+| `user_id`, `username`, `is_authenticated` | Basic user identity. `user_id` is `None` for unauthenticated requests. |
+
+Cookies, sessions, arbitrary headers, and the live Django user object are not
+included. Check `request.user_id` before calling registrar methods that take a
+user id.
 
 ## Source layout
 
@@ -60,7 +93,7 @@ my-plugin/
   "id": "example",
   "name": "Example",
   "version": "1.0.0",
-  "api_version": "1.0",
+  "api_version": "2.0",
   "description": "Small example plugin.",
   "entrypoint": "my_prdash_plugin.plugin:plugin",
   "python_path": "src"
@@ -132,8 +165,10 @@ registrar.register_ui(UIContribution(
 ))
 ```
 
-Templates receive the normal Django request context plus `plugin_id` and
-`plugin_config`. Public v1 slots are listed in `prdash.plugin_api`.
+Templates are rendered by the host and receive the normal Django template
+context plus `plugin_id` and `plugin_config`. The optional `context_provider`
+callback runs in the worker and receives `(request: RequestInfo, config)`. Public
+slots are listed in `prdash.plugin_api` and the dashboard templates.
 
 The core fuzzy search exposes a browser API after the
 `prdash:pullRequestSearchReady` event:
@@ -155,8 +190,8 @@ returns `false` when the current page has no PR search UI. Plugins should store
 this state unchanged and validate it again in their route handlers.
 
 For request-specific UI data, pass a context provider when registering a
-contribution. It receives `(request, config)` and returns a mapping merged into
-the template context:
+contribution. It receives `(request, config)` in the worker and returns a
+mapping merged into the template context by the host:
 
 ```python
 registrar.register_ui(UIContribution(
@@ -186,11 +221,15 @@ Deployment configuration is read once during initialization:
 self.timeout = registrar.deployment_config.get('timeout', 5)
 ```
 
-Per-user configuration remains plugin-owned:
+Per-user configuration remains plugin-owned. Registrar methods take the integer
+user id from `RequestInfo`, not a Django user object. Merge values before saving
+because `update_user_config` replaces the stored mapping:
 
 ```python
-config = registrar.get_user_config(request.user)
-registrar.update_user_config(request.user, {'timeout': 10})
+user_id = request.user_id
+if user_id is not None:
+    config = registrar.get_user_config(user_id)
+    registrar.update_user_config(user_id, {**config, 'timeout': 10})
 ```
 
 Validate user values before saving them. Never place secrets in template context
@@ -200,8 +239,10 @@ Use named user-data collections for user-created records rather than packing a
 growing list into plugin configuration:
 
 ```python
-registrar.set_user_data(request.user, 'saved_views', 'daily', {'query': {'author': 'octocat'}})
-saved_views = registrar.list_user_data(request.user, 'saved_views')
+user_id = request.user_id
+if user_id is not None:
+    registrar.set_user_data(user_id, 'saved_views', 'daily', {'query': {'author': 'octocat'}})
+    saved_views = registrar.list_user_data(user_id, 'saved_views')
 ```
 
 Collection names are simple identifiers and values must be JSON serializable.
@@ -211,5 +252,7 @@ Collections can also preserve a user-selected order. Pass every current key in
 its desired order:
 
 ```python
-registrar.reorder_user_data(request.user, 'saved_views', ('daily', 'weekly'))
+user_id = request.user_id
+if user_id is not None:
+    registrar.reorder_user_data(user_id, 'saved_views', ('daily', 'weekly'))
 ```
