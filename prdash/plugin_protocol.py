@@ -12,6 +12,7 @@ import struct
 import time
 
 _LENGTH_STRUCT = struct.Struct('>I')
+MAX_FRAME_SIZE = 16 * 1024 * 1024
 
 
 class ProtocolError(RuntimeError):
@@ -23,8 +24,10 @@ class ProtocolTimeout(ProtocolError):
 
 
 def write_message(stream, message):
-    """Write one JSON message to a binary stream, length-prefixed."""
+    """Write one JSON message, up to MAX_FRAME_SIZE bytes, to a binary stream."""
     body = json.dumps(message, default=_json_default).encode('utf-8')
+    if len(body) > MAX_FRAME_SIZE:
+        raise ProtocolError(f'Plugin protocol frame exceeds maximum size of {MAX_FRAME_SIZE} bytes')
     stream.write(_LENGTH_STRUCT.pack(len(body)))
     stream.write(body)
     stream.flush()
@@ -35,11 +38,14 @@ def read_message(stream, timeout=None):
 
     With `timeout` set, raises ProtocolTimeout if no complete message arrives
     within that many seconds (requires `stream` to support fileno()).
-    Raises ProtocolError if the stream is closed before a full message arrives.
+    Raises ProtocolError if the frame exceeds MAX_FRAME_SIZE or the stream is
+    closed before a full message arrives.
     """
     deadline = None if timeout is None else time.monotonic() + timeout
     header = _read_exact(stream, _LENGTH_STRUCT.size, deadline)
     (length,) = _LENGTH_STRUCT.unpack(header)
+    if length > MAX_FRAME_SIZE:
+        raise ProtocolError(f'Plugin protocol frame exceeds maximum size of {MAX_FRAME_SIZE} bytes')
     body = _read_exact(stream, length, deadline)
     try:
         return _restore_datetimes(json.loads(body.decode('utf-8')))
