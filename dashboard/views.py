@@ -167,8 +167,8 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
     )
     fetch_had_issues = bool(client.errors or client.warnings)
     stale_data = False
-    if fetch_had_issues and not prs:
-        # Total failure with no data at all: fall back to the last clean fetch.
+    if fetch_had_issues:
+        # A partial result is not a complete snapshot, so prefer the last clean fetch.
         cached_prs = cache.get(results_cache_key)
         if cached_prs is not None:
             prs = cached_prs
