@@ -778,7 +778,7 @@ class PluginManager:
         user = getattr(request, 'user', None)
         authenticated = bool(user and getattr(user, 'is_authenticated', False))
         body = ''
-        if request.method in ('POST', 'PUT', 'PATCH'):
+        if request.method in ('POST', 'PUT', 'PATCH', 'DELETE'):
             try:
                 body = request.body.decode('utf-8', errors='replace')
             except RawPostDataException:
