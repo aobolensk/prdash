@@ -22,4 +22,5 @@ jobs:
         with:
           python-version: '3.13'
       - run: pip install -r requirements.txt
+      - run: pip install -e plugins/github_status
       - run: python manage.py test

@@ -23,10 +23,15 @@ class GetGitHubStatusTests(TestCase):
         response.json.return_value = {'components': components}
         return response
 
-    @patch('prdash_github_status.status.cache')
+    @patch('prdash_github_status.status.cache_set')
+    @patch('prdash_github_status.status.cache_add')
+    @patch('prdash_github_status.status.cache_get')
     @patch('prdash_github_status.status.requests.get')
-    def test_all_tracked_components_operational(self, mock_get, mock_cache):
-        mock_cache.get.return_value = None
+    def test_all_tracked_components_operational(
+        self, mock_get, mock_cache_get, mock_cache_add, mock_cache_set,
+    ):
+        mock_cache_get.return_value = None
+        mock_cache_add.return_value = True
         mock_get.return_value = self._components_response([
             {'name': 'API Requests', 'status': 'operational'},
             {'name': 'Pull Requests', 'status': 'operational'},
@@ -39,10 +44,15 @@ class GetGitHubStatusTests(TestCase):
         self.assertEqual(status.degraded_components, [])
         self.assertTrue(status.known)
 
-    @patch('prdash_github_status.status.cache')
+    @patch('prdash_github_status.status.cache_set')
+    @patch('prdash_github_status.status.cache_add')
+    @patch('prdash_github_status.status.cache_get')
     @patch('prdash_github_status.status.requests.get')
-    def test_tracked_component_outage(self, mock_get, mock_cache):
-        mock_cache.get.return_value = None
+    def test_tracked_component_outage(
+        self, mock_get, mock_cache_get, mock_cache_add, mock_cache_set,
+    ):
+        mock_cache_get.return_value = None
+        mock_cache_add.return_value = True
         mock_get.return_value = self._components_response([
             {'name': 'API Requests', 'status': 'operational'},
             {'name': 'Pull Requests', 'status': 'partial_outage'},
@@ -57,10 +67,15 @@ class GetGitHubStatusTests(TestCase):
         self.assertEqual(status.outage_components[0].name, 'Pull Requests')
         self.assertEqual(status.outage_components[0].status, 'partial_outage')
 
-    @patch('prdash_github_status.status.cache')
+    @patch('prdash_github_status.status.cache_set')
+    @patch('prdash_github_status.status.cache_add')
+    @patch('prdash_github_status.status.cache_get')
     @patch('prdash_github_status.status.requests.get')
-    def test_tracked_component_degraded_performance_is_warning_not_outage(self, mock_get, mock_cache):
-        mock_cache.get.return_value = None
+    def test_tracked_component_degraded_performance_is_warning_not_outage(
+        self, mock_get, mock_cache_get, mock_cache_add, mock_cache_set,
+    ):
+        mock_cache_get.return_value = None
+        mock_cache_add.return_value = True
         mock_get.return_value = self._components_response([
             {'name': 'API Requests', 'status': 'degraded_performance'},
             {'name': 'Pull Requests', 'status': 'operational'},
@@ -74,11 +89,15 @@ class GetGitHubStatusTests(TestCase):
         self.assertEqual(len(status.warning_components), 1)
         self.assertEqual(status.warning_components[0].name, 'API Requests')
 
-    @patch('prdash_github_status.status.cache')
+    @patch('prdash_github_status.status.cache_set')
+    @patch('prdash_github_status.status.cache_add')
+    @patch('prdash_github_status.status.cache_get')
     @patch('prdash_github_status.status.requests.get')
-    def test_request_failure_returns_unknown(self, mock_get, mock_cache):
-        mock_cache.get.return_value = None
-        mock_cache.add.return_value = True
+    def test_request_failure_returns_unknown(
+        self, mock_get, mock_cache_get, mock_cache_add, mock_cache_set,
+    ):
+        mock_cache_get.return_value = None
+        mock_cache_add.return_value = True
         mock_get.side_effect = requests.exceptions.ConnectionError('boom')
 
         status = get_github_status()
@@ -86,33 +105,38 @@ class GetGitHubStatusTests(TestCase):
         self.assertFalse(status.known)
         self.assertTrue(status.healthy)
 
-    @patch('prdash_github_status.status.cache')
+    @patch('prdash_github_status.status.cache_set')
+    @patch('prdash_github_status.status.cache_add')
+    @patch('prdash_github_status.status.cache_get')
     @patch('prdash_github_status.status.requests.get')
-    def test_malformed_response_returns_unknown(self, mock_get, mock_cache):
-        mock_cache.get.return_value = None
-        mock_cache.add.return_value = True
+    def test_malformed_response_returns_unknown(
+        self, mock_get, mock_cache_get, mock_cache_add, mock_cache_set,
+    ):
+        mock_cache_get.return_value = None
+        mock_cache_add.return_value = True
         mock_get.return_value = self._components_response(None)
 
         status = get_github_status()
 
         self.assertFalse(status.known)
 
-    @patch('prdash_github_status.status.cache')
-    def test_uses_cache_when_present(self, mock_cache):
+    @patch('prdash_github_status.status.cache_get')
+    def test_uses_cache_when_present(self, mock_cache_get):
         cached_status = GitHubStatus(
             outage_components=[ComponentStatus('API Requests', 'major_outage')],
         )
-        mock_cache.get.return_value = cached_status
+        mock_cache_get.return_value = cached_status
 
         status = get_github_status()
 
         self.assertIs(status, cached_status)
 
-    @patch('prdash_github_status.status.cache')
+    @patch('prdash_github_status.status.cache_add')
+    @patch('prdash_github_status.status.cache_get')
     @patch('prdash_github_status.status.requests.get')
-    def test_concurrent_miss_does_not_fetch(self, mock_get, mock_cache):
-        mock_cache.get.return_value = None
-        mock_cache.add.return_value = False
+    def test_concurrent_miss_does_not_fetch(self, mock_get, mock_cache_get, mock_cache_add):
+        mock_cache_get.return_value = None
+        mock_cache_add.return_value = False
 
         status = get_github_status()
 
