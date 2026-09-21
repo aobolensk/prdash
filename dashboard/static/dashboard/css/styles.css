@@ -482,13 +482,17 @@ a:hover {
     flex-shrink: 0;
 }
 
-.repo-name {
+.repo-link {
     font-size: 13px;
     color: var(--color-text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     flex: 1;
+}
+
+.repo-link:hover {
+    text-decoration: none;
 }
 
 .repo-remove-btn {

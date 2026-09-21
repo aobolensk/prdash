@@ -291,6 +291,44 @@ class HTMXResponseTests(TestCase):
         self.assertIn('no-store', response['Cache-Control'])
 
     @patch('dashboard.views.GitHubClient')
+    def test_tracked_repo_link_preserves_tab_urls_and_repo_scope(self, mock_github_client):
+        """Render repository navigation and fetch only the selected repository."""
+        TrackedRepository.objects.create(user=self.user, owner='owner', name='repo')
+        mock_client = MagicMock()
+        mock_client.get_all_user_prs.return_value = []
+        mock_client.get_user_prs_for_repo.return_value = []
+        mock_client.get_username.return_value = 'testuser'
+        mock_client.errors = []
+        mock_client.warnings = []
+        mock_client.get_notification_triggers.return_value = {}
+        mock_github_client.return_value = mock_client
+
+        response = self.client.get(reverse('dashboard:pr_list'))
+        content = response.content.decode()
+        repo_urls = {
+            'my_prs': reverse('dashboard:repo_pr_list', args=['owner', 'repo']),
+            'merged': reverse('dashboard:repo_merged_pr_list', args=['owner', 'repo']),
+            'review_requests': reverse('dashboard:repo_review_requests_list', args=['owner', 'repo']),
+            'review_approved': reverse('dashboard:repo_review_approved_list', args=['owner', 'repo']),
+            'assigned': reverse('dashboard:repo_assigned_list', args=['owner', 'repo']),
+        }
+
+        self.assertContains(response, 'class="repo-link')
+        self.assertContains(response, f'href="{repo_urls["my_prs"]}"')
+        self.assertContains(response, 'data-repo="owner/repo"')
+        self.assertContains(response, f'hx-get="{repo_urls["my_prs"]}"')
+        self.assertContains(response, 'hx-target="#pr-content"')
+        self.assertContains(response, 'hx-swap="innerHTML"')
+        self.assertContains(response, 'hx-push-url="true"')
+        for tab, url in repo_urls.items():
+            self.assertIn(f'data-url-{tab}="{url}"', content)
+
+        response = self.client.get(repo_urls['my_prs'])
+
+        self.assertEqual(response.status_code, 200)
+        mock_client.get_user_prs_for_repo.assert_called_once_with('owner', 'repo')
+
+    @patch('dashboard.views.GitHubClient')
     def test_author_pr_list_fetches_selected_author(self, mock_github_client):
         """Verify the author tab fetches open PRs for the selected author."""
         mock_client = MagicMock()
