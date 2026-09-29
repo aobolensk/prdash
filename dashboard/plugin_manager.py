@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 from threading import RLock, Thread
+import time
 
 from django.conf import settings
 from django.db import OperationalError, ProgrammingError, transaction
@@ -98,6 +99,8 @@ class _WorkerHandle:
         self.lock = RLock()
         self.metadata = None
         self.manifest = None
+        self.fingerprint = None
+        self.fingerprint_checked_at = 0.0
         self.dead = False
         self._next_id = 0
 
@@ -180,6 +183,38 @@ class PluginManager:
                 self.discovery_errors.append(message)
             return
         self.descriptors[descriptor.plugin_id] = descriptor
+
+    FINGERPRINT_CHECK_INTERVAL = 1.0
+
+    @staticmethod
+    def _source_fingerprint(descriptor):
+        if not descriptor.python_path:
+            return None
+        root = Path(descriptor.python_path)
+        if not root.exists():
+            return None
+        latest = 0
+        for path in root.rglob('*.py'):
+            try:
+                latest = max(latest, path.stat().st_mtime_ns)
+            except OSError:
+                continue
+        return latest
+
+    def _worker_stale(self, worker, descriptor):
+        """Debounced dev-mode check: has the plugin source changed since this worker was
+        spawned? Debounced per worker since load() runs on every hook/route/service dispatch,
+        including recursively for each dependency. Skips the check (without consuming the
+        debounce window) while the worker is mid-call, so a stale worker is never torn down
+        while load() holds self._lock and the caller would otherwise block on worker.lock."""
+        now = time.monotonic()
+        if now - worker.fingerprint_checked_at < self.FINGERPRINT_CHECK_INTERVAL:
+            return False
+        if not worker.lock.acquire(blocking=False):
+            return False
+        worker.lock.release()
+        worker.fingerprint_checked_at = now
+        return self._source_fingerprint(descriptor) != worker.fingerprint
 
     @staticmethod
     def _api_compatible(required):
@@ -421,8 +456,10 @@ class PluginManager:
                 return None
 
             worker = self._workers.get(plugin_id)
-            if worker is not None and worker.dead:
-                self._workers.pop(plugin_id, None)
+            if worker is not None and (
+                worker.dead or (settings.DEBUG and self._worker_stale(worker, descriptor))
+            ):
+                self.unload(plugin_id)
                 worker = None
             if worker is not None:
                 try:
@@ -473,6 +510,8 @@ class PluginManager:
 
                 worker.metadata = plugin_metadata
                 worker.manifest = manifest
+                worker.fingerprint = self._source_fingerprint(descriptor)
+                worker.fingerprint_checked_at = time.monotonic()
                 self._workers[plugin_id] = worker
                 return worker
             except PluginActivationError as error:
