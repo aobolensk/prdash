@@ -118,6 +118,13 @@ class CollaborationStats:
     who_you_review: list[CollaboratorData] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class StatResult:
+    """Result for one stat section."""
+    data: object | None = None
+    error: str | None = None
+
+
 class StatsService:
     """Service for computing PR statistics."""
 
@@ -461,46 +468,49 @@ class StatsService:
         _cache_set(cache_key, stats, self.CACHE_TTL)
         return stats
 
-    def get_all_stats(self, repos: list[tuple[str, str]], days: int = 30) -> dict:
+    def get_all_stats(self, repos: list[tuple[str, str]], days: int = 30) -> dict[str, StatResult]:
         """Get all stats in one call, using parallel execution for independent methods."""
-        results = {}
-        self.get_prs_for_stats(repos, days)
+        results: dict[str, StatResult] = {}
+
+        try:
+            self.get_prs_for_stats(repos, days)
+        except Exception as error:
+            for stat_name in ('quick', 'velocity', 'health', 'repos'):
+                results[stat_name] = StatResult(error=self._format_error(error))
+
         try:
             self.get_reviews_data(repos, days)
-        except Exception:
-            pass
+        except Exception as error:
+            for stat_name in ('reviews', 'collaboration'):
+                results[stat_name] = StatResult(error=self._format_error(error))
 
         with ThreadPoolExecutor(max_workers=6) as executor:
             # Submit all stat collection tasks
+            stat_methods = {
+                'quick': self.get_quick_stats,
+                'velocity': self.get_velocity_stats,
+                'reviews': self.get_review_stats,
+                'health': self.get_health_stats,
+                'repos': self.get_repo_stats,
+                'collaboration': self.get_collaboration_stats,
+            }
             futures = {
-                executor.submit(self.get_quick_stats, repos, days): 'quick',
-                executor.submit(self.get_velocity_stats, repos, days): 'velocity',
-                executor.submit(self.get_review_stats, repos, days): 'reviews',
-                executor.submit(self.get_health_stats, repos, days): 'health',
-                executor.submit(self.get_repo_stats, repos, days): 'repos',
-                executor.submit(self.get_collaboration_stats, repos, days): 'collaboration',
+                executor.submit(method, repos, days): stat_name
+                for stat_name, method in stat_methods.items()
+                if stat_name not in results
             }
 
             # Collect results as they complete
             for future in as_completed(futures):
                 stat_name = futures[future]
                 try:
-                    results[stat_name] = future.result()
-                except Exception:
-                    # If a stat fails, return empty/default data for that stat
-                    # to prevent the entire stats page from breaking
-                    results[stat_name] = self._get_default_stat(stat_name)
+                    results[stat_name] = StatResult(data=future.result())
+                except Exception as error:
+                    results[stat_name] = StatResult(error=self._format_error(error))
 
         return results
 
-    def _get_default_stat(self, stat_name: str):
-        """Return default/empty stat object for error cases."""
-        defaults = {
-            'quick': QuickStats(),
-            'velocity': VelocityStats(),
-            'reviews': ReviewStats(),
-            'health': HealthStats(),
-            'repos': RepoStats(),
-            'collaboration': CollaborationStats(),
-        }
-        return defaults.get(stat_name, {})
+    @staticmethod
+    def _format_error(error: Exception) -> str:
+        """Return a useful message for a failed stat section."""
+        return str(error) or error.__class__.__name__

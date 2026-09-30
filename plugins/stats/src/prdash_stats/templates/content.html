@@ -1,6 +1,11 @@
 {% load dashboard_tags %}
 <!-- Quick Stats -->
 <div class="quick-stats-grid">
+    {% if quick_stats_error %}
+    <div class="stats-error stats-error-card">
+        Quick stats unavailable: {{ quick_stats_error }}
+    </div>
+    {% else %}
     <div class="stat-card">
         <div class="stat-value">{{ quick_stats.open_count }}</div>
         <div class="stat-label">Open PRs</div>
@@ -13,10 +18,17 @@
         <div class="stat-value">{{ quick_stats.avg_merge_time_hours|hours_display }}</div>
         <div class="stat-label">Avg Merge Time</div>
     </div>
+    {% endif %}
+    {% if velocity_stats_error %}
+    <div class="stats-error stats-error-card">
+        Velocity stats unavailable: {{ velocity_stats_error }}
+    </div>
+    {% else %}
     <div class="stat-card">
         <div class="stat-value">{{ velocity_stats.avg_prs_per_week|floatformat:1 }}</div>
         <div class="stat-label">PRs/Week</div>
     </div>
+    {% endif %}
 </div>
 
 <!-- Charts Row -->
@@ -25,6 +37,9 @@
     <div class="stats-section stats-section-wide">
         <h2 class="stats-section-title">Velocity</h2>
 
+        {% if velocity_stats_error %}
+        <p class="stats-error">Velocity stats unavailable: {{ velocity_stats_error }}</p>
+        {% else %}
         <div class="chart-row">
             <div class="chart-container">
                 <canvas id="velocityChart"></canvas>
@@ -52,6 +67,7 @@
                 <strong>{{ velocity_stats.avg_prs_per_period|floatformat:1 }}</strong> PRs/{% if velocity_stats.granularity == "day" %}day{% else %}week{% endif %} avg
             </span>
         </div>
+        {% endif %}
     </div>
 </div>
 
@@ -61,6 +77,9 @@
     <div class="stats-section">
         <h2 class="stats-section-title">Review Activity</h2>
 
+        {% if review_stats_error %}
+        <p class="stats-error">Review activity unavailable: {{ review_stats_error }}</p>
+        {% else %}
         <div class="review-summary">
             <div class="review-stat">
                 <div class="review-stat-value">{{ review_stats.reviews_given }}</div>
@@ -100,12 +119,16 @@
         {% else %}
         <p class="stats-empty">No review data available</p>
         {% endif %}
+        {% endif %}
     </div>
 
     <!-- Repository Breakdown -->
     <div class="stats-section">
         <h2 class="stats-section-title">Repository Breakdown</h2>
 
+        {% if repo_stats_error %}
+        <p class="stats-error">Repository stats unavailable: {{ repo_stats_error }}</p>
+        {% else %}
         {% if repo_stats.repos %}
         <div class="chart-container chart-container-small">
             <canvas id="repoChart"></canvas>
@@ -137,6 +160,7 @@
         {% else %}
         <p class="stats-empty">No repository data available</p>
         {% endif %}
+        {% endif %}
     </div>
 </div>
 
@@ -146,6 +170,9 @@
     <div class="stats-section">
         <h2 class="stats-section-title">PR Health</h2>
 
+        {% if health_stats_error %}
+        <p class="stats-error">PR health unavailable: {{ health_stats_error }}</p>
+        {% else %}
         <div class="health-summary health-summary-clickable">
             <button class="health-stat health-stat-warning" data-toggle="aging-section" type="button">
                 <div class="health-stat-value">{{ health_stats.aging_prs_count }}</div>
@@ -232,12 +259,16 @@
             });
         })();
         </script>
+        {% endif %}
     </div>
 
     <!-- Collaboration -->
     <div class="stats-section">
         <h2 class="stats-section-title">Collaboration</h2>
 
+        {% if collaboration_stats_error %}
+        <p class="stats-error">Collaboration stats unavailable: {{ collaboration_stats_error }}</p>
+        {% else %}
         <div class="collab-sections">
             {% if collaboration_stats.who_reviews_you %}
             <div class="leaderboard">
@@ -287,5 +318,6 @@
             <p class="stats-empty">No collaboration data available</p>
             {% endif %}
         </div>
+        {% endif %}
     </div>
 </div>
