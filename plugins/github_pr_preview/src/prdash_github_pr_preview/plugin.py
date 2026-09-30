@@ -48,6 +48,7 @@ class GitHubPRPreviewPlugin:
         registrar.register_route('reply', self.reply)
         registrar.register_route('update-branch', self.update_branch)
         registrar.register_route('merge', self.merge)
+        registrar.register_route('enable-auto-merge', self.enable_auto_merge)
 
     def shutdown(self):
         pass
@@ -337,16 +338,23 @@ class GitHubPRPreviewPlugin:
             return self._toast(self._error_message(response, 'GitHub could not publish the reply.'))
         return self._toast('Reply published.', 'success')
 
-    def _put_action(self, request, path_suffix, expected_status, error_message, success_message):
+    def _authorize_action(self, request):
+        """Returns ((owner, repository, number), token, None) or (None, None, toast_response)."""
         if request.method != 'POST':
-            return PluginJsonResponse({'error': 'Method not allowed'}, status=405)
+            return None, None, PluginJsonResponse({'error': 'Method not allowed'}, status=405)
         values = self._request_values(request)
         if values is None:
-            return self._toast('Could not determine this pull request.')
-        owner, repository, number = values
+            return None, None, self._toast('Could not determine this pull request.')
         token = self.registrar.resolve_github_token(request.user_id)
         if not token:
-            return self._toast('GitHub authentication is unavailable.')
+            return None, None, self._toast('GitHub authentication is unavailable.')
+        return values, token, None
+
+    def _put_action(self, request, path_suffix, expected_status, error_message, success_message):
+        values, token, error_response = self._authorize_action(request)
+        if error_response is not None:
+            return error_response
+        owner, repository, number = values
         try:
             response = requests.put(
                 f'{GITHUB_API_URL}/repos/{owner}/{repository}/pulls/{number}/{path_suffix}',
@@ -370,6 +378,39 @@ class GitHubPRPreviewPlugin:
             request, 'merge', 200,
             'GitHub could not merge this pull request.', 'Pull request merged.',
         )
+
+    def enable_auto_merge(self, request, config):
+        values, token, error_response = self._authorize_action(request)
+        if error_response is not None:
+            return error_response
+        node_id = request.form_params.get('node_id', '')
+        if not node_id:
+            return self._toast('Could not determine this pull request.')
+        try:
+            graphql_response = requests.post(
+                f'{GITHUB_API_URL}/graphql',
+                headers=self._headers(token),
+                json={
+                    'query': (
+                        'mutation($pullRequestId: ID!) { '
+                        'enablePullRequestAutoMerge(input: {pullRequestId: $pullRequestId}) { '
+                        'clientMutationId } }'
+                    ),
+                    'variables': {'pullRequestId': node_id},
+                },
+                timeout=15,
+            )
+        except requests.exceptions.RequestException:
+            return self._toast('GitHub could not enable auto-merge.')
+        try:
+            payload = graphql_response.json()
+        except ValueError:
+            payload = {}
+        errors = payload.get('errors')
+        if graphql_response.status_code != 200 or errors:
+            message = errors[0].get('message') if errors else 'GitHub could not enable auto-merge.'
+            return self._toast(message)
+        return self._toast('Auto-merge enabled.', 'success')
 
     def _preview_response(self, fragment_only, context):
         if fragment_only:

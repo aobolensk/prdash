@@ -22,16 +22,41 @@
             <input type="hidden" name="number" value="{{ number }}">
             <button type="submit" class="btn btn-secondary btn-small">Update branch</button>
         </form>
-        <form class="github-pr-preview-action-form"
-              hx-post="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='merge' %}"
-              hx-swap="none"
-              hx-confirm="Merge this pull request?">
-            {% csrf_token %}
-            <input type="hidden" name="owner" value="{{ owner }}">
-            <input type="hidden" name="repository" value="{{ repository }}">
-            <input type="hidden" name="number" value="{{ number }}">
-            <button type="submit" class="btn btn-primary btn-small">Merge</button>
-        </form>
+        <div class="github-pr-preview-merge-group">
+            <form class="github-pr-preview-action-form"
+                  hx-post="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='merge' %}"
+                  hx-swap="none"
+                  hx-confirm="Merge this pull request?">
+                {% csrf_token %}
+                <input type="hidden" name="owner" value="{{ owner }}">
+                <input type="hidden" name="repository" value="{{ repository }}">
+                <input type="hidden" name="number" value="{{ number }}">
+                <button type="submit" class="btn btn-primary btn-small github-pr-preview-merge-button">Merge</button>
+            </form>
+            <div class="github-pr-preview-merge-dropdown">
+                <button type="button" class="btn btn-primary btn-small github-pr-preview-merge-dropdown-toggle"
+                        aria-expanded="false" title="More merge options" aria-label="More merge options">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                </button>
+                <div class="github-pr-preview-merge-menu" hidden>
+                    {% if pull_request.auto_merge %}
+                    <span class="github-pr-preview-merge-menu-note">Auto-merge is enabled</span>
+                    {% else %}
+                    <form class="github-pr-preview-action-form"
+                          hx-post="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='enable-auto-merge' %}"
+                          hx-swap="none"
+                          hx-confirm="Enable auto-merge for this pull request?">
+                        {% csrf_token %}
+                        <input type="hidden" name="owner" value="{{ owner }}">
+                        <input type="hidden" name="repository" value="{{ repository }}">
+                        <input type="hidden" name="number" value="{{ number }}">
+                        <input type="hidden" name="node_id" value="{{ pull_request.node_id }}">
+                        <button type="submit" class="github-pr-preview-merge-menu-item">Enable auto-merge</button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
         {% endif %}
     </div>
 </div>

@@ -22,6 +22,15 @@
 .github-pr-preview-comment-form { background: var(--color-bg, #fff); border: 1px solid var(--color-border, #d0d7de); box-shadow: 0 3px 12px var(--color-shadow, #0003); display: none; padding: 6px; position: absolute; right: 0; top: 24px; width: 280px; z-index: 2; }.github-pr-preview-comment-form.is-open { display: block; }.github-pr-preview-comment-form textarea { background: var(--color-bg, #fff); border: 1px solid var(--color-border, #d0d7de); box-sizing: border-box; color: var(--color-text, #24292f); font: inherit; margin-bottom: 4px; resize: vertical; width: 100%; }.github-pr-preview-no-diff, .github-pr-preview-error { color: var(--color-text-secondary, #57606a); padding: 12px 0; }
 .github-pr-preview-existing-comment td { background: var(--color-bg-secondary, #f6f8fa); }.github-pr-preview-comment { background: var(--color-bg, #fff); border: 1px solid var(--color-border, #d0d7de); border-radius: 6px; color: var(--color-text, #24292f); font-family: sans-serif; margin: 6px 0; padding: 8px; white-space: normal; }.github-pr-preview-comment header { align-items: center; display: flex; font-size: 12px; gap: 8px; margin-bottom: 6px; }.github-pr-preview-comment header div { display: flex; flex: 1; justify-content: space-between; }.github-pr-preview-comment time { color: var(--color-text-secondary, #57606a); }.github-pr-preview-avatar { border-radius: 50%; height: 24px; width: 24px; }.github-pr-preview-comment p { margin: 0; }.github-pr-preview-reply { margin-left: 24px; }.github-pr-preview-reply-form { display: none; margin-top: 6px; }.github-pr-preview-reply-form.is-open { display: block; }.github-pr-preview-reply-form textarea { background: var(--color-bg, #fff); border: 1px solid var(--color-border, #d0d7de); box-sizing: border-box; color: var(--color-text, #24292f); font: inherit; margin-bottom: 4px; resize: vertical; width: 100%; }.github-pr-preview-unmatched-comments { border-top: 1px solid var(--color-border, #d0d7de); padding: 6px; }
 @media (max-width: 700px) { .github-pr-preview-shell { padding: 12px; }.github-pr-preview-dialog { max-width: 100vw; }.github-pr-preview-body { flex-direction: column; }.github-pr-preview-files { flex-basis: auto; max-height: 96px; position: static; width: 100%; }.github-pr-preview-diff { font-size: 11px; }.github-pr-preview-header { align-items: stretch; flex-direction: column; }.github-pr-preview-comment-form { width: 220px; } }
+.github-pr-preview-merge-group { align-items: center; display: inline-flex; }
+.github-pr-preview-merge-group .github-pr-preview-merge-button { border-bottom-right-radius: 0; border-top-right-radius: 0; }
+.github-pr-preview-merge-dropdown { position: relative; }
+.github-pr-preview-merge-dropdown-toggle { border-bottom-left-radius: 0; border-left: 1px solid #ffffff40; border-top-left-radius: 0; padding: 6px 8px; }
+.github-pr-preview-merge-menu { background: var(--color-bg, #fff); border: 1px solid var(--color-border, #d0d7de); border-radius: 6px; box-shadow: 0 4px 16px var(--color-shadow, #0003); display: flex; flex-direction: column; min-width: 200px; padding: 4px; position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; }
+.github-pr-preview-merge-menu[hidden] { display: none; }
+.github-pr-preview-merge-menu-item { background: none; border: 0; border-radius: 4px; color: var(--color-text, #24292f); cursor: pointer; font: inherit; padding: 6px 10px; text-align: left; white-space: nowrap; width: 100%; }
+.github-pr-preview-merge-menu-item:hover { background: var(--color-bg-secondary, #f6f8fa); }
+.github-pr-preview-merge-menu-note { color: var(--color-text-secondary, #57606a); font-size: 12px; padding: 6px 10px; white-space: nowrap; }
 </style>
 <script>
 (function() {
@@ -71,6 +80,26 @@
         if (cancelButton) cancelButton.closest('form').classList.remove('is-open');
         const replyButton = event.target.closest('.github-pr-preview-reply-button');
         if (replyButton) replyButton.nextElementSibling.classList.add('is-open');
+    });
+
+    document.addEventListener('click', function(event) {
+        const toggle = event.target.closest('.github-pr-preview-merge-dropdown-toggle');
+        if (toggle) {
+            const menu = toggle.closest('.github-pr-preview-merge-dropdown').querySelector('.github-pr-preview-merge-menu');
+            const wasOpen = !menu.hidden;
+            menu.hidden = wasOpen;
+            toggle.setAttribute('aria-expanded', String(!wasOpen));
+            return;
+        }
+        if (event.target.closest('.github-pr-preview-merge-menu-item')) {
+            event.target.closest('.github-pr-preview-merge-menu').hidden = true;
+            return;
+        }
+        const dropdown = event.target.closest('.github-pr-preview-merge-dropdown');
+        if (!dropdown) {
+            const menu = document.querySelector('.github-pr-preview-merge-menu');
+            if (menu) menu.hidden = true;
+        }
     });
 
     document.addEventListener('githubPRPreviewToast', function(event) {
