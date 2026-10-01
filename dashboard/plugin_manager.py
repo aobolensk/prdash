@@ -891,6 +891,7 @@ class PluginManager:
 
         context_payload = self._hook_context_to_json(hook_context)
         payload_value = self._hook_value_to_json(name, value)
+        current_value = value
         for _priority, plugin_id, config, worker in sorted(entries, key=lambda item: item[:2]):
             try:
                 result = self._call(worker, 'invoke_hook', {
@@ -901,10 +902,15 @@ class PluginManager:
                 })
                 new_value = result.get('value')
                 if new_value is not None:
+                    current_value = self._hook_value_from_json(name, new_value)
                     payload_value = new_value
             except PluginCallError:
                 logger.exception('Plugin %s failed in hook %s', plugin_id, name)
-        return self._hook_value_from_json(name, payload_value)
+            except Exception:
+                logger.exception(
+                    'Plugin %s returned a malformed result in hook %s', plugin_id, name,
+                )
+        return current_value
 
     def render_slot(self, slot, template_context, wrap=False, **extra_context):
         """Render enabled UI contributions for one template slot
