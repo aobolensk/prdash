@@ -6,7 +6,15 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from django.utils import timezone
 
-from dashboard.github_client import CIStatus, GRAPHQL_PR_BATCH_SIZE, GitHubClient, PullRequestInfo, ReviewStatus
+from dashboard.github_client import (
+    CIStatus,
+    GRAPHQL_PR_BATCH_SIZE,
+    GRAPHQL_RETRY_ATTEMPTS,
+    GRAPHQL_RETRY_BACKOFF_SECONDS,
+    GitHubClient,
+    PullRequestInfo,
+    ReviewStatus,
+)
 from dashboard.models import PersonalAccessToken
 
 
@@ -240,7 +248,54 @@ class GitHubClientErrorHandlingTests(TestCase):
 
         self.assertEqual(data, {'data': {'viewer': {'login': 'testuser'}}})
         self.assertEqual(mock_post.call_count, 2)
-        mock_sleep.assert_called_once_with(0.5)
+        mock_sleep.assert_called_once()
+        delay = mock_sleep.call_args[0][0]
+        self.assertGreaterEqual(delay, GRAPHQL_RETRY_BACKOFF_SECONDS)
+        self.assertLess(delay, 2 * GRAPHQL_RETRY_BACKOFF_SECONDS)
+
+    @patch('dashboard.github_client.time.sleep')
+    @patch('dashboard.github_client.requests.post')
+    def test_fetch_prs_batch_graphql_splits_on_exhausted_retries(self, mock_post, mock_sleep):
+        """A batch that keeps failing is split in half and retried, instead of dropping all PRs."""
+        ok_response = MagicMock(status_code=200)
+        ok_response.json.return_value = {
+            'data': {'repository': {'pr0': {'number': 1, 'title': 'ok'}}},
+        }
+        transient_response = MagicMock(status_code=502)
+        transient_response.text = 'bad gateway'
+        transient_response.headers = {}
+        # Whole batch of 2 fails every attempt; each half-batch of 1 succeeds immediately.
+        mock_post.side_effect = [transient_response] * GRAPHQL_RETRY_ATTEMPTS + [ok_response, ok_response]
+
+        with patch.object(self.client, '_get_token', return_value='token'), \
+                patch.object(self.client, '_parse_pr_from_graphql', side_effect=lambda data, o, n: data), \
+                patch.object(self.client, '_paginate_pr_review_connections'):
+            result = self.client._fetch_prs_batch_graphql('owner', 'repo', [1, 2])
+
+        self.assertEqual(len(result), 2)
+
+    @patch('dashboard.github_client.time.sleep')
+    @patch('dashboard.github_client.requests.post')
+    def test_fetch_pr_batch_multi_repo_splits_on_exhausted_retries(self, mock_post, mock_sleep):
+        """A multi-repo batch that keeps failing is split in half and retried."""
+        ok_response = MagicMock(status_code=200)
+        ok_response.json.return_value = {
+            'data': {'r0': {'pullRequest': {'number': 1, 'title': 'ok'}}},
+        }
+        transient_response = MagicMock(status_code=504)
+        transient_response.text = 'gateway timeout'
+        transient_response.headers = {}
+        mock_post.side_effect = [transient_response] * GRAPHQL_RETRY_ATTEMPTS + [ok_response, ok_response]
+
+        with patch.object(self.client, '_get_token', return_value='token'), \
+                patch.object(self.client, '_parse_pr_from_graphql', side_effect=lambda data, o, n: data), \
+                patch.object(self.client, '_paginate_pr_review_connections'):
+            result = self.client._fetch_pr_batch_multi_repo([
+                ('owner', 'repo1', 1),
+                ('owner', 'repo2', 2),
+            ])
+
+        self.assertEqual(len(result), 2)
 
 
 class GitHubClientCIStatusParsingTests(TestCase):

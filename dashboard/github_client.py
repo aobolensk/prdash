@@ -1,10 +1,12 @@
 """GitHub API client for fetching PR information."""
 import logging
+import random
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import partial
 from typing import Optional
 
 import requests
@@ -460,6 +462,27 @@ class GitHubClient:
                 pass
         cache.set(self._rate_limit_cooldown_key(), True, seconds)
 
+    @staticmethod
+    def _retry_delay(attempt: int) -> float:
+        """Backoff for retry `attempt`, jittered so parallel batches don't retry in lockstep."""
+        return GRAPHQL_RETRY_BACKOFF_SECONDS * attempt + random.uniform(0, GRAPHQL_RETRY_BACKOFF_SECONDS)
+
+    def _split_and_retry(self, items: list, fetch_fn) -> list:
+        """Halve `items` and retry each half via `fetch_fn` in parallel.
+
+        Used when a batched GraphQL call exhausts its retries, so a single bad
+        batch only drops the smallest possible slice instead of the whole thing.
+        """
+        if len(items) == 1:
+            return []
+        halves = list(self._iter_chunks(items, -(-len(items) // 2)))
+        result = []
+        with ThreadPoolExecutor(max_workers=len(halves)) as executor:
+            futures = [executor.submit(fetch_fn, half) for half in halves]
+            for future in as_completed(futures):
+                result.extend(future.result())
+        return result
+
     def _post_graphql(
         self,
         query: str,
@@ -502,7 +525,7 @@ class GitHubClient:
                     requests.exceptions.ChunkedEncodingError,
                 ))
                 if retryable and attempt < max_attempts:
-                    time.sleep(GRAPHQL_RETRY_BACKOFF_SECONDS * attempt)
+                    time.sleep(self._retry_delay(attempt))
                     continue
 
                 if isinstance(error, requests.exceptions.Timeout):
@@ -556,7 +579,7 @@ class GitHubClient:
                     repo_name,
                     summary,
                 )
-                time.sleep(GRAPHQL_RETRY_BACKOFF_SECONDS * attempt)
+                time.sleep(self._retry_delay(attempt))
                 continue
 
             # Handle non-200 HTTP response
@@ -687,7 +710,10 @@ class GitHubClient:
                 operation='PR details GraphQL query',
             )
             if data is None:
-                return []
+                return self._split_and_retry(
+                    pr_numbers,
+                    partial(self._fetch_prs_batch_graphql, owner, name),
+                )
 
             # Parse results
             result = []
@@ -775,7 +801,7 @@ class GitHubClient:
             operation='Multi-repo PR details GraphQL query',
         )
         if data is None:
-            return []
+            return self._split_and_retry(prs, self._fetch_pr_batch_multi_repo)
 
         result = []
         query_data = data.get('data', {})
