@@ -289,18 +289,14 @@ function prCollectUniqueCandidates(elements, kind, getName, candidates) {
     });
 }
 
-// Repo names come from the tracked repos baked into data-repos; label and
-// author names are read live off whatever PR cards are currently rendered,
-// so suggestions always reflect what's actually on the page.
+// Repo names come from the live sidebar; label and author names come from the
+// PR cards currently rendered.
 function prSuggestCandidates() {
-    const bar = document.getElementById('pr-search-bar');
     const content = document.getElementById('pr-content');
     const candidates = [];
-    if (bar) {
-        (bar.dataset.repos || '').split('|').filter(Boolean).forEach(function(name) {
-            candidates.push({ kind: 'repo', value: name });
-        });
-    }
+    prCollectUniqueCandidates(document.querySelectorAll('.repo-link[data-repo]'), 'repo', function(el) {
+        return el.dataset.repo;
+    }, candidates);
     if (content) {
         prCollectUniqueCandidates(content.querySelectorAll('.pr-label'), 'label', function(el) {
             return el.textContent;
