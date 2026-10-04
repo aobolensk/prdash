@@ -517,9 +517,13 @@ class HTMXResponseTests(TestCase):
             reverse('dashboard:pr_list'), HTTP_HX_REQUEST='true', HTTP_HX_TRIGGER='auto-refresh-container'
         )
         self.assertEqual(first.status_code, 200)
+        self.assertContains(first, f'data-render-hash="{first.context["pr_render_hash"]}"')
 
         second = self.client.get(
-            reverse('dashboard:pr_list'), HTTP_HX_REQUEST='true', HTTP_HX_TRIGGER='auto-refresh-container'
+            reverse('dashboard:pr_list'),
+            HTTP_HX_REQUEST='true',
+            HTTP_HX_TRIGGER='auto-refresh-container',
+            HTTP_X_PR_RENDER_HASH=first.context['pr_render_hash'],
         )
         self.assertEqual(second.status_code, 204)
         self.assertEqual(second['HX-Reswap'], 'none')
@@ -556,6 +560,10 @@ class HTMXResponseTests(TestCase):
         mock_github_client.return_value = mock_client
 
         mock_client.get_all_user_prs.return_value = []
+        older_browser = Client()
+        older_browser.login(username='testuser', password='testpass')
+        old_content = older_browser.get(reverse('dashboard:pr_list'), HTTP_HX_REQUEST='true')
+
         first = self.client.get(
             reverse('dashboard:pr_list'), HTTP_HX_REQUEST='true', HTTP_HX_TRIGGER='auto-refresh-container'
         )
@@ -584,10 +592,21 @@ class HTMXResponseTests(TestCase):
             )
         ]
         second = self.client.get(
-            reverse('dashboard:pr_list'), HTTP_HX_REQUEST='true', HTTP_HX_TRIGGER='auto-refresh-container'
+            reverse('dashboard:pr_list'),
+            HTTP_HX_REQUEST='true',
+            HTTP_HX_TRIGGER='auto-refresh-container',
+            HTTP_X_PR_RENDER_HASH=first.context['pr_render_hash'],
         )
         self.assertEqual(second.status_code, 200)
         self.assertTemplateUsed(second, 'dashboard/partials/_pr_content.html')
+
+        older_poll = older_browser.get(
+            reverse('dashboard:pr_list'),
+            HTTP_HX_REQUEST='true',
+            HTTP_HX_TRIGGER='auto-refresh-container',
+            HTTP_X_PR_RENDER_HASH=old_content.context['pr_render_hash'],
+        )
+        self.assertContains(older_poll, 'Test PR')
 
 
 class PATManagementTests(TestCase):

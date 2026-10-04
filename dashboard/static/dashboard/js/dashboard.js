@@ -1075,6 +1075,10 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         const elt = evt.detail.elt;
+        if (elt.id === 'auto-refresh-container' && elt.dataset.renderHash) {
+            evt.detail.headers['X-PR-Render-Hash'] = elt.dataset.renderHash;
+        }
+
         const dashboard = document.getElementById('dashboard-layout');
         if (!dashboard) return;
 

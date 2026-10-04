@@ -31,6 +31,7 @@
 {% endif %}
 
 <div id="auto-refresh-container"
+     data-render-hash="{{ pr_render_hash }}"
      hx-get="{{ current_url }}"
      hx-include=".filter-toolbar, #page-input"
      hx-trigger="{% if auto_refresh_enabled %}every {{ auto_refresh_interval }}s, {% endif %}manualRefresh from:body"

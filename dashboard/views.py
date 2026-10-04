@@ -25,10 +25,11 @@ from prdash.plugin_api import (
 
 PR_COUNT_CACHE_TTL = 300  # 5 minutes
 PR_RESULTS_CACHE_TTL = 3600  # 1 hour, fallback for failed refreshes
-PR_RENDER_HASH_CACHE_TTL = 3600  # covers the longest auto-refresh interval with margin
 
 
-def _compute_pr_render_hash(prs, *, auto_refresh_enabled, auto_refresh_interval, current_username, page_number):
+def _compute_pr_render_hash(
+    prs, *, auto_refresh_enabled, auto_refresh_interval, current_username, page_number, stale_data, render_path
+):
     """Hash the data that determines the rendered _pr_content.html output for a poll.
 
     pr_counts/errors/warnings are excluded: _pr_content.html doesn't render
@@ -42,6 +43,8 @@ def _compute_pr_render_hash(prs, *, auto_refresh_enabled, auto_refresh_interval,
             'auto_refresh_interval': auto_refresh_interval,
             'current_username': current_username,
             'page_number': page_number,
+            'stale_data': stale_data,
+            'render_path': render_path,
         },
         sort_keys=True,
         default=str,
@@ -246,6 +249,16 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         page_title = f'{page_title} - {current_repo.full_name}'
     page_title = f'{page_title} - PR Dashboard'
 
+    render_hash = _compute_pr_render_hash(
+        prs,
+        auto_refresh_enabled=user_prefs.is_auto_refresh_enabled_for_tab(active_tab),
+        auto_refresh_interval=user_prefs.get_auto_refresh_interval_seconds_for_tab(active_tab),
+        current_username=current_username,
+        page_number=page_obj.number if page_obj else None,
+        stale_data=stale_data,
+        render_path=request.get_full_path(),
+    )
+
     context = {
         'prs': prs,
         'repos': repos,
@@ -264,6 +277,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         'page_obj': page_obj,
         'page_title': page_title,
         'stale_data': stale_data,
+        'pr_render_hash': render_hash,
     }
 
     if request.headers.get('HX-Request') == 'true':
@@ -282,26 +296,14 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         # eligible for the render-skip: they always re-request the URL the DOM
         # already shows, unlike tab/filter navigation which targets a new URL.
         is_auto_refresh_poll = request.headers.get('HX-Trigger') == 'auto-refresh-container'
-        if is_auto_refresh_poll:
-            render_hash = _compute_pr_render_hash(
-                prs,
-                auto_refresh_enabled=context['auto_refresh_enabled'],
-                auto_refresh_interval=context['auto_refresh_interval'],
-                current_username=current_username,
-                page_number=page_obj.number if page_obj else None,
-            )
-            hash_cache_key = f"pr_render_hash:{request.user.id}:{request.get_full_path()}"
-            if cache.get(hash_cache_key) == render_hash:
-                # Nothing changed since the last poll of this URL: skip re-rendering
-                # and tell htmx to leave the existing DOM untouched.
-                response = HttpResponse(status=204)
-                response['HX-Reswap'] = 'none'
-                response['HX-Trigger'] = json.dumps(triggers)
-                return response
+        if is_auto_refresh_poll and request.headers.get('X-PR-Render-Hash') == render_hash:
+            # Nothing changed since this browser rendered the partial, so leave its DOM untouched.
+            response = HttpResponse(status=204)
+            response['HX-Reswap'] = 'none'
+            response['HX-Trigger'] = json.dumps(triggers)
+            return response
 
         response = render(request, 'dashboard/partials/_pr_content.html', context)
-        if is_auto_refresh_poll:
-            cache.set(hash_cache_key, render_hash, PR_RENDER_HASH_CACHE_TTL)
         response['HX-Trigger'] = json.dumps(triggers)
         return response
 
