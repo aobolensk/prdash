@@ -194,11 +194,12 @@ class PluginManager:
         if not root.exists():
             return None
         latest = 0
-        for path in root.rglob('*.py'):
-            try:
-                latest = max(latest, path.stat().st_mtime_ns)
-            except OSError:
-                continue
+        for pattern in ('*.py', '*.html'):
+            for path in root.rglob(pattern):
+                try:
+                    latest = max(latest, path.stat().st_mtime_ns)
+                except OSError:
+                    continue
         return latest
 
     def _worker_stale(self, worker, descriptor):

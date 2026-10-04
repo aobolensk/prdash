@@ -214,7 +214,8 @@ plugin = HookPlugin()
         package_dir = plugin_dir / 'ui_context'
         package_dir.mkdir(parents=True)
         (package_dir / '__init__.py').write_text('', encoding='utf-8')
-        (package_dir / 'template.html').write_text('{{ from_provider }}', encoding='utf-8')
+        template_path = package_dir / 'template.html'
+        template_path.write_text('{{ from_provider }}', encoding='utf-8')
         (package_dir / 'plugin.py').write_text('''\
 from prdash.plugin_api import (
     PLUGIN_API_VERSION, PluginMetadata, TemplateResource, UIContribution,
@@ -247,16 +248,22 @@ plugin = UIContextPlugin()
             'python_path': '.',
         }), encoding='utf-8')
         manager = PluginManager()
-        with override_settings(PRDASH_PLUGIN_PATHS=[str(root)]):
+        manager.FINGERPRINT_CHECK_INTERVAL = 0
+        with override_settings(DEBUG=True, PRDASH_PLUGIN_PATHS=[str(root)]):
             manager.discover()
-        self.addCleanup(manager._shutdown_all)
-        manager.configure_user(self.user, {'ui-context'})
-        request = self.factory.get('/example/')
-        request.user = self.user
+            self.addCleanup(manager._shutdown_all)
+            manager.configure_user(self.user, {'ui-context'})
+            request = self.factory.get('/example/')
+            request.user = self.user
 
-        result = manager.render_slot('example', Context({'request': request}))
+            context = Context({'request': request})
+            result = manager.render_slot('example', context)
+            self.assertEqual(result, '/example/')
 
-        self.assertEqual(result, '/example/')
+            template_path.write_text('Updated {{ from_provider }}', encoding='utf-8')
+            result = manager.render_slot('example', context)
+
+        self.assertEqual(result, 'Updated /example/')
 
     def test_dependency_must_remain_enabled_for_plugin_execution(self):
         tempdir = TemporaryDirectory()
