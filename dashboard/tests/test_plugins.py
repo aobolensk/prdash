@@ -11,9 +11,15 @@ from django.template import Context
 from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
-from dashboard.models import PluginConfiguration, PluginUserData
+from dashboard.models import (
+    PersonalAccessToken,
+    PluginConfiguration,
+    PluginUserData,
+    TrackedRepository,
+)
 from dashboard.github_client import CIStatus, PullRequestInfo, ReviewStatus
 from dashboard.plugin_manager import PluginDescriptor, PluginManager, plugin_manager
+from prdash.plugin_worker import _Registration, _WorkerRegistrar
 from prdash.plugin_api import (
     PLUGIN_API_VERSION,
     RequestInfo,
@@ -88,8 +94,10 @@ class HookPlugin:
 
     def initialize(self, registrar):
         self.shutdown_marker = Path({str(shutdown_marker)!r})
+        self.registrar = registrar
         registrar.register_hook('example', self.hook)
         registrar.register_route('hello', self.hello)
+        registrar.register_route('inspect_user', self.inspect_user)
         registrar.register_service('value', lambda args: 42)
 
     def shutdown(self):
@@ -104,6 +112,16 @@ class HookPlugin:
     @staticmethod
     def hello(request, config):
         return PluginJsonResponse({{'message': 'hello'}})
+
+    def inspect_user(self, request, config):
+        user_id = int(request.query_params['user_id'])
+        item = self.registrar.get_user_data(user_id, 'private', 'secret')
+        return PluginJsonResponse({{
+            'config': self.registrar.get_user_config(user_id),
+            'data': item.value if item else None,
+            'repositories': self.registrar.list_tracked_repositories(user_id),
+            'token': self.registrar.resolve_github_token(user_id),
+        }})
 
 plugin = HookPlugin()
 '''
@@ -164,6 +182,69 @@ plugin = HookPlugin()
             manager.get_service(self.user, 'hook-plugin', 'value'),
             42,
         )
+
+    def test_route_callbacks_are_bound_to_the_request_user(self):
+        manager = self.manager_with_plugin()
+        other_user = User.objects.create_user(username='other', password='testpass')
+        manager.configure_user(self.user, {'hook-plugin'})
+        manager.configure_user(other_user, {'hook-plugin'})
+
+        manager.update_user_config(self.user, 'hook-plugin', {'owner': 'first'})
+        manager.update_user_config(other_user, 'hook-plugin', {'owner': 'other'})
+        manager.set_user_data(self.user, 'hook-plugin', 'private', 'secret', {'owner': 'first'})
+        manager.set_user_data(other_user, 'hook-plugin', 'private', 'secret', {'owner': 'other'})
+        TrackedRepository.objects.create(user=self.user, owner='first', name='repo')
+        TrackedRepository.objects.create(user=other_user, owner='other', name='repo')
+        PersonalAccessToken.objects.create(user=self.user, token='first-token')
+        PersonalAccessToken.objects.create(user=other_user, token='other-token')
+
+        first_request = self.factory.get(
+            '/plugins/hook-plugin/inspect_user/', {'user_id': other_user.id}
+        )
+        first_request.user = self.user
+        first_response = manager.dispatch(first_request, 'hook-plugin', 'inspect_user')
+
+        other_request = self.factory.get(
+            '/plugins/hook-plugin/inspect_user/', {'user_id': self.user.id}
+        )
+        other_request.user = other_user
+        other_response = manager.dispatch(other_request, 'hook-plugin', 'inspect_user')
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(json.loads(first_response.content), {
+            'config': {'owner': 'first'},
+            'data': {'owner': 'first'},
+            'repositories': [{'owner': 'first', 'name': 'repo', 'enabled': True}],
+            'token': 'first-token',
+        })
+        self.assertEqual(other_response.status_code, 200)
+        self.assertEqual(json.loads(other_response.content), {
+            'config': {'owner': 'other'},
+            'data': {'owner': 'other'},
+            'repositories': [{'owner': 'other', 'name': 'repo', 'enabled': True}],
+            'token': 'other-token',
+        })
+
+    def test_user_scoped_callbacks_are_denied_without_an_active_user(self):
+        connection = MagicMock()
+        registrar = _WorkerRegistrar(connection, 'hook-plugin', _Registration(), {})
+
+        with self.assertRaises(PermissionError):
+            registrar.get_user_data(self.user.id, 'private', 'secret')
+        connection.callback.assert_not_called()
+
+        manager = self.manager_with_plugin()
+        worker = SimpleNamespace(plugin_id='hook-plugin')
+        with self.assertRaises(PermissionError):
+            manager._handle_callback(
+                worker,
+                'get_user_data',
+                {
+                    'user_id': self.user.id,
+                    'collection': 'private',
+                    'key': 'secret',
+                },
+            )
 
     def test_plugin_user_data_is_scoped_to_a_user_and_collection(self):
         manager = self.manager_with_plugin()

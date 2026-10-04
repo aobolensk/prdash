@@ -6,6 +6,7 @@ than a convention. All communication with the host happens over stdin/stdout
 using the framing defined in prdash.plugin_protocol.
 """
 
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, fields as dataclass_fields, is_dataclass
 from importlib import import_module, resources
 import inspect
@@ -69,10 +70,27 @@ class _WorkerRegistrar:
         self._plugin_id = plugin_id
         self._registration = registration
         self._deployment_config = deployment_config
+        self._active_user_id = None
 
     @property
     def deployment_config(self):
         return dict(self._deployment_config)
+
+    @contextmanager
+    def active_user(self, user_id):
+        previous_user_id = self._active_user_id
+        self._active_user_id = user_id
+        try:
+            yield
+        finally:
+            self._active_user_id = previous_user_id
+
+    def _user_callback(self, op, params):
+        if self._active_user_id is None:
+            raise PermissionError('User-scoped registrar callbacks require an active user')
+        bound_params = dict(params)
+        bound_params['user_id'] = self._active_user_id
+        return self._conn.callback(op, bound_params)
 
     def register_hook(self, name, callback, *, priority=100):
         if not name or not callable(callback):
@@ -97,7 +115,7 @@ class _WorkerRegistrar:
         self._registration.services[name] = handler
 
     def call_service(self, user_id, plugin_id, name, args):
-        result = self._conn.callback('call_service', {
+        result = self._user_callback('call_service', {
             'user_id': user_id,
             'plugin_id': plugin_id,
             'name': name,
@@ -106,33 +124,33 @@ class _WorkerRegistrar:
         return result.get('result')
 
     def resolve_github_token(self, user_id):
-        result = self._conn.callback('resolve_github_token', {'user_id': user_id})
+        result = self._user_callback('resolve_github_token', {'user_id': user_id})
         return result.get('token')
 
     def list_tracked_repositories(self, user_id, *, enabled_only=False):
-        result = self._conn.callback('list_tracked_repositories', {
+        result = self._user_callback('list_tracked_repositories', {
             'user_id': user_id, 'enabled_only': enabled_only,
         })
         return tuple(result['repos'])
 
     def get_username(self, user_id):
-        result = self._conn.callback('get_username', {'user_id': user_id})
+        result = self._user_callback('get_username', {'user_id': user_id})
         return result.get('username')
 
     def fetch_open_prs(self, user_id, repos, author=None):
-        result = self._conn.callback('fetch_open_prs', {
+        result = self._user_callback('fetch_open_prs', {
             'user_id': user_id, 'repos': [list(repo) for repo in repos], 'author': author,
         })
         return tuple(result['prs'])
 
     def fetch_merged_prs(self, user_id, repos, author=None):
-        result = self._conn.callback('fetch_merged_prs', {
+        result = self._user_callback('fetch_merged_prs', {
             'user_id': user_id, 'repos': [list(repo) for repo in repos], 'author': author,
         })
         return tuple(result['prs'])
 
     def fetch_reviews_for_stats(self, user_id, repos, username, days=30):
-        return self._conn.callback('fetch_reviews_for_stats', {
+        return self._user_callback('fetch_reviews_for_stats', {
             'user_id': user_id,
             'repos': [list(repo) for repo in repos],
             'username': username,
@@ -140,37 +158,39 @@ class _WorkerRegistrar:
         })
 
     def get_user_config(self, user_id):
-        result = self._conn.callback('get_user_config', {'user_id': user_id})
+        result = self._user_callback('get_user_config', {'user_id': user_id})
         return result['config']
 
     def update_user_config(self, user_id, values):
-        self._conn.callback('update_user_config', {'user_id': user_id, 'values': dict(values)})
+        self._user_callback('update_user_config', {'user_id': user_id, 'values': dict(values)})
 
     def list_user_data(self, user_id, collection):
-        result = self._conn.callback('list_user_data', {'user_id': user_id, 'collection': collection})
+        result = self._user_callback(
+            'list_user_data', {'user_id': user_id, 'collection': collection}
+        )
         return tuple(_to_plugin_user_data(item) for item in result['items'])
 
     def get_user_data(self, user_id, collection, key):
-        result = self._conn.callback(
+        result = self._user_callback(
             'get_user_data', {'user_id': user_id, 'collection': collection, 'key': key}
         )
         item = result.get('item')
         return _to_plugin_user_data(item) if item else None
 
     def set_user_data(self, user_id, collection, key, value):
-        result = self._conn.callback('set_user_data', {
+        result = self._user_callback('set_user_data', {
             'user_id': user_id, 'collection': collection, 'key': key, 'value': value,
         })
         return _to_plugin_user_data(result['item'])
 
     def delete_user_data(self, user_id, collection, key):
-        result = self._conn.callback(
+        result = self._user_callback(
             'delete_user_data', {'user_id': user_id, 'collection': collection, 'key': key}
         )
         return result['deleted']
 
     def reorder_user_data(self, user_id, collection, keys):
-        self._conn.callback(
+        self._user_callback(
             'reorder_user_data', {'user_id': user_id, 'collection': collection, 'keys': list(keys)}
         )
 
@@ -204,7 +224,7 @@ def _initialize(conn, params):
     registration = _Registration()
     registrar = _WorkerRegistrar(conn, plugin_id, registration, params.get('deployment_config', {}))
     plugin.initialize(registrar)
-    return plugin, registration
+    return plugin, registration, registrar
 
 
 def _describe(plugin, registration):
@@ -258,7 +278,7 @@ def _build_hook_context(data):
     )
 
 
-def _invoke_hook(registration, params):
+def _invoke_hook(registration, params, registrar):
     name = params['name']
     value = params['value']
     config = params.get('config', {})
@@ -266,10 +286,11 @@ def _invoke_hook(registration, params):
     if name == PR_LIST_QUERY_HOOK:
         value = PullRequestQuery(**value)
     matches = [entry for entry in registration.hooks if entry[0] == name]
-    for _name, _priority, callback in sorted(matches, key=lambda entry: entry[1]):
-        result = callback(value, context, config)
-        if result is not None:
-            value = result
+    with registrar.active_user(params.get('_callback_user_id')):
+        for _name, _priority, callback in sorted(matches, key=lambda entry: entry[1]):
+            result = callback(value, context, config)
+            if result is not None:
+                value = result
     if is_dataclass(value):
         value = asdict(value)
     return {'value': value}
@@ -330,15 +351,16 @@ def _serialize_response(response):
     )
 
 
-def _invoke_route(registration, params, emit_chunk):
+def _invoke_route(registration, params, emit_chunk, registrar):
     callback = registration.routes.get(params['route'])
     if callback is None:
         return {'response': {'type': 'not_found'}}
     request = _build_request_info(params['request'])
     config = params.get('config', {})
-    response = callback(request, config)
-    if inspect.isgenerator(response):
-        response = _drain_stream(response, emit_chunk)
+    with registrar.active_user(params.get('_callback_user_id')):
+        response = callback(request, config)
+        if inspect.isgenerator(response):
+            response = _drain_stream(response, emit_chunk)
     return {'response': _serialize_response(response)}
 
 
@@ -353,23 +375,25 @@ def _drain_stream(generator, emit_chunk):
         emit_chunk({'kind': chunk.kind, 'data': dict(chunk.data)})
 
 
-def _invoke_ui_context(registration, params):
+def _invoke_ui_context(registration, params, registrar):
     contribution = registration.ui[params['index']]
     if contribution.context_provider is None:
         return {'context': {}}
     request = _build_request_info(params['request'])
     config = params.get('config', {})
-    context = contribution.context_provider(request, config)
+    with registrar.active_user(params.get('_callback_user_id')):
+        context = contribution.context_provider(request, config)
     if not isinstance(context, Mapping):
         raise TypeError('Plugin UI context providers must return a mapping')
     return {'context': dict(context)}
 
 
-def _invoke_service(registration, params):
+def _invoke_service(registration, params, registrar):
     handler = registration.services.get(params['name'])
     if handler is None:
         raise KeyError(f'Unknown service: {params["name"]}')
-    return {'result': handler(params.get('args', {}))}
+    with registrar.active_user(params.get('_callback_user_id')):
+        return {'result': handler(params.get('args', {}))}
 
 
 def main():
@@ -378,6 +402,7 @@ def main():
     conn = _Connection(stdin, stdout)
     plugin = None
     registration = None
+    registrar = None
 
     while True:
         try:
@@ -396,16 +421,16 @@ def main():
 
         try:
             if op == 'initialize':
-                plugin, registration = _initialize(conn, params)
+                plugin, registration, registrar = _initialize(conn, params)
                 result = _describe(plugin, registration)
             elif op == 'invoke_hook':
-                result = _invoke_hook(registration, params)
+                result = _invoke_hook(registration, params, registrar)
             elif op == 'invoke_route':
-                result = _invoke_route(registration, params, emit_chunk)
+                result = _invoke_route(registration, params, emit_chunk, registrar)
             elif op == 'invoke_ui_context':
-                result = _invoke_ui_context(registration, params)
+                result = _invoke_ui_context(registration, params, registrar)
             elif op == 'invoke_service':
-                result = _invoke_service(registration, params)
+                result = _invoke_service(registration, params, registrar)
             elif op == 'shutdown':
                 if plugin is not None:
                     plugin.shutdown()
