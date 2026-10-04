@@ -148,14 +148,30 @@ class AuthenticationRequiredTests(TestCase):
 class RepositoryManagementTests(TestCase):
     """Tests for repository management views."""
 
+    count_tabs = ('my_prs', 'review_requests', 'assigned')
+
     def setUp(self):
         self.client = Client()
         self.user = User.objects.create_user(username='testuser', password='testpass')
         self.client.login(username='testuser', password='testpass')
+        cache.clear()
+
+    def _prime_pr_caches(self):
+        cache.set(f'pr_results_gen:{self.user.id}', 7)
+        cache.set(f'pr_results:{self.user.id}:7:/prs/:test', ['stale PR snapshot'])
+        for tab in self.count_tabs:
+            cache.set(f'pr_count:{self.user.id}:{tab}', 10)
+
+    def _assert_pr_caches_invalidated(self):
+        self.assertEqual(cache.get(f'pr_results_gen:{self.user.id}'), 8)
+        self.assertIsNone(cache.get(f'pr_results:{self.user.id}:8:/prs/:test'))
+        for tab in self.count_tabs:
+            self.assertIsNone(cache.get(f'pr_count:{self.user.id}:{tab}'))
 
     @patch('dashboard.views.GitHubClient')
     def test_add_repo_valid_format(self, mock_github_client):
         """Verify adding repo with owner/repo format."""
+        self._prime_pr_caches()
         mock_client = MagicMock()
         mock_client.validate_repo.return_value = (True, 'Found: owner/repo')
         mock_github_client.return_value = mock_client
@@ -170,6 +186,7 @@ class RepositoryManagementTests(TestCase):
         self.assertTrue(TrackedRepository.objects.filter(
             user=self.user, owner='owner', name='repo'
         ).exists())
+        self._assert_pr_caches_invalidated()
 
     @patch('dashboard.views.GitHubClient')
     def test_add_repo_https_url(self, mock_github_client):
@@ -222,6 +239,7 @@ class RepositoryManagementTests(TestCase):
 
     def test_remove_repo_success(self):
         """Verify repo deletion."""
+        self._prime_pr_caches()
         repo = TrackedRepository.objects.create(user=self.user, owner='owner', name='repo')
 
         response = self.client.post(
@@ -231,6 +249,22 @@ class RepositoryManagementTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(TrackedRepository.objects.filter(id=repo.id).exists())
+        self._assert_pr_caches_invalidated()
+
+    def test_toggle_repo_success(self):
+        """Verify toggling a repo invalidates PR caches."""
+        self._prime_pr_caches()
+        repo = TrackedRepository.objects.create(user=self.user, owner='owner', name='repo')
+
+        response = self.client.post(
+            reverse('dashboard:toggle_repo', args=[repo.id]),
+            HTTP_HX_REQUEST='true'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        repo.refresh_from_db()
+        self.assertFalse(repo.enabled)
+        self._assert_pr_caches_invalidated()
 
     def test_remove_repo_not_owned(self):
         """Verify can't delete other user's repo."""

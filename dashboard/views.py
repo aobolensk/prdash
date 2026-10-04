@@ -56,6 +56,16 @@ def _invalidate_pr_results_cache(user):
     cache.incr(key)
 
 
+def _invalidate_repo_edit_caches(user):
+    """Invalidate PR results and tab counts after a tracked repository changes."""
+    _invalidate_pr_results_cache(user)
+    cache.delete_many([
+        f"pr_count:{user.id}:my_prs",
+        f"pr_count:{user.id}:review_requests",
+        f"pr_count:{user.id}:assigned",
+    ])
+
+
 def _get_user_preferences(user):
     """Get or create user preferences with defaults."""
     prefs, _ = UserPreferences.objects.get_or_create(user=user)
@@ -480,6 +490,7 @@ def add_repo(request):
     if not created:
         return _render_repo_list(request, errors=['Repository already tracked'])
 
+    _invalidate_repo_edit_caches(request.user)
     return _render_repo_list(request)
 
 
@@ -489,7 +500,7 @@ def remove_repo(request, repo_id):
     """Remove a tracked repository."""
     repo = get_object_or_404(TrackedRepository, id=repo_id, user=request.user)
     repo.delete()
-    _invalidate_pr_results_cache(request.user)
+    _invalidate_repo_edit_caches(request.user)
     return _render_repo_list(request)
 
 
@@ -500,7 +511,7 @@ def toggle_repo(request, repo_id):
     repo = get_object_or_404(TrackedRepository, id=repo_id, user=request.user)
     repo.enabled = not repo.enabled
     repo.save()
-    _invalidate_pr_results_cache(request.user)
+    _invalidate_repo_edit_caches(request.user)
     return _render_repo_list(request)
 
 
