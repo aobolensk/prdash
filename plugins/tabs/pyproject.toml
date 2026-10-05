@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prdash-tabs"
+version = "1.0.0"
+description = "Tabs for the PR dashboard"
+requires-python = ">=3.12"
+
+[project.entry-points."prdash.plugins"]
+tabs = "prdash_tabs.plugin:plugin"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+prdash_tabs = ["static/*.css", "static/*.js", "templates/*.html"]

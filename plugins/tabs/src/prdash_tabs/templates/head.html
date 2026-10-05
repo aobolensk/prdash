@@ -1,0 +1,7 @@
+{% if tabs_js %}
+<style>{{ tabs_css|safe }}</style>
+<script>
+window.prdashTabsUserId = "{{ request.user.id|default:'user' }}";
+{{ tabs_js|safe }}
+</script>
+{% endif %}

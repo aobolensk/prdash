@@ -1,0 +1,106 @@
+.prdash-tabs-bar {
+    display: flex;
+    overflow-x: auto;
+    margin: -24px -24px 24px;
+    padding: 12px 24px 0;
+    border-bottom: 1px solid var(--color-border);
+    background-color: var(--color-bg-secondary);
+}
+
+.prdash-tabs-bar[hidden] {
+    display: none;
+}
+
+.prdash-tabs {
+    display: flex;
+    align-items: end;
+    gap: 4px;
+    min-width: max-content;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.prdash-tab-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-bottom: -1px;
+    padding: 4px 6px;
+    border: 1px solid transparent;
+    border-bottom: 0;
+    border-radius: 8px 8px 0 0;
+}
+
+.prdash-tab-row.active {
+    border-color: var(--color-border);
+    background-color: var(--color-bg);
+}
+
+.prdash-tab {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 220px;
+    min-width: 90px;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--color-text-secondary);
+    text-align: left;
+    cursor: pointer;
+}
+
+.prdash-tab-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.prdash-tab-loading {
+    width: 12px;
+    height: 12px;
+    flex: 0 0 12px;
+    border: 2px solid var(--color-text-muted);
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: prdash-tab-spin 0.8s linear infinite;
+}
+
+.prdash-tab-loading[hidden] {
+    display: none;
+}
+
+@keyframes prdash-tab-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.prdash-tab-row.active .prdash-tab {
+    color: var(--color-text);
+    font-weight: 600;
+}
+
+.prdash-tab:hover {
+    background-color: var(--color-bg-tertiary);
+    color: var(--color-text);
+}
+
+.prdash-tab-close {
+    width: 24px;
+    height: 24px;
+    flex: 0 0 24px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--color-text-muted);
+    cursor: pointer;
+}
+
+.prdash-tab-close:hover {
+    background-color: var(--color-bg-tertiary);
+    color: var(--color-text);
+}

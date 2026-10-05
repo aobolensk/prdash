@@ -1,0 +1,9 @@
+{
+  "id": "tabs",
+  "name": "Tabs",
+  "version": "1.0.0",
+  "api_version": "2.0",
+  "description": "Adds tabs to the PR dashboard.",
+  "entrypoint": "prdash_tabs.plugin:plugin",
+  "python_path": "src"
+}
