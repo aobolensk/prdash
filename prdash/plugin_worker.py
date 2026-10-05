@@ -65,9 +65,8 @@ class _Connection:
 
 
 class _WorkerRegistrar:
-    def __init__(self, conn, plugin_id, registration, deployment_config):
+    def __init__(self, conn, registration, deployment_config):
         self._conn = conn
-        self._plugin_id = plugin_id
         self._registration = registration
         self._deployment_config = deployment_config
         self._active_user_id = None
@@ -215,14 +214,13 @@ def _materialize(candidate):
 
 
 def _initialize(conn, params):
-    plugin_id = params['plugin_id']
     python_path = params.get('python_path')
     if python_path:
         sys.path.insert(0, python_path)
     candidate = _load_object(params['entrypoint'])
     plugin = _materialize(candidate)
     registration = _Registration()
-    registrar = _WorkerRegistrar(conn, plugin_id, registration, params.get('deployment_config', {}))
+    registrar = _WorkerRegistrar(conn, registration, params.get('deployment_config', {}))
     plugin.initialize(registrar)
     return plugin, registration, registrar
 

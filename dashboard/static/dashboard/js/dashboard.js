@@ -700,7 +700,7 @@ function togglePrSearch(forceOpen) {
 function copyBranchName(branchName) {
     navigator.clipboard.writeText(branchName).then(() => {
         showToast('Branch name copied!', 'success');
-    }).catch((err) => {
+    }).catch(() => {
         showToast('Failed to copy branch name', 'error');
     });
 }
@@ -1049,7 +1049,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    document.body.addEventListener('repoToggled', function(evt) {
+    document.body.addEventListener('repoToggled', function() {
         const refreshBtn = document.getElementById('pr-refresh-btn');
         if (refreshBtn) {
             refreshBtn.click();

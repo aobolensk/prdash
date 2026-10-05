@@ -501,7 +501,6 @@ class PluginManager:
                 worker = self._spawn_worker(descriptor)
                 initialization_started = True
                 manifest = self._call(worker, 'initialize', {
-                    'plugin_id': plugin_id,
                     'entrypoint': descriptor.entrypoint,
                     'python_path': str(descriptor.python_path) if descriptor.python_path else None,
                     'deployment_config': dict(

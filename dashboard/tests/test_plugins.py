@@ -227,7 +227,7 @@ plugin = HookPlugin()
 
     def test_user_scoped_callbacks_are_denied_without_an_active_user(self):
         connection = MagicMock()
-        registrar = _WorkerRegistrar(connection, 'hook-plugin', _Registration(), {})
+        registrar = _WorkerRegistrar(connection, _Registration(), {})
 
         with self.assertRaises(PermissionError):
             registrar.get_user_data(self.user.id, 'private', 'secret')
