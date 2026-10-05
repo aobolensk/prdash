@@ -504,7 +504,7 @@ class GitHubClientReviewPaginationTests(TestCase):
         mock_post_graphql.side_effect = [
             {
                 'data': {
-                    'repository': {
+                    'p0': {
                         'pullRequest': {
                             'reviews': {
                                 'nodes': [self._review(
@@ -532,6 +532,94 @@ class GitHubClientReviewPaginationTests(TestCase):
         self.assertIn('after: "thread_cursor_1"', query)
 
     @patch.object(GitHubClient, '_post_graphql')
+    def test_overflow_pages_are_batched_across_prs(self, mock_post_graphql):
+        client = GitHubClient(user=None)
+        pr_nodes = [
+            {
+                'number': 41,
+                'reviews': {
+                    'nodes': [self._review('reviewer1', 'APPROVED', '2024-01-01T10:00:00Z')],
+                    'pageInfo': {'hasNextPage': True, 'endCursor': 'review_cursor_41'},
+                },
+                'comments': {'totalCount': 2},
+                'reviewThreads': {
+                    'nodes': [{'comments': {'totalCount': 3}}],
+                    'pageInfo': {'hasNextPage': True, 'endCursor': 'thread_cursor_41'},
+                },
+            },
+            {
+                'number': 42,
+                'reviews': {
+                    'nodes': [self._review('reviewer3', 'COMMENTED', '2024-01-01T10:00:00Z')],
+                    'pageInfo': {'hasNextPage': True, 'endCursor': 'review_cursor_42'},
+                },
+                'comments': {'totalCount': 5},
+                'reviewThreads': {
+                    'nodes': [{'comments': {'totalCount': 6}}],
+                    'pageInfo': {'hasNextPage': True, 'endCursor': 'thread_cursor_42'},
+                },
+            },
+        ]
+        overflow_response = {
+            'data': {
+                'p0': {
+                    'pullRequest': {
+                        'reviews': {
+                            'nodes': [self._review('reviewer2', 'CHANGES_REQUESTED', '2024-01-01T11:00:00Z')],
+                            'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        },
+                        'reviewThreads': {
+                            'nodes': [{'comments': {'totalCount': 4}}],
+                            'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        },
+                    }
+                },
+                'p1': {
+                    'pullRequest': {
+                        'reviews': {
+                            'nodes': [self._review('reviewer4', 'APPROVED', '2024-01-01T11:00:00Z')],
+                            'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        },
+                        'reviewThreads': {
+                            'nodes': [{'comments': {'totalCount': 7}}],
+                            'pageInfo': {'hasNextPage': False, 'endCursor': None},
+                        },
+                    }
+                },
+            }
+        }
+        mock_post_graphql.side_effect = [
+            {
+                'data': {
+                    'repository': {
+                        'pr0': pr_nodes[0],
+                        'pr1': pr_nodes[1],
+                    }
+                }
+            },
+            overflow_response,
+        ]
+
+        with patch.object(client, '_parse_pr_from_graphql', side_effect=lambda data, owner, name: data):
+            results = client._fetch_prs_batch_graphql('owner', 'repo', [41, 42])
+
+        self.assertEqual(len(results), 2)
+        self.assertEqual(mock_post_graphql.call_count, 2)
+        query = mock_post_graphql.call_args_list[1].args[0]
+        for cursor in (
+            'review_cursor_41', 'thread_cursor_41', 'review_cursor_42', 'thread_cursor_42'
+        ):
+            self.assertIn(f'after: "{cursor}"', query)
+        first_status = client._parse_review_status_from_graphql(results[0])
+        second_status = client._parse_review_status_from_graphql(results[1])
+        self.assertEqual(len(results[0]['reviews']['nodes']), 2)
+        self.assertEqual(len(results[1]['reviews']['nodes']), 2)
+        self.assertEqual(first_status.comment_count, 9)
+        self.assertEqual(second_status.comment_count, 18)
+        self.assertEqual(first_status.state, 'changes_requested')
+        self.assertEqual(second_status.state, 'approved')
+
+    @patch.object(GitHubClient, '_post_graphql')
     def test_review_stats_include_reviews_after_first_page(self, mock_post_graphql):
         client = GitHubClient(user=None)
         client._get_token = MagicMock(return_value='token')
@@ -542,7 +630,7 @@ class GitHubClientReviewPaginationTests(TestCase):
             elif 'pullRequest(number: 1)' in query:
                 return {
                     'data': {
-                        'repository': {
+                        'p0': {
                             'pullRequest': {
                                 'reviews': {
                                     'nodes': [self._review(

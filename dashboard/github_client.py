@@ -722,12 +722,14 @@ class GitHubClient:
             if not repo_data:
                 return []
 
-            for i, pr_num in enumerate(pr_numbers):
+            pr_nodes = []
+            for i, _ in enumerate(pr_numbers):
                 pr_data = repo_data.get(f'pr{i}')
-                if not pr_data:
-                    continue
+                if pr_data:
+                    pr_nodes.append((pr_data, owner, name))
+            self._paginate_pr_review_connections_batch(pr_nodes)
 
-                self._paginate_pr_review_connections(pr_data, owner, name)
+            for pr_data, _, _ in pr_nodes:
                 pr_info = self._parse_pr_from_graphql(pr_data, owner, name)
                 if pr_info:
                     result.append(pr_info)
@@ -803,7 +805,7 @@ class GitHubClient:
         if data is None:
             return self._split_and_retry(prs, self._fetch_pr_batch_multi_repo)
 
-        result = []
+        pr_nodes = []
         query_data = data.get('data', {})
 
         for alias, (owner, name) in alias_map.items():
@@ -815,7 +817,12 @@ class GitHubClient:
             if not pr_node:
                 continue
 
-            self._paginate_pr_review_connections(pr_node, owner, name)
+            pr_nodes.append((pr_node, owner, name))
+
+        self._paginate_pr_review_connections_batch(pr_nodes)
+
+        result = []
+        for pr_node, owner, name in pr_nodes:
             pr_info = self._parse_pr_from_graphql(pr_node, owner, name)
             if pr_info:
                 result.append(pr_info)
@@ -824,16 +831,36 @@ class GitHubClient:
 
     def _paginate_pr_review_connections(self, pr_data: dict, owner: str, name: str) -> None:
         """Append remaining review and review-thread pages to a PR response."""
-        number = pr_data.get('number')
-        if not number:
-            return
+        self._paginate_pr_review_connections_batch([(pr_data, owner, name)])
 
-        reviews = pr_data.get('reviews')
-        review_threads = pr_data.get('reviewThreads')
-        review_cursor = self._next_cursor(reviews)
-        thread_cursor = self._next_cursor(review_threads)
+    def _paginate_pr_review_connections_batch(
+        self, pr_nodes: list[tuple[dict, str, str]]
+    ) -> None:
+        """Append remaining review pages for PRs using bounded batched queries."""
+        pending = [
+            (pr_data, owner, name)
+            for pr_data, owner, name in pr_nodes
+            if pr_data.get('number') and (
+                self._next_cursor(pr_data.get('reviews'))
+                or self._next_cursor(pr_data.get('reviewThreads'))
+            )
+        ]
 
-        while review_cursor or thread_cursor:
+        while pending:
+            next_pending = []
+            for batch in self._iter_chunks(pending, GRAPHQL_PR_BATCH_SIZE):
+                next_pending.extend(self._fetch_pr_review_page_batch(batch))
+            pending = next_pending
+
+    def _fetch_pr_review_page_batch(
+        self, pr_nodes: list[tuple[dict, str, str]]
+    ) -> list[tuple[dict, str, str]]:
+        """Fetch one remaining review page for each PR in a bounded query."""
+        pr_queries = []
+        for i, (pr_data, owner, name) in enumerate(pr_nodes):
+            review_cursor = self._next_cursor(pr_data.get('reviews'))
+            thread_cursor = self._next_cursor(pr_data.get('reviewThreads'))
+
             review_field = ''
             if review_cursor:
                 review_field = f'''
@@ -858,38 +885,57 @@ class GitHubClient:
                     }}
                 '''
 
-            query = f'''
-                query {{
-                    repository(owner: "{owner}", name: "{name}") {{
-                        pullRequest(number: {number}) {{
-                            {review_field}
-                            {thread_field}
-                        }}
+            pr_queries.append(f'''
+                p{i}: repository(owner: "{owner}", name: "{name}") {{
+                    pullRequest(number: {pr_data['number']}) {{
+                        {review_field}
+                        {thread_field}
                     }}
                 }}
-            '''
-            data = self._post_graphql(
-                query,
-                owner=owner,
-                name=name,
-                operation='PR review pagination GraphQL query',
-            )
-            if data is None:
-                break
+            ''')
 
-            page_pr = data.get('data', {}).get('repository', {}).get('pullRequest')
+        query = f'''
+            query {{
+                {' '.join(pr_queries)}
+            }}
+        '''
+        repos = {(owner, name) for _, owner, name in pr_nodes}
+        owner, name = next(iter(repos)) if len(repos) == 1 else (None, None)
+        data = self._post_graphql(
+            query,
+            owner=owner,
+            name=name,
+            operation='PR review pagination GraphQL query',
+        )
+        if data is None:
+            return self._split_and_retry(pr_nodes, self._fetch_pr_review_page_batch)
+
+        query_data = data.get('data', {})
+        next_pending = []
+        for i, (pr_data, owner, name) in enumerate(pr_nodes):
+            page_pr = query_data.get(f'p{i}', {}).get('pullRequest')
             if not page_pr:
-                break
+                continue
 
-            if review_cursor:
+            reviews = pr_data.get('reviews')
+            if self._next_cursor(reviews):
                 page = page_pr.get('reviews', {})
                 reviews.setdefault('nodes', []).extend(page.get('nodes', []))
-                review_cursor = self._next_cursor(page)
+                reviews['pageInfo'] = page.get('pageInfo', {})
 
-            if thread_cursor:
+            review_threads = pr_data.get('reviewThreads')
+            if self._next_cursor(review_threads):
                 page = page_pr.get('reviewThreads', {})
                 review_threads.setdefault('nodes', []).extend(page.get('nodes', []))
-                thread_cursor = self._next_cursor(page)
+                review_threads['pageInfo'] = page.get('pageInfo', {})
+
+            if (
+                self._next_cursor(pr_data.get('reviews'))
+                or self._next_cursor(pr_data.get('reviewThreads'))
+            ):
+                next_pending.append((pr_data, owner, name))
+
+        return next_pending
 
     @staticmethod
     def _next_cursor(connection: Optional[dict]) -> Optional[str]:
