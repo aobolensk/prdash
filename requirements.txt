@@ -1,5 +1,5 @@
 cryptography==50.0.0
-Django==6.0.7
+Django==6.0.8
 django-allauth==65.14.1
 django-htmx==1.21.0
 packaging==25.0
