@@ -17,6 +17,7 @@
      data-review-tab="{% if review_tab %}{{ review_tab }}{% else %}pending{% endif %}">
     <aside class="sidebar">
         <div class="sidebar-section">
+            <h2 class="sidebar-title">Views</h2>
             <a href="{% if current_repo %}{% url 'dashboard:repo_pr_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:pr_list' %}{% endif %}"
                class="sidebar-link {% if active_tab == 'open' or active_tab == 'merged' %}active{% endif %}"
                data-tab="my_prs"
