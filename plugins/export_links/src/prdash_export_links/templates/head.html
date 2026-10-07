@@ -1,0 +1,80 @@
+{{ export_links_formats|json_script:"export-links-formats" }}
+<style>
+.export-links-group {
+    margin-left: auto;
+}
+
+.export-links-all {
+    padding: 4px 6px;
+}
+
+.export-links-pr {
+    align-items: center;
+    align-self: center;
+    background: none;
+    border: none;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    display: inline-flex;
+    justify-content: center;
+    line-height: 0;
+    padding: 0;
+    transition: color 0.1s ease;
+}
+
+.export-links-pr:hover {
+    color: var(--color-text);
+}
+
+.export-links-pr:active {
+    color: var(--color-primary);
+}
+</style>
+<script>
+(function() {
+    function formats() {
+        const el = document.getElementById('export-links-formats');
+        return el ? JSON.parse(el.textContent) : {single: '{url}', list: '{url}', separator: '\n'};
+    }
+
+    function render(template, data) {
+        return template.replace(/\{(\w+)\}/g, function(match, name) {
+            return Object.prototype.hasOwnProperty.call(data, name) ? data[name] : match;
+        });
+    }
+
+    function toast(message, type) {
+        if (typeof window.showToast === 'function') window.showToast(message, type);
+    }
+
+    function copy(text, message) {
+        navigator.clipboard.writeText(text).then(function() {
+            toast(message, 'success');
+        }).catch(function() {
+            toast('Failed to export links', 'error');
+        });
+    }
+
+    document.addEventListener('click', function(evt) {
+        const single = evt.target.closest('.export-links-pr');
+        if (single) {
+            copy(render(formats().single, single.dataset), 'Link copied!');
+            return;
+        }
+        if (!evt.target.closest('.export-links-all')) return;
+        const content = document.getElementById('pr-content');
+        const buttons = content
+            ? content.querySelectorAll('.pr-card:not([hidden]) .export-links-pr')
+            : [];
+        if (!buttons.length) {
+            toast('No pull requests to copy', 'warning');
+            return;
+        }
+        const config = formats();
+        const lines = Array.prototype.map.call(buttons, function(button) {
+            return render(config.list, button.dataset);
+        });
+        copy(lines.join(config.separator), lines.length + ' link(s) copied!');
+    });
+})();
+</script>

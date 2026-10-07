@@ -1,0 +1,9 @@
+{
+  "id": "export-links",
+  "name": "Export Links",
+  "version": "1.0.0",
+  "api_version": "2.0",
+  "description": "Export pull request links to the clipboard, one at a time or all visible ones, in a configurable format.",
+  "entrypoint": "prdash_export_links.plugin:plugin",
+  "python_path": "src"
+}

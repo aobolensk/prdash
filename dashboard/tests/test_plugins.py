@@ -641,6 +641,62 @@ class ReferencePluginIntegrationTests(TestCase):
             ),
         )
 
+    @patch('dashboard.views.GitHubClient')
+    def test_export_links_renders_buttons_with_saved_formats(self, mock_github_client):
+        PluginConfiguration.objects.create(
+            user=self.user,
+            plugin_id='export-links',
+            enabled=True,
+        )
+        github_client = MagicMock()
+        github_client.get_all_user_prs.return_value = [PullRequestInfo(
+            number=123,
+            title='Copy me',
+            url='https://github.com/owner/repo/pull/123',
+            repo_owner='owner',
+            repo_name='repo',
+            author='testuser',
+            author_avatar='',
+            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            labels=[],
+            ci_status=CIStatus(state='unknown'),
+            review_status=ReviewStatus(state='not_reviewed'),
+            draft=False,
+            additions=1,
+            deletions=1,
+        )]
+        github_client.get_username.return_value = 'testuser'
+        github_client.errors = []
+        github_client.warnings = []
+        mock_github_client.return_value = github_client
+        settings_url = reverse(
+            'dashboard:plugin_route',
+            kwargs={'plugin_id': 'export-links', 'route': 'settings'},
+        )
+
+        invalid_response = self.client.post(
+            settings_url, {'single_format': '', 'list_format': '{url}', 'separator': 'newline'},
+        )
+        settings_response = self.client.post(
+            settings_url,
+            {'single_format': '[{title}]({url})', 'list_format': '- {url}', 'separator': 'comma'},
+        )
+        list_response = self.client.get(reverse('dashboard:pr_list'))
+
+        self.assertContains(invalid_response, 'Formats must be 1 to 200 characters.')
+        self.assertContains(settings_response, 'Export Links settings saved.')
+        self.assertEqual(
+            PluginConfiguration.objects.get(user=self.user, plugin_id='export-links').config,
+            {'single_format': '[{title}]({url})', 'list_format': '- {url}', 'separator': 'comma'},
+        )
+        self.assertContains(list_response, 'export-links-all')
+        self.assertContains(list_response, 'data-url="https://github.com/owner/repo/pull/123"')
+        self.assertContains(
+            list_response,
+            '{"single": "[{title}]({url})", "list": "- {url}", "separator": ", "}',
+        )
+
     @patch('requests.get')
     def test_pr_preview_loads_files_and_commentable_diff_lines(self, mock_get):
         pull_response = MagicMock(status_code=200)

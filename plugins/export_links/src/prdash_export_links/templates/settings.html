@@ -1,0 +1,27 @@
+<div id="export-links-settings" class="preferences-form-wrapper">
+    {% if export_links_success %}<div class="alert alert-success">{{ export_links_success }}</div>{% endif %}
+    {% if export_links_error %}<div class="alert alert-error">{{ export_links_error }}</div>{% endif %}
+
+    <form hx-post="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='settings' %}"
+          hx-target="#export-links-settings" hx-swap="outerHTML" class="preferences-form">
+        {% csrf_token %}
+        <p class="form-help">Placeholders: {{ export_links_placeholders }}. Example: [{title}]({url}) for Markdown.</p>
+        <div class="form-group">
+            <label for="export-links-single-format">Single link format</label>
+            <input type="text" name="single_format" id="export-links-single-format" class="input"
+                   maxlength="200" required value="{{ export_links_single_format }}">
+        </div>
+        <div class="form-group">
+            <label for="export-links-list-format">Export all: format per pull request</label>
+            <input type="text" name="list_format" id="export-links-list-format" class="input"
+                   maxlength="200" required value="{{ export_links_list_format }}">
+        </div>
+        <div class="form-group">
+            <label for="export-links-separator">Export all: separator</label>
+            <select name="separator" id="export-links-separator" class="filter-select">
+                {% for separator in export_links_separators %}<option value="{{ separator.key }}" {% if separator.selected %}selected{% endif %}>{{ separator.label }}</option>{% endfor %}
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary">Save Export Links Settings</button>
+    </form>
+</div>
