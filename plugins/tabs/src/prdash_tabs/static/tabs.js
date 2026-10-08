@@ -159,7 +159,7 @@
         };
         try {
             window.sessionStorage.setItem(storageKey, JSON.stringify(data));
-        } catch (error) {
+        } catch {
             // Tab state still works for the lifetime of this page.
         }
     }
@@ -170,7 +170,7 @@
             return Array.isArray(data.tabs) ? data.tabs.filter(function(tab) {
                 return tab && tabLabels[tab.id] && typeof tab.url === 'string';
             }) : [];
-        } catch (error) {
+        } catch {
             return [];
         }
     }
@@ -246,7 +246,7 @@
             updateSidebarCounts(triggers.prCounts);
             if (triggers.pageTitle) tab.title = triggers.pageTitle;
             return triggers;
-        } catch (error) {
+        } catch {
             return {};
         }
     }
@@ -294,7 +294,7 @@
             tab.html = html;
             persistTabs();
             scheduleBackgroundRefresh(tab);
-        } catch (error) {
+        } catch {
             // The cached list remains available if GitHub or the connection is unavailable.
         } finally {
             tab.refreshing = false;
