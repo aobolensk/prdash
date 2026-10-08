@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 GITHUB_GRAPHQL_URL = 'https://api.github.com/graphql'
 GITHUB_PROVIDER = 'github'
+MERGED_PR_LIMIT = 200
 USERNAME_CACHE_TTL_SECONDS = 86400
 GRAPHQL_PR_BATCH_SIZE = 25
 GRAPHQL_REVIEW_PAGE_SIZE = 100
@@ -1267,7 +1268,9 @@ class GitHubClient:
         else:
             self._add_warning(f"Rate limit hit. {count} repos not loaded.")
 
-    def _search_prs(self, query: str, owner: str, name: str) -> list[int]:
+    def _search_prs(
+        self, query: str, owner: str, name: str, limit: Optional[int] = None
+    ) -> list[int]:
         """Search for PR numbers using REST API, paginating up to GitHub's 1000-result cap."""
         token = self._get_token()
         if not token:
@@ -1316,6 +1319,8 @@ class GitHubClient:
                     if n not in seen:
                         seen.add(n)
                         pr_numbers.append(n)
+                        if limit and len(pr_numbers) >= limit:
+                            return pr_numbers
 
                 # GitHub Search API caps at 1000 results; stop if this page wasn't full
                 if len(items) < 100:
@@ -1352,17 +1357,17 @@ class GitHubClient:
         return result
 
     def _search_and_finalize_repo_prs(
-        self, owner: str, name: str, query: str, sort_key
+        self, owner: str, name: str, query: str, sort_key, limit: Optional[int] = None
     ) -> list[PullRequestInfo]:
         """Search a single repo, then run the shared get_X_for_repo tail."""
-        pr_numbers = self._search_prs(query, owner, name)
+        pr_numbers = self._search_prs(query, owner, name, limit)
         return self._finalize_repo_prs(owner, name, pr_numbers, sort_key)
 
     def _consolidated_search_and_fetch(
-        self, repos: list[tuple[str, str]], query: str, sort_key
+        self, repos: list[tuple[str, str]], query: str, sort_key, limit: Optional[int] = None
     ) -> list[PullRequestInfo]:
         """Shared tail for get_all_X: consolidated search, multi-repo fetch, and sort."""
-        pr_data = self._search_prs_consolidated(query, repos)
+        pr_data = self._search_prs_consolidated(query, repos, limit)
         all_prs = self._fetch_multi_repo_prs(pr_data)
         all_prs.sort(key=sort_key, reverse=True)
         return all_prs
@@ -1419,7 +1424,7 @@ class GitHubClient:
         return all_prs
 
     def _search_prs_consolidated(
-        self, query: str, repos: list[tuple[str, str]]
+        self, query: str, repos: list[tuple[str, str]], limit: Optional[int] = None
     ) -> dict[tuple[str, str], list[int]]:
         """Search for PRs across all repos with one query, paginating like _search_prs.
 
@@ -1439,6 +1444,7 @@ class GitHubClient:
 
         tracked_repos = {(owner.lower(), name.lower()) for owner, name in repos}
         result: dict[tuple[str, str], list[int]] = {}
+        found = 0
         page = 1
 
         try:
@@ -1479,6 +1485,9 @@ class GitHubClient:
                         owner, name = parts[-2], parts[-1]
                         if (owner.lower(), name.lower()) in tracked_repos:
                             result.setdefault((owner, name), []).append(item['number'])
+                            found += 1
+                            if limit and found >= limit:
+                                return result
 
                 # GitHub Search API caps at 1000 results; stop if this page wasn't full
                 if len(items) < 100:
@@ -1517,7 +1526,8 @@ class GitHubClient:
 
             query = f"repo:{owner}/{name} is:pr is:merged author:{author}"
             return self._search_and_finalize_repo_prs(
-                owner, name, query, lambda pr: (pr.merged_at or pr.updated_at, pr.number)
+                owner, name, query, lambda pr: (pr.merged_at or pr.updated_at, pr.number),
+                limit=MERGED_PR_LIMIT,
             )
         except Exception as e:
             self._handle_api_error(e, owner, name)
@@ -1537,7 +1547,8 @@ class GitHubClient:
 
         query = f"is:pr is:merged author:{author}"
         return self._consolidated_search_and_fetch(
-            repos, query, lambda pr: (pr.merged_at or pr.updated_at, pr.number)
+            repos, query, lambda pr: (pr.merged_at or pr.updated_at, pr.number),
+            limit=MERGED_PR_LIMIT,
         )
 
     def get_review_requests_for_repo(
