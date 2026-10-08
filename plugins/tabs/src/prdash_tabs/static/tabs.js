@@ -1,9 +1,17 @@
 (function() {
     const tabLabels = {
         my_prs: 'My PRs',
+        my_prs_merged: 'My PRs: Merged',
         author_prs: 'PRs by Author',
         review_requests: 'Review Requests',
         assigned: 'Assigned'
+    };
+    const tabShortLabels = {
+        my_prs: 'M',
+        my_prs_merged: 'G',
+        author_prs: 'A',
+        review_requests: 'R',
+        assigned: 'D'
     };
     const storageKey = 'prdash-tabs:' +
         (window.prdashTabsUserId || 'user');
@@ -71,11 +79,15 @@
     }
 
     function defaultTabForGroup(group) {
+        if (group === 'my_prs_merged') return 'merged';
         return group === 'author_prs' ? 'author' : group;
     }
 
+    function tabIdForCurrent(currentTab) {
+        return currentTab === 'merged' ? 'my_prs_merged' : groupForTab(currentTab);
+    }
+
     function tabForUrl(group, url) {
-        if (group === 'my_prs' && /\/merged\/?(?:\?|$)/.test(url)) return 'merged';
         if (group === 'author_prs' && /\/merged\/?(?:\?|$)/.test(url)) return 'author_merged';
         return defaultTabForGroup(group);
     }
@@ -92,6 +104,7 @@
         if (/\/prs\/by-author(?:\/|$)/.test(path)) return 'author_prs';
         if (/\/review-requests(?:\/|$)/.test(path)) return 'review_requests';
         if (/\/assigned(?:\/|$)/.test(path)) return 'assigned';
+        if (/\/merged\/?$/.test(path)) return 'my_prs_merged';
         return 'my_prs';
     }
 
@@ -179,6 +192,11 @@
         }
     }
 
+    function mergeParams(url, params, names) {
+        names.forEach(function(name) { url.searchParams.delete(name); });
+        params.forEach(function(value, name) { url.searchParams.append(name, value); });
+    }
+
     function backgroundRequestUrl(tab, doc, autoRefresh) {
         const rawUrl = autoRefresh && autoRefresh.getAttribute('hx-get') || tab.url;
         const url = new URL(rawUrl, window.location.href);
@@ -198,8 +216,7 @@
         controls.forEach(function(control) {
             appendControlValue(params, control, names);
         });
-        names.forEach(function(name) { url.searchParams.delete(name); });
-        params.forEach(function(value, name) { url.searchParams.append(name, value); });
+        mergeParams(url, params, names);
         return url;
     }
 
@@ -321,8 +338,7 @@
             select.type = 'button';
             select.className = 'prdash-tab' + (tab === activeTab ? ' active' : '');
             select.dataset.prdashTab = tab.id;
-            select.dataset.tabShort = tab.id === 'my_prs' ? 'M' :
-                (tab.id === 'author_prs' ? 'A' : (tab.id === 'review_requests' ? 'R' : 'D'));
+            select.dataset.tabShort = tabShortLabels[tab.id];
             select.setAttribute('aria-current', tab === activeTab ? 'page' : 'false');
             select.title = tab.label + ' - ' + tab.url;
             const loading = tab.pendingRender || tab.loading;
@@ -491,6 +507,43 @@
         requestTab(tab, tab.url);
     }
 
+    function openMergedSwitch(link) {
+        const url = new URL(link.getAttribute('href'), window.location.href);
+        const toolbar = document.querySelector('.filter-toolbar');
+        if (toolbar) {
+            const params = new URLSearchParams();
+            const names = new Set();
+            toolbar.querySelectorAll('input, select, textarea').forEach(function(control) {
+                appendControlValue(params, control, names);
+            });
+            mergeParams(url, params, names);
+        }
+        const href = url.pathname + url.search;
+        const id = groupForUrl(href);
+        const existing = tabs.find(function(tab) { return tab.id === id; });
+        if (existing === activeTab) return;
+        if (existing && existing.currentRepo === repoForUrl(id, href)) {
+            activateTab(existing);
+            return;
+        }
+        const tab = existing || {
+            id: id,
+            label: tabLabels[id],
+            url: href,
+            html: null,
+            currentTab: defaultTabForGroup(id),
+            currentRepo: '',
+            reviewTab: 'pending',
+            search: null,
+            scrollTop: 0
+        };
+        if (!existing) {
+            tabs.push(tab);
+            renderTabs();
+        }
+        requestTab(tab, href);
+    }
+
     function closeTab(id) {
         const index = tabs.findIndex(function(tab) { return tab.id === id; });
         if (index === -1) return;
@@ -528,10 +581,13 @@
         const list = content();
         if (!layout || !list || !ensureTabBar()) return;
         const saved = readTabs();
-        const currentGroup = groupForTab(layout.dataset.currentTab || 'my_prs');
+        const currentGroup = tabIdForCurrent(layout.dataset.currentTab || 'my_prs');
         const url = currentUrl();
         tabs = saved.map(function(tab) {
+            if (tab.id === 'my_prs' && groupForUrl(tab.url) === 'my_prs_merged') tab.id = 'my_prs_merged';
             return Object.assign(tab, { label: tabLabels[tab.id], html: null });
+        }).filter(function(tab, index, all) {
+            return all.findIndex(function(other) { return other.id === tab.id; }) === index;
         });
         activeTab = tabs.find(function(tab) { return tab.id === currentGroup; });
         if (!activeTab) {
@@ -578,6 +634,14 @@
         if (prdashTab) {
             event.preventDefault();
             activateTab(tabs.find(function(tab) { return tab.id === prdashTab.dataset.prdashTab; }));
+            return;
+        }
+        const switchLink = event.target.closest('#pr-content .tab-navigation a.tab');
+        if (switchLink && activeTab && (activeTab.id === 'my_prs' || activeTab.id === 'my_prs_merged') && event.button === 0 &&
+                !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+            event.preventDefault();
+            event.stopPropagation();
+            openMergedSwitch(switchLink);
             return;
         }
         const sidebarLink = event.target.closest('.sidebar-link[data-tab]');
