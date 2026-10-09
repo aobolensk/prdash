@@ -471,33 +471,53 @@ class StatsService:
     def get_all_stats(self, repos: list[tuple[str, str]], days: int = 30) -> dict[str, StatResult]:
         """Get all stats in one call, using parallel execution for independent methods."""
         results: dict[str, StatResult] = {}
+        stat_methods = {
+            'quick': self.get_quick_stats,
+            'velocity': self.get_velocity_stats,
+            'reviews': self.get_review_stats,
+            'health': self.get_health_stats,
+            'repos': self.get_repo_stats,
+            'collaboration': self.get_collaboration_stats,
+        }
+        cache_keys = {
+            'quick': self._get_cache_key('quick', repos, days),
+            'velocity': self._get_cache_key('velocity', repos, days),
+            'reviews': self._get_cache_key('reviews', repos, days),
+            'health': self._get_cache_key('health', repos, 0),
+            'repos': self._get_cache_key('repos', repos, days),
+            'collaboration': self._get_cache_key('collab', repos, days),
+        }
 
-        try:
-            self.get_prs_for_stats(repos, days)
-        except Exception as error:
-            for stat_name in ('quick', 'velocity', 'health', 'repos'):
-                results[stat_name] = StatResult(error=self._format_error(error))
+        missing_stats = {}
+        for stat_name, method in stat_methods.items():
+            cached = _cache_get(cache_keys[stat_name])
+            if cached:
+                results[stat_name] = StatResult(data=cached)
+            else:
+                missing_stats[stat_name] = method
 
-        try:
-            self.get_reviews_data(repos, days)
-        except Exception as error:
-            for stat_name in ('reviews', 'collaboration'):
-                results[stat_name] = StatResult(error=self._format_error(error))
+        pr_stats = {'quick', 'velocity', 'health', 'repos'} & missing_stats.keys()
+        if pr_stats:
+            try:
+                self.get_prs_for_stats(repos, days)
+            except Exception as error:
+                for stat_name in pr_stats:
+                    results[stat_name] = StatResult(error=self._format_error(error))
+                    missing_stats.pop(stat_name)
+
+        review_stats = {'reviews', 'collaboration'} & missing_stats.keys()
+        if review_stats:
+            try:
+                self.get_reviews_data(repos, days)
+            except Exception as error:
+                for stat_name in review_stats:
+                    results[stat_name] = StatResult(error=self._format_error(error))
+                    missing_stats.pop(stat_name)
 
         with ThreadPoolExecutor(max_workers=6) as executor:
-            # Submit all stat collection tasks
-            stat_methods = {
-                'quick': self.get_quick_stats,
-                'velocity': self.get_velocity_stats,
-                'reviews': self.get_review_stats,
-                'health': self.get_health_stats,
-                'repos': self.get_repo_stats,
-                'collaboration': self.get_collaboration_stats,
-            }
             futures = {
                 executor.submit(method, repos, days): stat_name
-                for stat_name, method in stat_methods.items()
-                if stat_name not in results
+                for stat_name, method in missing_stats.items()
             }
 
             # Collect results as they complete
