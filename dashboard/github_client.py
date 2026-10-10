@@ -84,8 +84,6 @@ PR_GRAPHQL_FIELDS = '''
                         totalCount
                         nodes {
                             ... on CheckRun {
-                                name
-                                status
                                 conclusion
                                 checkSuite {
                                     workflowRun {
@@ -99,7 +97,6 @@ PR_GRAPHQL_FIELDS = '''
                             }
                             ... on StatusContext {
                                 state
-                                context
                             }
                         }
                     }
@@ -1849,7 +1846,6 @@ class GitHubClient:
                 }
                 nodes {
                     author { login avatarUrl }
-                    state
                     submittedAt
                 }
             }
@@ -1865,8 +1861,6 @@ class GitHubClient:
                 }
                 nodes {
                     author { login }
-                    state
-                    submittedAt
                 }
             }
         '''
