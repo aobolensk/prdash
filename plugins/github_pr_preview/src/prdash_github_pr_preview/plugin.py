@@ -17,11 +17,13 @@ from prdash.plugin_api import (
     TemplateResource,
     UIContribution,
 )
+from prdash.plugin_cache import cache_get, cache_set
 
 
 PACKAGE = 'prdash_github_pr_preview'
 REPOSITORY_PART_PATTERN = re.compile(r'^[A-Za-z0-9_.-]+$')
 GITHUB_API_URL = 'https://api.github.com'
+ETAG_CACHE_TTL = 3600
 
 
 class GitHubPRPreviewPlugin:
@@ -75,6 +77,24 @@ class GitHubPRPreviewPlugin:
             'Authorization': f'Bearer {token}',
             'X-GitHub-Api-Version': GITHUB_API_VERSION,
         }
+
+    @staticmethod
+    def _get_json(url, headers, params=None):
+        """Returns (response, data), data None unless the request succeeded. A 304 is free against the rate limit."""
+        key = ('github_pr_preview:etag', headers.get('Authorization'), url, tuple(sorted((params or {}).items())))
+        cached = cache_get(key)
+        if cached is not None:
+            headers = {**headers, 'If-None-Match': cached[0]}
+        response = requests.get(url, params=params, headers=headers, timeout=15)
+        if response.status_code == 304 and cached is not None:
+            return response, cached[1]
+        if response.status_code != 200:
+            return response, None
+        data = response.json()
+        etag = response.headers.get('ETag')
+        if etag:
+            cache_set(key, (etag, data), ETAG_CACHE_TTL)
+        return response, data
 
     @staticmethod
     def _error_message(response, fallback):
@@ -181,17 +201,11 @@ class GitHubPRPreviewPlugin:
         page = 1
         while True:
             try:
-                response = requests.get(
-                    url,
-                    params={'per_page': 100, 'page': page},
-                    headers=headers,
-                    timeout=15,
-                )
+                response, page_items = self._get_json(url, headers, {'per_page': 100, 'page': page})
             except requests.exceptions.RequestException:
                 return None, fallback
-            if response.status_code != 200:
+            if page_items is None:
                 return None, self._error_message(response, fallback)
-            page_items = response.json()
             items.extend(page_items)
             if len(page_items) < 100:
                 return items, None
@@ -213,14 +227,13 @@ class GitHubPRPreviewPlugin:
         headers = self._headers(token)
         pull_url = f'{GITHUB_API_URL}/repos/{owner}/{repository}/pulls/{number}'
         try:
-            pull_response = requests.get(pull_url, headers=headers, timeout=15)
+            pull_response, pull_request = self._get_json(pull_url, headers)
         except requests.exceptions.RequestException:
             return respond({'error': 'GitHub could not load this pull request.'})
-        if pull_response.status_code != 200:
+        if pull_request is None:
             return respond({
                 'error': self._error_message(pull_response, 'GitHub could not load this pull request.'),
             })
-        pull_request = pull_response.json()
 
         changed_files, files_error = self._load_pages(
             f'{pull_url}/files',

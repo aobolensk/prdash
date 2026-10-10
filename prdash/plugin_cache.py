@@ -7,6 +7,8 @@ hand-rolling its own.
 
 import time
 
+MAX_ENTRIES = 256
+
 _CACHE = {}
 
 
@@ -22,7 +24,15 @@ def cache_get(key):
 
 
 def cache_set(key, value, ttl):
-    _CACHE[key] = (value, time.time() + ttl)
+    now = time.time()
+    # Pop first so the key moves to the newest position.
+    _CACHE.pop(key, None)
+    _CACHE[key] = (value, now + ttl)
+    if len(_CACHE) > MAX_ENTRIES:
+        for stale in [k for k, (_, expires_at) in _CACHE.items() if now >= expires_at]:
+            del _CACHE[stale]
+        while len(_CACHE) > MAX_ENTRIES:
+            del _CACHE[next(iter(_CACHE))]
 
 
 def cache_add(key, value, ttl):

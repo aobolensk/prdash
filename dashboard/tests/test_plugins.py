@@ -770,6 +770,34 @@ class ReferencePluginIntegrationTests(TestCase):
         self.assertEqual(response.context['commit_id'], 'head-sha')
         self.assertEqual(mock_get.call_count, 3)
 
+    @patch.dict('prdash.plugin_cache._CACHE', clear=True)
+    @patch('requests.get')
+    def test_pr_preview_revalidates_with_etag(self, mock_get):
+        def ok(url, params=None, headers=None, **kwargs):
+            response = MagicMock(status_code=200, headers={'ETag': f'"{url}"'})
+            response.json.return_value = [] if params else {'head': {'sha': 'head-sha'}}
+            return response
+
+        mock_get.side_effect = ok
+        plugin = self._plugin(
+            'github_pr_preview',
+            'prdash_github_pr_preview',
+            'GitHubPRPreviewPlugin',
+        )
+        request = self._request_info(
+            'GET', query_params={'owner': 'owner', 'repository': 'repo', 'number': '123'},
+        )
+        plugin.preview(request, {})
+
+        mock_get.reset_mock()
+        mock_get.side_effect = lambda url, **kwargs: MagicMock(status_code=304, headers={})
+        response = plugin.preview(request, {})
+
+        self.assertEqual(response.context['commit_id'], 'head-sha')
+        self.assertEqual(mock_get.call_count, 3)
+        for call in mock_get.call_args_list:
+            self.assertEqual(call.kwargs['headers']['If-None-Match'], f'"{call.args[0]}"')
+
     @patch('requests.post')
     def test_pr_preview_publishes_inline_comment(self, mock_post):
         mock_post.return_value = MagicMock(status_code=201)
