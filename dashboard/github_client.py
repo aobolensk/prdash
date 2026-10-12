@@ -283,15 +283,12 @@ class GitHubClient:
 
         # Fall back to OAuth token
         from allauth.socialaccount.models import SocialToken
-        try:
-            social_token = SocialToken.objects.filter(
-                account__user=self.user,
-                account__provider='github'
-            ).first()
-            if social_token:
-                return social_token.token
-        except SocialToken.DoesNotExist:
-            pass
+        social_token = SocialToken.objects.filter(
+            account__user=self.user,
+            account__provider='github'
+        ).first()
+        if social_token:
+            return social_token.token
         return None
 
     def _add_grouped_message(

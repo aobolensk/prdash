@@ -191,6 +191,15 @@ class GitHubClientTokenTests(TestCase):
 
         self.assertEqual(token, 'oauth_token')
 
+    @patch('allauth.socialaccount.models.SocialToken')
+    def test_get_token_returns_none_without_oauth_token(self, mock_social_token):
+        mock_social_token.objects.filter.return_value.first.return_value = None
+
+        client = GitHubClient(self.user)
+        token = client._get_token()
+
+        self.assertIsNone(token)
+
 
 class GitHubClientErrorHandlingTests(TestCase):
     """Tests for GitHubClient error handling."""
