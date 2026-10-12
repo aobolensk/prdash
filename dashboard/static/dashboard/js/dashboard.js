@@ -1024,6 +1024,14 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     document.body.addEventListener('click', function(evt) {
+        if (evt.target.closest('#pr-search-toggle')) {
+            togglePrSearch();
+            return;
+        }
+        if (evt.target.closest('#pr-refresh-btn')) {
+            htmx.trigger(document.body, 'manualRefresh');
+            return;
+        }
         const copyButton = evt.target.closest('.btn-copy-branch');
         if (copyButton) copyBranchName(copyButton.dataset.branchName);
     });

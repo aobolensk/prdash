@@ -16,4 +16,4 @@ stats = "prdash_stats.plugin:plugin"
 where = ["src"]
 
 [tool.setuptools.package-data]
-prdash_stats = ["templates/*.html"]
+prdash_stats = ["static/*.js", "templates/*.html"]

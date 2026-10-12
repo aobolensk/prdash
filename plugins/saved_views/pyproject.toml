@@ -15,4 +15,4 @@ saved-views = "prdash_saved_views.plugin:plugin"
 where = ["src"]
 
 [tool.setuptools.package-data]
-prdash_saved_views = ["templates/*.html"]
+prdash_saved_views = ["static/*.js", "templates/*.html"]

@@ -6,6 +6,11 @@ app_name = 'dashboard'
 urlpatterns = [
     path('', views.home, name='home'),
     path(
+        'plugins/<slug:plugin_id>/assets/<str:asset_name>/',
+        views.plugin_asset,
+        name='plugin_asset',
+    ),
+    path(
         'plugins/<slug:plugin_id>/<slug:route>/',
         views.plugin_route,
         name='plugin_route',

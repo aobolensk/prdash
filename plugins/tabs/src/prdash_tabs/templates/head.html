@@ -1,7 +1,7 @@
-{% if tabs_js %}
+{% if tabs_css %}
 <style>{{ tabs_css|safe }}</style>
-<script>
-window.prdashTabsUserId = "{{ request.user.id|default:'user' }}";
-{{ tabs_js|safe }}
-</script>
+<script
+    src="{% url 'dashboard:plugin_asset' plugin_id='tabs' asset_name='tabs.js' %}"
+    data-user-id="{{ request.user.id|default:'user' }}"
+    defer></script>
 {% endif %}

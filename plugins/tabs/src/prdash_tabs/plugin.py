@@ -34,7 +34,6 @@ class TabsPlugin:
         assets = resources.files(PACKAGE).joinpath('static')
         return {
             'tabs_css': assets.joinpath('tabs.css').read_text(encoding='utf-8'),
-            'tabs_js': assets.joinpath('tabs.js').read_text(encoding='utf-8'),
         }
 
     def shutdown(self):

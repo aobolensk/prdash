@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth.models import User
+from django.http import Http404
 from django.template import Context
 from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import reverse
@@ -51,6 +52,35 @@ class PluginDiscoveryTests(TestCase):
 
             self.assertIn('example', manager.descriptors)
             self.assertNotIn('module_that_must_not_load', __import__('sys').modules)
+
+    def test_source_plugin_assets_resolve_inside_package_static_directory(self):
+        with TemporaryDirectory() as directory:
+            plugin_directory = Path(directory) / 'asset-plugin'
+            asset = plugin_directory / 'src' / 'asset_plugin' / 'static' / 'app.js'
+            asset.parent.mkdir(parents=True)
+            asset.write_text('window.assetPlugin = true;', encoding='utf-8')
+            manifest = {
+                'id': 'asset-plugin',
+                'name': 'Asset Plugin',
+                'version': '1.0.0',
+                'api_version': PLUGIN_API_VERSION,
+                'entrypoint': 'asset_plugin.plugin:plugin',
+                'python_path': 'src',
+            }
+            (plugin_directory / 'prdash-plugin.json').write_text(
+                json.dumps(manifest),
+                encoding='utf-8',
+            )
+
+            with override_settings(PRDASH_PLUGIN_PATHS=[directory]):
+                manager = PluginManager()
+                manager.discover()
+
+            self.assertEqual(manager.asset_path('asset-plugin', 'app.js'), asset.resolve())
+            with self.assertRaises(Http404):
+                manager.asset_path('asset-plugin', '../app.js')
+            with self.assertRaises(Http404):
+                manager.asset_path('asset-plugin', 'style.css')
 
     def test_incompatible_source_is_discovered_but_not_loaded(self):
         manager = PluginManager()

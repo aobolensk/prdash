@@ -54,6 +54,7 @@ logger = logging.getLogger(__name__)
 ENTRY_POINT_GROUP = 'prdash.plugins'
 SOURCE_MANIFEST = 'prdash-plugin.json'
 IDENTIFIER_PATTERN = re.compile(r'^[a-z0-9][a-z0-9_-]*$')
+ASSET_NAME_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]*$')
 
 DEFAULT_CALL_TIMEOUT = getattr(settings, 'PRDASH_PLUGIN_CALL_TIMEOUT', 10.0)
 DEFAULT_ROUTE_TIMEOUT = getattr(settings, 'PRDASH_PLUGIN_ROUTE_TIMEOUT', 120.0)
@@ -85,7 +86,7 @@ class PluginDescriptor:
 
     def __init__(
         self, plugin_id, name, version, description, entrypoint, source,
-        *, api_version=None, python_path=None, load_error=None,
+        *, api_version=None, python_path=None, asset_root=None, load_error=None,
     ):
         self.plugin_id = plugin_id
         self.name = name
@@ -95,6 +96,7 @@ class PluginDescriptor:
         self.source = source
         self.api_version = api_version
         self.python_path = python_path
+        self.asset_root = asset_root
         self.load_error = load_error
 
 
@@ -159,6 +161,10 @@ class PluginManager:
                         source=str(manifest_path.parent),
                         api_version=data.get('api_version'),
                         python_path=(manifest_path.parent / data.get('python_path', '.')).resolve(),
+                        asset_root=self._package_path(
+                            (manifest_path.parent / data.get('python_path', '.')).resolve(),
+                            data['entrypoint'],
+                        ),
                     )
                     self._add_descriptor(descriptor)
                 except (OSError, ValueError, KeyError, TypeError) as error:
@@ -177,6 +183,7 @@ class PluginManager:
                 description=dist_metadata.get('Summary', ''),
                 entrypoint=entry_point.value,
                 source=f'Python distribution {dist_metadata.get("Name", entry_point.name)}',
+                asset_root=self._distribution_package_path(distribution, entry_point.value),
             )
             self._add_descriptor(descriptor, source_precedence=False)
 
@@ -192,6 +199,37 @@ class PluginManager:
             return
         self.descriptors[descriptor.plugin_id] = descriptor
 
+    @staticmethod
+    def _package_name(entrypoint):
+        module_name = entrypoint.partition(':')[0]
+        return module_name.rpartition('.')[0] or module_name
+
+    @classmethod
+    def _package_path(cls, root, entrypoint):
+        return Path(root).joinpath(*cls._package_name(entrypoint).split('.'))
+
+    @classmethod
+    def _distribution_package_path(cls, distribution, entrypoint):
+        if distribution is None:
+            return None
+        return Path(distribution.locate_file(cls._package_name(entrypoint).replace('.', '/')))
+
+    def asset_path(self, plugin_id, asset_name):
+        if not ASSET_NAME_PATTERN.fullmatch(asset_name):
+            raise Http404
+        descriptor = self.descriptors.get(plugin_id)
+        if descriptor is None or descriptor.asset_root is None:
+            raise Http404
+        static_root = (Path(descriptor.asset_root) / 'static').resolve()
+        asset_path = (static_root / asset_name).resolve()
+        if (
+            asset_path.parent != static_root
+            or asset_path.suffix.lower() != '.js'
+            or not asset_path.is_file()
+        ):
+            raise Http404
+        return asset_path
+
     FINGERPRINT_CHECK_INTERVAL = 1.0
 
     @staticmethod
@@ -202,7 +240,7 @@ class PluginManager:
         if not root.exists():
             return None
         latest = 0
-        for pattern in ('*.py', '*.html'):
+        for pattern in ('*.py', '*.html', '*.js', '*.css'):
             for path in root.rglob(pattern):
                 try:
                     latest = max(latest, path.stat().st_mtime_ns)
@@ -1064,7 +1102,9 @@ class PluginManager:
             context = dict(response.get('context', {}))
             for key, nested in response.get('nested', {}).items():
                 nested_template = engines['django'].from_string(nested['source'])
-                context[key] = nested_template.render(dict(nested['context']), request)
+                nested_context = dict(nested['context'])
+                nested_context['plugin_id'] = plugin_id
+                context[key] = nested_template.render(nested_context, request)
             context['plugin_id'] = plugin_id
             context['plugin_config'] = config
             template = engines['django'].from_string(response['source'])

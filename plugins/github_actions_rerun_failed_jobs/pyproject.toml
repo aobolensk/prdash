@@ -16,4 +16,4 @@ github-actions-rerun-failed-jobs = "prdash_github_actions_rerun_failed_jobs.plug
 where = ["src"]
 
 [tool.setuptools.package-data]
-prdash_github_actions_rerun_failed_jobs = ["templates/*.html"]
+prdash_github_actions_rerun_failed_jobs = ["static/*.js", "templates/*.html"]

@@ -15,4 +15,4 @@ export-links = "prdash_export_links.plugin:plugin"
 where = ["src"]
 
 [tool.setuptools.package-data]
-prdash_export_links = ["templates/*.html"]
+prdash_export_links = ["static/*.js", "templates/*.html"]

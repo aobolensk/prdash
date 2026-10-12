@@ -13,8 +13,9 @@
         review_requests: 'R',
         assigned: 'D'
     };
+    const currentScript = document.currentScript;
     const storageKey = 'prdash-tabs:' +
-        (window.prdashTabsUserId || 'user');
+        (currentScript && currentScript.dataset.userId || 'user');
     const inFlightRequests = new Set();
     const syntheticSources = new WeakSet();
     let tabs = [];

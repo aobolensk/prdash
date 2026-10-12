@@ -10,6 +10,7 @@ from django.utils import timezone
 from dataclasses import asdict
 import hashlib
 import json
+from mimetypes import guess_type
 import re
 import requests
 
@@ -636,6 +637,20 @@ def save_plugins(request):
 def plugin_route(request, plugin_id, route):
     """Dispatch a request to a route registered by an enabled plugin."""
     return plugin_manager.dispatch(request, plugin_id, route)
+
+
+def plugin_asset(request, plugin_id, asset_name):
+    """Serve a file from an installed plugin package static directory."""
+    asset_path = plugin_manager.asset_path(plugin_id, asset_name)
+    try:
+        content = asset_path.read_bytes()
+    except OSError as error:
+        raise Http404 from error
+    content_type = guess_type(asset_path.name)[0] or 'application/octet-stream'
+    response = HttpResponse(content, content_type=content_type)
+    response['X-Content-Type-Options'] = 'nosniff'
+    response['Cache-Control'] = 'no-cache'
+    return response
 
 
 @login_required
