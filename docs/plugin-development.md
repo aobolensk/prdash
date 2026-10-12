@@ -180,13 +180,18 @@ document.addEventListener('prdash:pullRequestSearchReady', function() {
     search.setState({
         open: true,
         include: {text: 'bug', pills: [{kind: 'label', value: 'urgent'}]},
-        exclude: {text: '', pills: []}
+        exclude: {text: '', pills: []},
+        alternatives: [{
+            include: {text: 'docs', pills: []},
+            exclude: {text: '', pills: []}
+        }]
     });
 });
 ```
 
-`getState()` returns this same JSON-serializable structure. `setState()`
-returns `false` when the current page has no PR search UI. Plugins should store
+Each entry in the optional `alternatives` list is an extra include/exclude
+pair, and a PR is shown when any pair matches. `getState()` returns this same
+JSON-serializable structure. `setState()` returns `false` when the current page has no PR search UI. Plugins should store
 this state unchanged and validate it again in their route handlers.
 
 For request-specific UI data, pass a context provider when registering a

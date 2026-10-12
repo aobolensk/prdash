@@ -1139,6 +1139,40 @@ a:hover {
     flex-shrink: 0;
 }
 
+.pr-search-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1;
+    min-width: 80px;
+}
+
+.pr-search-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.pr-search-or-label {
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+}
+
+.pr-search-row-remove {
+    flex-shrink: 0;
+    color: var(--color-text-muted);
+}
+
+.pr-search-row-remove:hover {
+    color: var(--color-danger);
+}
+
+.pr-search-add-or {
+    flex-shrink: 0;
+}
+
 .pr-search-field {
     display: flex;
     flex-wrap: wrap;
@@ -1782,6 +1816,10 @@ mark.pr-hl-typo {
     }
 
     .pr-search-bar {
+        flex-wrap: wrap;
+    }
+
+    .pr-search-row {
         flex-wrap: wrap;
     }
 

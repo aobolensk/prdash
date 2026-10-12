@@ -1031,6 +1031,42 @@ class ReferencePluginIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['category'], {'name': 'By octocat', 'query': query})
 
+    def test_saved_search_category_keeps_alternatives(self):
+        PluginConfiguration.objects.create(
+            user=self.user,
+            plugin_id='saved-views',
+            enabled=True,
+        )
+        url = reverse(
+            'dashboard:plugin_route',
+            kwargs={'plugin_id': 'saved-views', 'route': 'categories'},
+        )
+        empty = {'text': '', 'pills': []}
+        query = {
+            'open': True,
+            'include': empty,
+            'exclude': empty,
+            'alternatives': [{
+                'include': {'text': 'bug', 'pills': []},
+                'exclude': empty,
+            }],
+        }
+
+        response = self.client.post(
+            url,
+            data=json.dumps({'name': 'Either', 'query': query}),
+            content_type='application/json',
+        )
+        invalid = self.client.post(
+            url,
+            data=json.dumps({'name': 'Bad', 'query': {**query, 'alternatives': ['x']}}),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['category']['query'], query)
+        self.assertEqual(invalid.status_code, 400)
+
     def test_saved_search_category_rejects_empty_query(self):
         PluginConfiguration.objects.create(
             user=self.user,

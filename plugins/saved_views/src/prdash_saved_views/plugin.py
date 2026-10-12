@@ -17,6 +17,7 @@ CATEGORY_COLLECTION = 'categories'
 MAX_CATEGORY_NAME_LENGTH = 80
 MAX_TEXT_LENGTH = 500
 MAX_PILLS_PER_FIELD = 40
+MAX_ALTERNATIVES = 10
 MAX_PILL_VALUE_LENGTH = 200
 PILL_KINDS = {'repo', 'label', 'author'}
 
@@ -143,8 +144,23 @@ class SavedViewsPlugin:
             'include': SavedViewsPlugin._validate_query_field(value.get('include')),
             'exclude': SavedViewsPlugin._validate_query_field(value.get('exclude')),
         }
-        if not query['include']['text'] and not query['exclude']['text'] and not (
-            query['include']['pills'] or query['exclude']['pills']
+        alternatives = value.get('alternatives', [])
+        if not isinstance(alternatives, list) or len(alternatives) > MAX_ALTERNATIVES:
+            raise ValueError('Search alternatives are invalid')
+        if alternatives:
+            query['alternatives'] = []
+            for alternative in alternatives:
+                if not isinstance(alternative, dict):
+                    raise ValueError('Search alternative is invalid')
+                query['alternatives'].append({
+                    'include': SavedViewsPlugin._validate_query_field(alternative.get('include')),
+                    'exclude': SavedViewsPlugin._validate_query_field(alternative.get('exclude')),
+                })
+        groups = [query] + query.get('alternatives', [])
+        if not any(
+            group['include']['text'] or group['exclude']['text']
+            or group['include']['pills'] or group['exclude']['pills']
+            for group in groups
         ):
             raise ValueError('Search query cannot be empty')
         return query

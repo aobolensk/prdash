@@ -25,12 +25,12 @@ function showToast(message, type = 'error') {
 const PR_HL_SELECTOR = '.pr-title, .pr-repo, .pr-number, .pr-author, .pr-branch-name, .pr-linked-issues, .pr-label';
 
 // Pill-field controllers for the include/exclude search inputs, set up in
-// DOMContentLoaded. Tokens are {kind: 'text'|'repo'|'label'|'author', value}
-// objects; repo/label/author tokens come from committed suggestion pills and
-// match exactly, while text tokens are the free-typed words and match
-// fuzzily as before.
-let prIncludeField = null;
-let prExcludeField = null;
+// DOMContentLoaded. A PR is shown when any group matches. Tokens are
+// {kind: 'text'|'repo'|'label'|'author', value} objects; repo/label/author
+// tokens come from committed suggestion pills and match exactly, while text
+// tokens are the free-typed words and match fuzzily as before.
+const prSearchGroups = [];
+const PR_MAX_SEARCH_ALTERNATIVES = 10;
 
 // Typo budget scales with token length: short tokens must match exactly.
 function prMaxTypos(len) {
@@ -427,21 +427,111 @@ function prSetSearchFieldState(field, state) {
     prHideSuggestions(field);
 }
 
+function prSearchGroupState(group) {
+    return {
+        include: prSearchFieldState(group.include),
+        exclude: prSearchFieldState(group.exclude)
+    };
+}
+
+function prSetSearchGroupState(group, state) {
+    if (!state || typeof state !== 'object') return;
+    prSetSearchFieldState(group.include, state.include);
+    prSetSearchFieldState(group.exclude, state.exclude);
+}
+
+function prBuildSearchField(isExclude) {
+    const fieldEl = document.createElement('div');
+    fieldEl.className = 'pr-search-field' + (isExclude ? ' pr-search-exclude-field' : '');
+    const inputEl = document.createElement('input');
+    inputEl.type = 'text';
+    inputEl.className = 'input pr-search-input' + (isExclude ? ' pr-search-exclude-input' : '');
+    inputEl.placeholder = isExclude ? 'Exclude\u2026' : 'OR search\u2026';
+    inputEl.setAttribute('aria-label', isExclude ?
+        'Exclude pull requests matching this text (alternative search)' :
+        'Alternative search for pull requests on this page');
+    inputEl.autocomplete = 'off';
+    inputEl.spellcheck = false;
+    const suggestEl = document.createElement('div');
+    suggestEl.className = 'pr-search-suggest';
+    suggestEl.hidden = true;
+    fieldEl.appendChild(inputEl);
+    fieldEl.appendChild(suggestEl);
+    return initPillField(fieldEl, inputEl, suggestEl, isExclude);
+}
+
+function prAddSearchGroup() {
+    const rowsEl = document.getElementById('pr-search-rows');
+    if (!rowsEl || prSearchGroups.length > PR_MAX_SEARCH_ALTERNATIVES) return null;
+    const rowEl = document.createElement('div');
+    rowEl.className = 'pr-search-row pr-search-row-alt';
+    const labelEl = document.createElement('span');
+    labelEl.className = 'pr-search-or-label';
+    labelEl.textContent = 'OR';
+    const group = { rowEl: rowEl, include: prBuildSearchField(false), exclude: prBuildSearchField(true) };
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn-icon pr-search-row-remove';
+    removeBtn.title = 'Remove this alternative';
+    removeBtn.setAttribute('aria-label', 'Remove this alternative search');
+    removeBtn.textContent = '\u00d7';
+    removeBtn.addEventListener('click', function() {
+        prRemoveSearchGroup(group);
+    });
+    rowEl.appendChild(labelEl);
+    rowEl.appendChild(group.include.fieldEl);
+    rowEl.appendChild(group.exclude.fieldEl);
+    rowEl.appendChild(removeBtn);
+    rowsEl.appendChild(rowEl);
+    prSearchGroups.push(group);
+    prUpdateAddOrButton();
+    return group;
+}
+
+function prRemoveSearchGroup(group) {
+    const idx = prSearchGroups.indexOf(group);
+    if (idx < 1) return;
+    prSearchGroups.splice(idx, 1);
+    group.rowEl.remove();
+    prUpdateAddOrButton();
+    applyPrSearch();
+}
+
+function prUpdateAddOrButton() {
+    const btn = document.getElementById('pr-search-add-or');
+    if (btn) btn.disabled = prSearchGroups.length > PR_MAX_SEARCH_ALTERNATIVES;
+}
+
 function getPrSearchState() {
     const bar = document.getElementById('pr-search-bar');
+    const first = prSearchGroups.length ? prSearchGroupState(prSearchGroups[0]) : {
+        include: prSearchFieldState(null),
+        exclude: prSearchFieldState(null)
+    };
     return {
         open: Boolean(bar && !bar.hidden),
-        include: prSearchFieldState(prIncludeField),
-        exclude: prSearchFieldState(prExcludeField)
+        include: first.include,
+        exclude: first.exclude,
+        alternatives: prSearchGroups.slice(1).map(prSearchGroupState)
     };
 }
 
 function setPrSearchState(state) {
-    if (!state || typeof state !== 'object' || !prIncludeField || !prExcludeField) {
+    if (!state || typeof state !== 'object' || !prSearchGroups.length) {
         return false;
     }
-    prSetSearchFieldState(prIncludeField, state.include);
-    prSetSearchFieldState(prExcludeField, state.exclude);
+    const alternatives = Array.isArray(state.alternatives) ?
+        state.alternatives.slice(0, PR_MAX_SEARCH_ALTERNATIVES) : [];
+    while (prSearchGroups.length > alternatives.length + 1) {
+        prRemoveSearchGroup(prSearchGroups[prSearchGroups.length - 1]);
+    }
+    while (prSearchGroups.length < alternatives.length + 1) {
+        if (!prAddSearchGroup()) break;
+    }
+    prSetSearchGroupState(prSearchGroups[0], state);
+    alternatives.forEach(function(alternative, idx) {
+        prSetSearchGroupState(prSearchGroups[idx + 1], alternative);
+    });
     togglePrSearch(state.open !== false);
     document.dispatchEvent(new CustomEvent('prdash:pullRequestSearchChanged', {
         detail: getPrSearchState()
@@ -620,15 +710,18 @@ function applyPrSearch() {
 
     const cards = content.querySelectorAll('.pr-card');
     const active = !bar.hidden;
-    const include = active ? prFieldTokens(prIncludeField) : { tokens: [], displayParts: [] };
-    const exclude = active ? prFieldTokens(prExcludeField) : { tokens: [], displayParts: [] };
+    const groups = active ? prSearchGroups.map(function(group) {
+        return { include: prFieldTokens(group.include), exclude: prFieldTokens(group.exclude) };
+    }).filter(function(group) {
+        return group.include.tokens.length || group.exclude.tokens.length;
+    }) : [];
 
     let existingEmpty = content.querySelector('.pr-search-empty');
 
     // Always strip previous highlights before recomputing.
     prClearHighlights(content);
 
-    if (!include.tokens.length && !exclude.tokens.length) {
+    if (!groups.length) {
         cards.forEach(card => { card.hidden = false; });
         if (countEl) countEl.textContent = '';
         if (existingEmpty) existingEmpty.remove();
@@ -638,11 +731,13 @@ function applyPrSearch() {
     let matches = 0;
     cards.forEach(card => {
         const haystack = (card.dataset.search || '').toLowerCase();
-        const show = prCardMatches(include.tokens, card, haystack, exclude.tokens);
-        card.hidden = !show;
-        if (show) {
+        const matched = groups.filter(function(group) {
+            return prCardMatches(group.include.tokens, card, haystack, group.exclude.tokens);
+        });
+        card.hidden = !matched.length;
+        if (matched.length) {
             matches++;
-            prHighlightCard(card, include.tokens.map(t => t.value));
+            prHighlightCard(card, matched.flatMap(group => group.include.tokens.map(t => t.value)));
         }
     });
 
@@ -655,10 +750,13 @@ function applyPrSearch() {
             existingEmpty.className = 'empty-state pr-search-empty';
             list.appendChild(existingEmpty);
         }
-        const queryParts = [];
-        if (include.displayParts.length) queryParts.push(include.displayParts.join(' '));
-        if (exclude.displayParts.length) queryParts.push('-' + exclude.displayParts.join(' -'));
-        existingEmpty.textContent = 'No PRs match “' + queryParts.join(' ') + '”';
+        const queries = groups.map(function(group) {
+            const queryParts = [];
+            if (group.include.displayParts.length) queryParts.push(group.include.displayParts.join(' '));
+            if (group.exclude.displayParts.length) queryParts.push('-' + group.exclude.displayParts.join(' -'));
+            return queryParts.join(' ');
+        });
+        existingEmpty.textContent = 'No PRs match “' + queries.join('” or “') + '”';
     } else if (existingEmpty) {
         existingEmpty.remove();
     }
@@ -691,8 +789,10 @@ function togglePrSearch(forceOpen) {
         input.focus();
         input.select();
     } else {
-        if (prIncludeField) prHideSuggestions(prIncludeField);
-        if (prExcludeField) prHideSuggestions(prExcludeField);
+        prSearchGroups.forEach(function(group) {
+            prHideSuggestions(group.include);
+            prHideSuggestions(group.exclude);
+        });
     }
     applyPrSearch();
 }
@@ -959,18 +1059,28 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    prIncludeField = initPillField(
+    const prIncludeField = initPillField(
         document.getElementById('pr-search-field'),
         document.getElementById('pr-search-input'),
         document.getElementById('pr-search-suggest'),
         false
     );
-    prExcludeField = initPillField(
+    const prExcludeField = initPillField(
         document.getElementById('pr-search-exclude-field'),
         document.getElementById('pr-search-exclude-input'),
         document.getElementById('pr-search-exclude-suggest'),
         true
     );
+    if (prIncludeField && prExcludeField) {
+        prSearchGroups.push({ rowEl: null, include: prIncludeField, exclude: prExcludeField });
+    }
+    const addOrBtn = document.getElementById('pr-search-add-or');
+    if (addOrBtn) {
+        addOrBtn.addEventListener('click', function() {
+            const group = prAddSearchGroup();
+            if (group) group.include.inputEl.focus();
+        });
+    }
     window.prdash = window.prdash || {};
     window.prdash.pullRequestSearch = {
         getState: getPrSearchState,
@@ -978,10 +1088,10 @@ document.addEventListener('DOMContentLoaded', function() {
     };
     document.dispatchEvent(new CustomEvent('prdash:pullRequestSearchReady'));
     document.addEventListener('click', function(evt) {
-        [prIncludeField, prExcludeField].forEach(function(field) {
-            if (field && !field.fieldEl.contains(evt.target)) {
-                prHideSuggestions(field);
-            }
+        prSearchGroups.forEach(function(group) {
+            [group.include, group.exclude].forEach(function(field) {
+                if (!field.fieldEl.contains(evt.target)) prHideSuggestions(field);
+            });
         });
     });
     const searchClose = document.getElementById('pr-search-close');
