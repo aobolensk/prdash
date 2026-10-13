@@ -1102,6 +1102,13 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
     });
+    const searchClear = document.getElementById('pr-search-clear');
+    if (searchClear) {
+        searchClear.addEventListener('click', function() {
+            const empty = prSearchFieldState(null);
+            setPrSearchState({ open: true, include: empty, exclude: empty, alternatives: [] });
+        });
+    }
     const searchClose = document.getElementById('pr-search-close');
     if (searchClose) {
         searchClose.addEventListener('click', function() {

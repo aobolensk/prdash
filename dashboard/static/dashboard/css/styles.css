@@ -1169,6 +1169,7 @@ a:hover {
     color: var(--color-danger);
 }
 
+.pr-search-clear,
 .pr-search-add-or {
     flex-shrink: 0;
 }
