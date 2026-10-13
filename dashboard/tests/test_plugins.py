@@ -1329,7 +1329,10 @@ class PluginStreamingRuntimeTests(TestCase):
 
 
 _PAGE_PLUGIN_SOURCE = '''
-from prdash.plugin_api import PLUGIN_API_VERSION, PluginMetadata, PluginPrListPage
+from prdash.plugin_api import (
+    PLUGIN_API_VERSION, PR_LIST_PROCESS_HOOK, PluginMetadata, PluginPrListPage, TemplateResource,
+    UIContribution,
+)
 
 
 class PagePlugin:
@@ -1339,9 +1342,21 @@ class PagePlugin:
 
     def initialize(self, registrar):
         registrar.register_pr_list_page(PluginPrListPage(name='triage', title='Triage'))
+        registrar.register_hook(PR_LIST_PROCESS_HOOK, self.process)
+        registrar.register_ui(UIContribution(
+            slot='example', template=TemplateResource('page_assets', 'badge.html'),
+        ))
 
     def shutdown(self):
         pass
+
+    @staticmethod
+    def process(prs, context, config):
+        prs = list(reversed(prs))
+        for index, pr in enumerate(prs):
+            pr['plugin_annotations']['page-plugin'] = {'rank': index + 1}
+            pr['plugin_annotations']['other-plugin'] = 'forged'
+        return prs
 '''
 
 
@@ -1352,7 +1367,10 @@ class PluginPrListPageTests(TestCase):
         self.addCleanup(tempdir.cleanup)
         root = Path(tempdir.name)
         plugin_dir = root / 'page-plugin'
-        plugin_dir.mkdir()
+        assets_dir = plugin_dir / 'page_assets'
+        assets_dir.mkdir(parents=True)
+        (assets_dir / '__init__.py').write_text('', encoding='utf-8')
+        (assets_dir / 'badge.html').write_text('rank {{ plugin_annotation.rank }}', encoding='utf-8')
         (plugin_dir / 'page_plugin.py').write_text(_PAGE_PLUGIN_SOURCE + '\nplugin = PagePlugin()\n',
                                                    encoding='utf-8')
         (plugin_dir / 'prdash-plugin.json').write_text(json.dumps({
@@ -1368,6 +1386,22 @@ class PluginPrListPageTests(TestCase):
             self.manager.discover()
         self.addCleanup(self.manager._shutdown_all)
 
+    @staticmethod
+    def make_pr(number, annotations=None):
+        return PullRequestInfo(
+            number=number, title=f'PR {number}', url='', repo_owner='org', repo_name='repo',
+            author='someone', author_avatar='',
+            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            labels=[], ci_status=CIStatus(state='success'),
+            review_status=ReviewStatus(
+                state='commented',
+                last_reviewed_at={'pageuser': datetime(2026, 1, 1, 12, tzinfo=timezone.utc)},
+            ),
+            draft=False, additions=1, deletions=1,
+            plugin_annotations=annotations or {},
+        )
+
     def test_pages_are_listed_only_for_users_with_the_plugin_enabled(self):
         self.assertEqual(self.manager.pr_list_pages(self.user), [])
 
@@ -1380,6 +1414,32 @@ class PluginPrListPageTests(TestCase):
         self.assertEqual(self.manager.pr_list_pages(self.user), [page])
         self.assertEqual(self.manager.pr_list_page(self.user, 'page-plugin', 'triage'), page)
         self.assertIsNone(self.manager.pr_list_page(self.user, 'page-plugin', 'missing'))
+
+    def test_process_hook_annotations_are_scoped_to_the_calling_plugin(self):
+        self.manager.configure_user(self.user, {'page-plugin'})
+        context = PullRequestListContext(request=None, active_tab='plugin:page-plugin:triage', current_username=None)
+        prs = [self.make_pr(1, {'other-plugin': 'kept'}), self.make_pr(2)]
+
+        result = self.manager.run_hook('pr_list.process', prs, context, self.user)
+
+        self.assertEqual([pr.number for pr in result], [2, 1])
+        self.assertEqual(result[0].plugin_annotations, {'page-plugin': {'rank': 1}})
+        self.assertEqual(result[1].plugin_annotations, {'other-plugin': 'kept', 'page-plugin': {'rank': 2}})
+        self.assertEqual(
+            result[1].review_status.last_reviewed_at,
+            {'pageuser': datetime(2026, 1, 1, 12, tzinfo=timezone.utc)},
+        )
+
+    def test_card_slots_receive_the_plugin_annotation(self):
+        self.manager.configure_user(self.user, {'page-plugin'})
+        request = RequestFactory().get('/prs/')
+        request.user = self.user
+
+        rendered = self.manager.render_slot(
+            'example', Context({'request': request}), pr=self.make_pr(1, {'page-plugin': {'rank': 3}}),
+        )
+
+        self.assertEqual(rendered, 'rank 3')
 
     def test_invalid_pages_are_rejected_at_registration(self):
         from prdash.plugin_api import PluginPrListPage

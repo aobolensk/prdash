@@ -240,6 +240,20 @@ repositories. A `pr_list.query` hook can narrow it with
 `fetch_options['updated_since']`, an ISO date such as `'2026-01-31'`, and should
 add the same value to `cache_vary`.
 
+A `pr_list.process` hook may reorder PRs and attach per-PR data under its own
+plugin id:
+
+```python
+def process(prs, context, config):
+    for pr in prs:
+        pr['plugin_annotations']['my-plugin'] = {'score': 0.8}
+    return sorted(prs, key=lambda pr: -pr['plugin_annotations']['my-plugin']['score'])
+```
+
+Card slot templates, such as `pr_card.badges`, read it as `plugin_annotation`.
+PRs also carry `last_commit_at` and `review_status.last_reviewed_at`, a mapping
+from reviewer login to the time of their latest review of any state.
+
 ## Dependencies and configuration
 
 Declare Python dependencies under `[project].dependencies`. Declare another

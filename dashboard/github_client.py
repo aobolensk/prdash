@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import partial
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import requests
 from allauth.socialaccount.models import SocialAccount
@@ -78,6 +78,7 @@ PR_GRAPHQL_FIELDS = '''
     commits(last: 1) {
         nodes {
             commit {
+                committedDate
                 statusCheckRollup {
                     state
                     contexts(first: 100) {
@@ -160,6 +161,7 @@ class ReviewStatus:
     review_decision: Optional[str] = None  # 'APPROVED', 'CHANGES_REQUESTED', 'REVIEW_REQUIRED', or None
     approvers: list[str] = field(default_factory=list)
     review_states: dict[str, str] = field(default_factory=dict)  # username -> latest review state
+    last_reviewed_at: dict[str, datetime] = field(default_factory=dict)  # username -> latest review of any state
 
 
 @dataclass(slots=True)
@@ -196,6 +198,9 @@ class PullRequestInfo:
     auto_merge_enabled_by: Optional[str] = None
     is_queued: bool = False
     linked_issues: list[LinkedIssue] = None
+    last_commit_at: Optional[datetime] = None
+    # plugin_id -> JSON data from the pr_list.process hook of that plugin
+    plugin_annotations: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         if self.linked_issues is None:
@@ -242,6 +247,20 @@ class GitHubClient:
                     if state in ('APPROVED', 'CHANGES_REQUESTED') or old_state == 'COMMENTED':
                         latest[user] = (state, submitted_at)
         return latest
+
+    @staticmethod
+    def _compute_last_reviewed_at(reviews: list[dict]) -> dict[str, datetime]:
+        """Map each reviewer to their latest submitted review, regardless of its state."""
+        latest: dict[str, str] = {}
+        for review in reviews:
+            user = (review.get('author') or {}).get('login')
+            submitted_at = review.get('submittedAt')
+            if user and submitted_at and submitted_at > latest.get(user, ''):
+                latest[user] = submitted_at
+        return {
+            user: datetime.fromisoformat(submitted_at.replace('Z', '+00:00'))
+            for user, submitted_at in latest.items()
+        }
 
     def __init__(self, user):
         self.user = user
@@ -989,6 +1008,12 @@ class GitHubClient:
                 auto_merge_enabled_by = auto_merge_request['enabledBy'].get('login')
             is_queued = pr_data.get('mergeQueueEntry') is not None
 
+            last_commit_at = None
+            commit_nodes = pr_data.get('commits', {}).get('nodes') or []
+            committed_date = commit_nodes[-1].get('commit', {}).get('committedDate') if commit_nodes else None
+            if committed_date:
+                last_commit_at = datetime.fromisoformat(committed_date.replace('Z', '+00:00'))
+
             linked_issues = [
                 LinkedIssue(number=issue['number'], url=issue['url'])
                 for issue in pr_data.get('closingIssuesReferences', {}).get('nodes', [])
@@ -1020,6 +1045,7 @@ class GitHubClient:
                 auto_merge_enabled_by=auto_merge_enabled_by,
                 is_queued=is_queued,
                 linked_issues=linked_issues,
+                last_commit_at=last_commit_at,
             )
         except Exception:
             return None
@@ -1187,6 +1213,7 @@ class GitHubClient:
 
             latest_review_by_user = self._compute_latest_review_states(reviews)
             review_states = {user: state for user, (state, _) in latest_review_by_user.items()}
+            last_reviewed_at = self._compute_last_reviewed_at(reviews)
 
             approvers = [user for user, state in review_states.items() if state == 'APPROVED']
             approval_count = len(approvers)
@@ -1206,6 +1233,7 @@ class GitHubClient:
                 review_decision=review_decision,
                 approvers=approvers,
                 review_states=review_states,
+                last_reviewed_at=last_reviewed_at,
             )
         except Exception:
             return ReviewStatus(state='not_reviewed', approval_count=0, comment_count=0)

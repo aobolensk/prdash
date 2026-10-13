@@ -705,7 +705,7 @@ class PluginPrListPageViewTests(TestCase):
         return mock_client
 
     @staticmethod
-    def make_pr(number, author='someone'):
+    def make_pr(number, author='someone', annotations=None):
         from datetime import datetime, timezone
         return PullRequestInfo(
             number=number, title=f'PR {number}', url=f'https://github.com/o/r/pull/{number}',
@@ -713,7 +713,7 @@ class PluginPrListPageViewTests(TestCase):
             created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
             updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
             labels=[], ci_status=CIStatus(state='success'), review_status=ReviewStatus(state='not_reviewed'),
-            draft=False, additions=1, deletions=1,
+            draft=False, additions=1, deletions=1, plugin_annotations=annotations or {},
         )
 
     @patch('dashboard.views.GitHubClient')
@@ -739,6 +739,25 @@ class PluginPrListPageViewTests(TestCase):
             response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 404)
+
+    @patch('dashboard.views.GitHubClient')
+    def test_poll_rerenders_when_only_an_annotation_changes(self, mock_github_client):
+        TrackedRepository.objects.create(user=self.user, owner='o', name='r')
+        mock_client = self.mock_client(mock_github_client, [self.make_pr(1, annotations={'page-plugin': 1})])
+        first = self.client.get(self.url, HTTP_HX_REQUEST='true', HTTP_HX_TRIGGER='auto-refresh-container')
+        poll_headers = {
+            'HTTP_HX_REQUEST': 'true',
+            'HTTP_HX_TRIGGER': 'auto-refresh-container',
+            'HTTP_X_PR_RENDER_HASH': first.context['pr_render_hash'],
+        }
+
+        unchanged = self.client.get(self.url, **poll_headers)
+        cache.clear()
+        mock_client.get_all_open_prs.return_value = [self.make_pr(1, annotations={'page-plugin': 2})]
+        changed = self.client.get(self.url, **poll_headers)
+
+        self.assertEqual(unchanged.status_code, 204)
+        self.assertEqual(changed.status_code, 200)
 
     def test_plugin_page_auto_refresh_is_saved_and_used(self):
         UserPreferences.objects.create(user=self.user, plugin_auto_refresh={'plugin:gone:page': {'enabled': True}})

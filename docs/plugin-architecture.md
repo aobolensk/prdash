@@ -49,6 +49,10 @@ Plugins register through the scoped registrar passed to `initialize`:
   `/prs/_plugins/<plugin-id>/<name>/`. The page runs the usual `pr_list` hooks
   with active tab `plugin:<plugin-id>:<name>` and has its own auto-refresh
   setting. The page `source` picks the core fetcher, currently `open_all`.
+- A `pr_list.process` hook may attach JSON data to a PR under
+  `plugin_annotations[<plugin-id>]`. The host keeps only the calling plugin key.
+  Annotations are part of the PR render hash, so a changed annotation re-renders
+  the list on the next poll.
 
 Commands are not a plugin runtime capability. Lazy, per-user activation
 does not fit Django command discovery through `INSTALLED_APPS`. A plugin that needs

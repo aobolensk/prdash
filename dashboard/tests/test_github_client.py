@@ -1,4 +1,5 @@
 import time
+from datetime import datetime, timezone as dt_timezone
 from unittest.mock import MagicMock, patch
 
 import requests
@@ -930,7 +931,6 @@ class GitHubClientBatchFetchConcurrencyTests(TestCase):
 
 
 class GitHubClientOpenPrsTests(TestCase):
-    """Tests for the open PRs of every author fetcher."""
 
     def _client(self):
         return GitHubClient(user=None)
@@ -955,3 +955,43 @@ class GitHubClientOpenPrsTests(TestCase):
 
         self.assertEqual(client.get_all_open_prs([]), [])
         client._search_prs.assert_not_called()
+
+    def test_last_reviewed_at_keeps_latest_review_of_any_state(self):
+        pr_data = {
+            'reviews': {
+                'nodes': [
+                    {'author': {'login': 'reviewer1'}, 'state': 'APPROVED', 'submittedAt': '2024-01-01T10:00:00Z'},
+                    {'author': {'login': 'reviewer1'}, 'state': 'COMMENTED', 'submittedAt': '2024-01-02T10:00:00Z'},
+                    {'author': {'login': 'reviewer2'}, 'state': 'COMMENTED', 'submittedAt': '2024-01-01T08:00:00Z'},
+                ]
+            },
+            'comments': {'totalCount': 0},
+            'reviewThreads': {'totalCount': 0},
+        }
+
+        status = self._client()._parse_review_status_from_graphql(pr_data)
+
+        self.assertEqual(status.last_reviewed_at, {
+            'reviewer1': datetime(2024, 1, 2, 10, tzinfo=dt_timezone.utc),
+            'reviewer2': datetime(2024, 1, 1, 8, tzinfo=dt_timezone.utc),
+        })
+        self.assertEqual(status.state, 'approved')
+
+    def test_last_commit_at_comes_from_latest_commit(self):
+        pr_data = {
+            'number': 7,
+            'title': 'Change',
+            'url': 'https://github.com/org/a/pull/7',
+            'author': {'login': 'someone', 'avatarUrl': ''},
+            'createdAt': '2024-01-01T00:00:00Z',
+            'updatedAt': '2024-01-03T00:00:00Z',
+            'commits': {'nodes': [{'commit': {'committedDate': '2024-01-02T12:00:00Z'}}]},
+            'reviews': {'nodes': []},
+            'comments': {'totalCount': 0},
+            'reviewThreads': {'totalCount': 0},
+        }
+
+        pr = self._client()._parse_pr_from_graphql(pr_data, 'org', 'a')
+
+        self.assertEqual(pr.last_commit_at, datetime(2024, 1, 2, 12, tzinfo=dt_timezone.utc))
+        self.assertEqual(pr.plugin_annotations, {})

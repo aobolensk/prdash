@@ -956,6 +956,8 @@ class PluginManager:
                 }, callback_user_id=callback_user_id)
                 new_value = result.get('value')
                 if new_value is not None:
+                    if name == PR_LIST_PROCESS_HOOK:
+                        new_value = self._scope_plugin_annotations(plugin_id, payload_value, new_value)
                     current_value = self._hook_value_from_json(name, new_value)
                     payload_value = new_value
             except PluginCallError:
@@ -965,6 +967,27 @@ class PluginManager:
                     'Plugin %s returned a malformed result in hook %s', plugin_id, name,
                 )
         return current_value
+
+    @staticmethod
+    def _scope_plugin_annotations(plugin_id, previous, returned):
+        """Let a pr_list.process callback change only its own plugin_annotations entry."""
+        previous_annotations = {
+            (pr['repo_owner'], pr['repo_name'], pr['number']): pr.get('plugin_annotations') or {}
+            for pr in previous
+        }
+        scoped = []
+        for item in returned:
+            item = dict(item)
+            key = (item['repo_owner'], item['repo_name'], item['number'])
+            annotations = {
+                owner: data for owner, data in previous_annotations.get(key, {}).items() if owner != plugin_id
+            }
+            own = (item.get('plugin_annotations') or {}).get(plugin_id)
+            if own is not None:
+                annotations[plugin_id] = own
+            item['plugin_annotations'] = annotations
+            scoped.append(item)
+        return scoped
 
     def pr_list_pages(self, user, request=None):
         _, _, active_workers = self._activate_user_plugins(user, request)
@@ -1009,6 +1032,9 @@ class PluginManager:
             context = dict(base_context)
             context['plugin_id'] = plugin_id
             context['plugin_config'] = config
+            if 'pr' in extra_context:
+                annotations = getattr(extra_context['pr'], 'plugin_annotations', None) or {}
+                context['plugin_annotation'] = annotations.get(plugin_id)
             try:
                 if ui['has_context_provider']:
                     result = self._call(worker, 'invoke_ui_context', {
