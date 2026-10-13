@@ -15,6 +15,7 @@ from django.core.cache import cache
 from github import RateLimitExceededException
 from urllib3.exceptions import MaxRetryError
 
+from prdash import pr_search
 from prdash.plugin_api import GITHUB_API_VERSION
 
 
@@ -1438,7 +1439,7 @@ class GitHubClient:
 
     def get_all_open_prs(
         self, repos: list[tuple[str, str]], exclude_author: Optional[str] = None,
-        updated_since: Optional[str] = None,
+        updated_since: Optional[str] = None, search: Optional[dict] = None,
         progress: Optional[Callable[[str, int, int], None]] = None,
     ) -> list[PullRequestInfo]:
         """Get open PRs from every author across multiple repositories.
@@ -1449,6 +1450,7 @@ class GitHubClient:
         Args:
             exclude_author: If provided, drop PRs authored by this user.
             updated_since: If provided, an ISO date (YYYY-MM-DD) PRs must have been updated on or after.
+            search: If provided, a PR search bar state to narrow to. The result can still hold PRs it does not match.
             progress: If provided, called as progress(phase, done, total) while searching and fetching.
         """
         qualifiers = 'is:pr is:open'
@@ -1457,7 +1459,16 @@ class GitHubClient:
         if updated_since:
             qualifiers += f' updated:>={updated_since}'
 
-        searches = [((owner, name), f'repo:{owner}/{name} {qualifiers}') for owner, name in repos]
+        scopes = pr_search.fetch_scopes(search)
+        searches = []
+        for scope in scopes or ():
+            scope_qualifiers = ''.join(f' {qualifier}' for qualifier in scope['qualifiers'])
+            for owner, name in repos:
+                if scope['repos'] is None or f'{owner}/{name}'.lower() in scope['repos']:
+                    searches.append(((owner, name), f'repo:{owner}/{name} {qualifiers}{scope_qualifiers}'))
+        if scopes is None or len(searches) > len(repos):
+            # Narrowing must not cost more search requests (rate limited per minute) than not narrowing.
+            searches = [((owner, name), f'repo:{owner}/{name} {qualifiers}') for owner, name in repos]
         if not searches:
             return []
 
@@ -1471,6 +1482,7 @@ class GitHubClient:
             futures = [executor.submit(search_repo, repo, query) for repo, query in searches]
             for done, future in enumerate(as_completed(futures), 1):
                 repo, numbers = future.result()
+                # Dedupes PRs found by several scopes, in search order.
                 pr_data.setdefault(repo, {}).update(dict.fromkeys(numbers))
                 if progress:
                     progress('Searching repositories', done, len(searches))

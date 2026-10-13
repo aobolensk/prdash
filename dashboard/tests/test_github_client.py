@@ -930,6 +930,13 @@ class GitHubClientBatchFetchConcurrencyTests(TestCase):
         self.assertLess(elapsed, sleep_seconds * 2)
 
 
+def search_rows(*rows):
+    def row(pills):
+        return {'include': {'text': '', 'pills': [{'kind': kind, 'value': value} for kind, value in pills]},
+                'exclude': {'text': '', 'pills': []}}
+    return {'open': True, **row(rows[0]), 'alternatives': [row(pills) for pills in rows[1:]]}
+
+
 class GitHubClientOpenPrsTests(TestCase):
 
     def _client(self):
@@ -948,6 +955,43 @@ class GitHubClientOpenPrsTests(TestCase):
             'repo:org/b is:pr is:open -author:me updated:>=2026-01-31',
         ])
         client._fetch_multi_repo_prs.assert_called_once_with({('org', 'a'): [1]}, progress=None)
+
+    def test_get_all_open_prs_searches_only_the_scopes_of_a_search(self):
+        client = self._client()
+        client._search_prs = MagicMock(side_effect=lambda query, owner, name: [2, 1] if 'label' in query else [1])
+        client._fetch_multi_repo_prs = MagicMock(return_value=[])
+        repos = [('org', 'a'), ('org', 'b'), ('org', 'c')]
+
+        client.get_all_open_prs(repos, exclude_author='me', search=search_rows(
+            [('repo', 'org/A')], [('repo', 'org/a'), ('label', 'Bug')], [('repo', 'org/b'), ('label', 'Bug')],
+        ))
+
+        queries = sorted(call.args[0] for call in client._search_prs.call_args_list)
+        self.assertEqual(queries, [
+            'repo:org/a is:pr is:open -author:me',
+            'repo:org/a is:pr is:open -author:me label:"bug"',
+            'repo:org/b is:pr is:open -author:me label:"bug"',
+        ])
+        pr_data = client._fetch_multi_repo_prs.call_args.args[0]
+        self.assertEqual(sorted(pr_data[('org', 'a')]), [1, 2])
+        self.assertEqual(pr_data[('org', 'b')], [2, 1])
+
+    def test_get_all_open_prs_does_not_narrow_when_it_costs_more_searches(self):
+        client = self._client()
+        client._search_prs = MagicMock(return_value=[])
+
+        client.get_all_open_prs([('org', 'a'), ('org', 'b')], search=search_rows([('label', 'bug')], [('label', 'x')]))
+
+        queries = sorted(call.args[0] for call in client._search_prs.call_args_list)
+        self.assertEqual(queries, ['repo:org/a is:pr is:open', 'repo:org/b is:pr is:open'])
+
+    def test_get_all_open_prs_skips_search_when_no_tracked_repo_is_in_scope(self):
+        client = self._client()
+        client._search_prs = MagicMock()
+        search = {'open': True, 'include': {'text': '', 'pills': [{'kind': 'repo', 'value': 'org/c'}]}}
+
+        self.assertEqual(client.get_all_open_prs([('org', 'a')], search=search), [])
+        client._search_prs.assert_not_called()
 
     def test_get_all_open_prs_without_repos_skips_search(self):
         client = self._client()

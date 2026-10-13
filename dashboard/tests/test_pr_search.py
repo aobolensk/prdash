@@ -118,3 +118,49 @@ class SearchMatchTests(SimpleTestCase):
         bad['include']['pills'] = [{'kind': 'milestone', 'value': 'v1'}, {'kind': 'label', 'value': '  '}, 'junk']
 
         self.assertTrue(pr_search.matches(make_pr(), bad))
+
+
+def group(pills=(), exclude_pills=(), text=''):
+    return {key: value for key, value in state(text, pills, exclude_pills=exclude_pills).items()
+            if key in ('include', 'exclude')}
+
+
+class FetchScopesTests(SimpleTestCase):
+    def test_states_without_repo_or_label_pills_do_not_narrow(self):
+        self.assertIsNone(pr_search.fetch_scopes(None))
+        self.assertIsNone(pr_search.fetch_scopes(state(open_=False, pills=[('repo', 'org/core')])))
+        self.assertIsNone(pr_search.fetch_scopes(state('deadlock', pills=[('author', 'alice')])))
+
+    def test_repo_and_label_pills_become_a_scope(self):
+        scopes = pr_search.fetch_scopes(state(
+            'deadlock', pills=[('repo', 'Org/Core'), ('label', 'Good First Issue')], exclude_pills=[('label', 'wip')],
+        ))
+
+        self.assertEqual(scopes, [{'repos': ['org/core'], 'qualifiers': ['-label:"wip"', 'label:"good first issue"']}])
+
+    def test_each_alternative_is_a_scope_and_an_unnarrowed_one_drops_them_all(self):
+        scopes = pr_search.fetch_scopes(state(pills=[('repo', 'org/a')], alternatives=[group([('repo', 'org/b')])]))
+
+        self.assertEqual(scopes, [{'repos': ['org/a'], 'qualifiers': []}, {'repos': ['org/b'], 'qualifiers': []}])
+        self.assertIsNone(pr_search.fetch_scopes(
+            state(pills=[('repo', 'org/a')], alternatives=[group(text='docs')]),
+        ))
+
+    def test_groups_that_match_nothing_have_no_scope(self):
+        self.assertEqual(pr_search.fetch_scopes(state(pills=[('repo', 'org/a'), ('repo', 'org/b')])), [])
+        self.assertEqual(
+            pr_search.fetch_scopes(state(pills=[('repo', 'org/a')], exclude_pills=[('repo', 'org/a')])), [],
+        )
+
+    def test_scopes_find_every_pr_the_state_matches(self):
+        pr = make_pr()
+        labels = {f'label:"{label["name"].lower()}"' for label in pr.labels}
+        for search in (
+            state(pills=[('repo', 'org/core'), ('label', 'bug')]),
+            state(pills=[('repo', 'org/other')], alternatives=[group([('label', 'good first issue')])]),
+        ):
+            self.assertTrue(pr_search.matches(pr, search))
+            self.assertTrue(any(
+                (scope['repos'] is None or 'org/core' in scope['repos']) and set(scope['qualifiers']) <= labels
+                for scope in pr_search.fetch_scopes(search)
+            ))

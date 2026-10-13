@@ -5,6 +5,7 @@
 PRs may be PullRequestInfo objects or the PullRequestInfo-shaped dicts plugin hooks receive.
 """
 
+import json
 import math
 
 PILL_KINDS = ('repo', 'label', 'author')
@@ -107,6 +108,35 @@ def _groups(state):
 def is_active(state):
     """Whether the state filters anything, an inactive state matches every PR."""
     return bool(_groups(state))
+
+
+def fetch_scopes(state):
+    """GitHub search scopes that together find every open PR the state can match.
+
+    None means no narrowing and [] means no PR can match. Only repo and label pills narrow:
+    free text is fuzzy and an author qualifier fails the search for unknown or bot logins.
+    """
+    groups = _groups(state)
+    if not groups:
+        return None
+    scopes = []
+    for include, exclude in groups:
+        repos = {value for kind, value in include if kind == 'repo'}
+        if len(repos) > 1:
+            continue
+        repos -= {value for kind, value in exclude if kind == 'repo'}
+        if any(kind == 'repo' for kind, _ in include) and not repos:
+            continue
+        qualifiers = sorted(
+            {f'label:"{value}"' for kind, value in include if kind == 'label' and '"' not in value}
+            | {f'-label:"{value}"' for kind, value in exclude if kind == 'label' and '"' not in value}
+        )
+        if not repos and not qualifiers:
+            return None
+        scope = {'repos': sorted(repos) or None, 'qualifiers': qualifiers}
+        if scope not in scopes:
+            scopes.append(scope)
+    return sorted(scopes, key=lambda scope: json.dumps(scope, sort_keys=True))
 
 
 def matches(pr, state):

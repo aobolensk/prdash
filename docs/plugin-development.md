@@ -238,7 +238,12 @@ check the active tab before changing a page they do not own. The `open_all`
 source lists open PRs of every author except the current user in the tracked
 repositories. A `pr_list.query` hook can narrow it with
 `fetch_options['updated_since']`, an ISO date such as `'2026-01-31'`, and should
-add the same value to `cache_vary`.
+add the same value to `cache_vary`. It can also narrow it to a search bar state
+with `fetch_options['search']`. The GitHub search then only covers the repo and
+label pills of the state, so the hook should add
+`json.dumps(pr_search.fetch_scopes(state))` to `cache_vary`, and a
+`pr_list.process` hook still applies `pr_search.matches` for free text and
+author pills.
 
 A `pr_list.process` hook may reorder PRs and attach per-PR data under its own
 plugin id:
