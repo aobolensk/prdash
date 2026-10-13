@@ -206,6 +206,18 @@ registrar.register_ui(UIContribution(
 ))
 ```
 
+`prdash.pr_search` applies the same search state on the server, for example to
+filter PRs in a `pr_list.process` hook before ranking them:
+
+```python
+from prdash import pr_search
+
+prs = [pr for pr in prs if pr_search.matches(pr, saved_state)]
+```
+
+`matches` follows the browser rules: free-text words match fuzzily, repo, label,
+and author pills match exactly, and a state with `open` false matches every PR.
+
 ## Dependencies and configuration
 
 Declare Python dependencies under `[project].dependencies`. Declare another
