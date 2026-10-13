@@ -848,7 +848,7 @@ class GitHubClientConsolidatedSearchTests(TestCase):
         self.client.get_all_review_requests(self.repos, include_all=True)
 
         self.client._fetch_prs_multi_repo_graphql.assert_called_once_with(
-            {('org', 'repo1'): [1, 2]}
+            {('org', 'repo1'): [1, 2]}, progress=None
         )
 
     @patch('dashboard.github_client.requests.get')
@@ -927,3 +927,31 @@ class GitHubClientBatchFetchConcurrencyTests(TestCase):
             elapsed = time.monotonic() - start
 
         self.assertLess(elapsed, sleep_seconds * 2)
+
+
+class GitHubClientOpenPrsTests(TestCase):
+    """Tests for the open PRs of every author fetcher."""
+
+    def _client(self):
+        return GitHubClient(user=None)
+
+    def test_get_all_open_prs_searches_each_repo_with_qualifiers(self):
+        client = self._client()
+        client._search_prs = MagicMock(side_effect=lambda query, owner, name: [1] if name == 'a' else [])
+        client._fetch_multi_repo_prs = MagicMock(return_value=[])
+
+        client.get_all_open_prs([('org', 'a'), ('org', 'b')], exclude_author='me', updated_since='2026-01-31')
+
+        queries = sorted(call.args[0] for call in client._search_prs.call_args_list)
+        self.assertEqual(queries, [
+            'repo:org/a is:pr is:open -author:me updated:>=2026-01-31',
+            'repo:org/b is:pr is:open -author:me updated:>=2026-01-31',
+        ])
+        client._fetch_multi_repo_prs.assert_called_once_with({('org', 'a'): [1]}, progress=None)
+
+    def test_get_all_open_prs_without_repos_skips_search(self):
+        client = self._client()
+        client._search_prs = MagicMock()
+
+        self.assertEqual(client.get_all_open_prs([]), [])
+        client._search_prs.assert_not_called()

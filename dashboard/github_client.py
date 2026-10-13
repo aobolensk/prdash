@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import partial
-from typing import Optional
+from typing import Callable, Optional
 
 import requests
 from allauth.socialaccount.models import SocialAccount
@@ -735,12 +735,14 @@ class GitHubClient:
             return []
 
     def _fetch_prs_multi_repo_graphql(
-        self, pr_data: dict[tuple[str, str], list[int]]
+        self, pr_data: dict[tuple[str, str], list[int]],
+        progress: Optional[Callable[[str, int, int], None]] = None,
     ) -> list[PullRequestInfo]:
         """Fetch PRs from multiple repos in a single GraphQL query.
 
         This reduces API calls from N (one per repo) to ceil(total_prs / batch_size).
         Batches are independent network calls, so they are fetched in parallel.
+        `progress`, if provided, is called as progress(phase, done, total) in PRs.
         """
         if not pr_data:
             return []
@@ -758,10 +760,16 @@ class GitHubClient:
         batches = list(self._iter_chunks(all_prs, batch_size))
 
         result = []
+        done = 0
+        if progress:
+            progress('Fetching PR details', done, len(all_prs))
         with ThreadPoolExecutor(max_workers=min(10, len(batches))) as executor:
-            futures = [executor.submit(self._fetch_pr_batch_multi_repo, batch) for batch in batches]
+            futures = {executor.submit(self._fetch_pr_batch_multi_repo, batch): len(batch) for batch in batches}
             for future in as_completed(futures):
                 result.extend(future.result())
+                done += futures[future]
+                if progress:
+                    progress('Fetching PR details', done, len(all_prs))
 
         return result
 
@@ -1400,8 +1408,53 @@ class GitHubClient:
         query = f"is:pr is:open author:{author}"
         return self._consolidated_search_and_fetch(repos, query, lambda pr: (pr.updated_at, pr.number))
 
+    def get_all_open_prs(
+        self, repos: list[tuple[str, str]], exclude_author: Optional[str] = None,
+        updated_since: Optional[str] = None,
+        progress: Optional[Callable[[str, int, int], None]] = None,
+    ) -> list[PullRequestInfo]:
+        """Get open PRs from every author across multiple repositories.
+
+        Searches each repo separately: a consolidated query over all of GitHub
+        would hit the 1000-result search cap long before reaching tracked repos.
+
+        Args:
+            exclude_author: If provided, drop PRs authored by this user.
+            updated_since: If provided, an ISO date (YYYY-MM-DD) PRs must have been updated on or after.
+            progress: If provided, called as progress(phase, done, total) while searching and fetching.
+        """
+        qualifiers = 'is:pr is:open'
+        if exclude_author:
+            qualifiers += f' -author:{exclude_author}'
+        if updated_since:
+            qualifiers += f' updated:>={updated_since}'
+
+        searches = [((owner, name), f'repo:{owner}/{name} {qualifiers}') for owner, name in repos]
+        if not searches:
+            return []
+
+        def search_repo(repo, query):
+            return repo, self._search_prs(query, *repo)
+
+        pr_data = {}
+        if progress:
+            progress('Searching repositories', 0, len(searches))
+        with ThreadPoolExecutor(max_workers=min(10, len(searches))) as executor:
+            futures = [executor.submit(search_repo, repo, query) for repo, query in searches]
+            for done, future in enumerate(as_completed(futures), 1):
+                repo, numbers = future.result()
+                pr_data.setdefault(repo, {}).update(dict.fromkeys(numbers))
+                if progress:
+                    progress('Searching repositories', done, len(searches))
+        pr_data = {repo: list(numbers) for repo, numbers in pr_data.items() if numbers}
+
+        all_prs = self._fetch_multi_repo_prs(pr_data, progress=progress)
+        all_prs.sort(key=lambda pr: (pr.updated_at, pr.number), reverse=True)
+        return all_prs
+
     def _fetch_multi_repo_prs(
-        self, pr_data: dict[tuple[str, str], list[int]]
+        self, pr_data: dict[tuple[str, str], list[int]],
+        progress: Optional[Callable[[str, int, int], None]] = None,
     ) -> list[PullRequestInfo]:
         """Shared tail for the get_all_* multi-repo fetchers.
 
@@ -1413,7 +1466,7 @@ class GitHubClient:
             self.finalize_warnings()
             return []
 
-        all_prs = self._fetch_prs_multi_repo_graphql(pr_data)
+        all_prs = self._fetch_prs_multi_repo_graphql(pr_data, progress=progress)
         self.finalize_warnings()
         return all_prs
 
