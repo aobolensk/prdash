@@ -674,3 +674,88 @@ class PATManagementTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(PersonalAccessToken.objects.filter(user=self.user).exists())
+
+
+class PluginPrListPageViewTests(TestCase):
+
+    PAGE = {
+        'plugin_id': 'page-plugin', 'name': 'triage', 'title': 'Triage', 'source': 'open_all',
+        'tab': 'plugin:page-plugin:triage',
+    }
+
+    def setUp(self):
+        self.client = Client()
+        self.user = User.objects.create_user(username='testuser', password='testpass')
+        self.client.login(username='testuser', password='testpass')
+        cache.clear()
+        for name, value in (('pr_list_pages', [self.PAGE]), ('pr_list_page', self.PAGE)):
+            patcher = patch(f'dashboard.views.plugin_manager.{name}', return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.url = reverse('dashboard:plugin_pr_list', args=['page-plugin', 'triage'])
+
+    def mock_client(self, mock_github_client, prs):
+        mock_client = MagicMock()
+        mock_client.get_all_open_prs.return_value = prs
+        mock_client.get_username.return_value = 'testuser'
+        mock_client.errors = []
+        mock_client.warnings = []
+        mock_client.get_notification_triggers.return_value = {}
+        mock_github_client.return_value = mock_client
+        return mock_client
+
+    @staticmethod
+    def make_pr(number, author='someone'):
+        from datetime import datetime, timezone
+        return PullRequestInfo(
+            number=number, title=f'PR {number}', url=f'https://github.com/o/r/pull/{number}',
+            repo_owner='o', repo_name='r', author=author, author_avatar='',
+            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            labels=[], ci_status=CIStatus(state='success'), review_status=ReviewStatus(state='not_reviewed'),
+            draft=False, additions=1, deletions=1,
+        )
+
+    @patch('dashboard.views.GitHubClient')
+    def test_full_page_lists_open_prs_of_others_and_links_the_page(self, mock_github_client):
+        TrackedRepository.objects.create(user=self.user, owner='o', name='r')
+        mock_client = self.mock_client(mock_github_client, [self.make_pr(1), self.make_pr(2, author='testuser')])
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        mock_client.get_all_open_prs.assert_called_once_with([('o', 'r')], exclude_author='testuser')
+        self.assertContains(response, 'PR 1')
+        self.assertNotContains(response, 'PR 2')
+        self.assertContains(response, 'data-current-tab="plugin:page-plugin:triage"')
+        self.assertContains(response, 'data-tab="plugin:page-plugin:triage"')
+        self.assertContains(response, f'hx-get="{self.url}"')
+        self.assertContains(response, '<title>Triage')
+
+    @patch('dashboard.views.GitHubClient')
+    def test_unknown_page_returns_404(self, mock_github_client):
+        self.mock_client(mock_github_client, [])
+        with patch('dashboard.views.plugin_manager.pr_list_page', return_value=None):
+            response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_plugin_page_auto_refresh_is_saved_and_used(self):
+        UserPreferences.objects.create(user=self.user, plugin_auto_refresh={'plugin:gone:page': {'enabled': True}})
+
+        response = self.client.post(reverse('dashboard:save_preferences'), {
+            'auto_refresh_plugin:page-plugin:triage': 'on',
+            'auto_refresh_interval_plugin:page-plugin:triage': '10',
+        })
+
+        prefs = UserPreferences.objects.get(user=self.user)
+        self.assertEqual(prefs.plugin_auto_refresh, {
+            'plugin:gone:page': {'enabled': True},
+            'plugin:page-plugin:triage': {'enabled': True, 'interval': 10},
+        })
+        self.assertTrue(prefs.is_auto_refresh_enabled_for_tab('plugin:page-plugin:triage'))
+        self.assertEqual(prefs.get_auto_refresh_interval_for_tab('plugin:page-plugin:triage'), 10)
+        self.assertEqual(prefs.get_auto_refresh_interval_for_tab('plugin:gone:page'), 5)
+        self.assertFalse(prefs.is_auto_refresh_enabled_for_tab('plugin:other:page'))
+        self.assertContains(response, 'name="auto_refresh_plugin:page-plugin:triage"')
+        self.assertContains(response, 'Triage')

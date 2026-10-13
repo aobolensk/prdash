@@ -72,7 +72,33 @@
         return window.location.pathname + window.location.search;
     }
 
+    function isPluginTab(id) {
+        return typeof id === 'string' && id.indexOf('plugin:') === 0;
+    }
+
+    function pluginSidebarLink(id) {
+        return Array.from(document.querySelectorAll('.sidebar-link[data-tab]'))
+            .find(function(link) { return link.dataset.tab === id; });
+    }
+
+    // A plugin tab is known only while its plugin is enabled and its page linked.
+    function isKnownTab(id) {
+        return Boolean(tabLabels[id] || (isPluginTab(id) && pluginSidebarLink(id)));
+    }
+
+    function labelFor(id) {
+        if (tabLabels[id]) return tabLabels[id];
+        const link = pluginSidebarLink(id);
+        const label = link && link.querySelector('.sidebar-label');
+        return label ? label.textContent.trim() : id;
+    }
+
+    function shortLabelFor(id) {
+        return tabShortLabels[id] || 'P';
+    }
+
     function groupForTab(tab) {
+        if (isPluginTab(tab)) return tab;
         if (tab === 'author' || tab === 'author_merged' || tab === 'author_prs') return 'author_prs';
         if (tab === 'review_requests' || tab === 'review_approved') return 'review_requests';
         if (tab === 'assigned') return 'assigned';
@@ -94,7 +120,7 @@
     }
 
     function repoForUrl(group, url) {
-        if (group === 'author_prs') return '';
+        if (group === 'author_prs' || isPluginTab(group)) return '';
         if (/\/prs\/(?:merged|review-requests|assigned)(?:\/|\?|$)/.test(url)) return '';
         const match = url.match(/\/prs\/([^/]+)\/([^/?]+)(?:\/|\?|$)/);
         return match ? match[1] + '/' + match[2] : '';
@@ -102,6 +128,8 @@
 
     function groupForUrl(url) {
         const path = url.split('?')[0];
+        const pluginPage = path.match(/\/prs\/_plugins\/([^/]+)\/([^/]+)(?:\/|$)/);
+        if (pluginPage) return 'plugin:' + pluginPage[1] + ':' + pluginPage[2];
         if (/\/prs\/by-author(?:\/|$)/.test(path)) return 'author_prs';
         if (/\/review-requests(?:\/|$)/.test(path)) return 'review_requests';
         if (/\/assigned(?:\/|$)/.test(path)) return 'assigned';
@@ -169,7 +197,7 @@
         try {
             const data = JSON.parse(window.sessionStorage.getItem(storageKey) || '{}');
             return Array.isArray(data.tabs) ? data.tabs.filter(function(tab) {
-                return tab && tabLabels[tab.id] && typeof tab.url === 'string';
+                return tab && isKnownTab(tab.id) && typeof tab.url === 'string';
             }) : [];
         } catch {
             return [];
@@ -339,7 +367,7 @@
             select.type = 'button';
             select.className = 'prdash-tab' + (tab === activeTab ? ' active' : '');
             select.dataset.prdashTab = tab.id;
-            select.dataset.tabShort = tabShortLabels[tab.id];
+            select.dataset.tabShort = shortLabelFor(tab.id);
             select.setAttribute('aria-current', tab === activeTab ? 'page' : 'false');
             select.title = tab.label + ' - ' + tab.url;
             const loading = tab.pendingRender || tab.loading;
@@ -455,7 +483,7 @@
         renderTabs();
         const list = content();
         setSearchState(tab.search);
-        document.title = tab.title || (tabLabels[tab.id] + ' - PR Dashboard');
+        document.title = tab.title || (labelFor(tab.id) + ' - PR Dashboard');
         restoreContent(list, tab.html);
         if (tab.scrollTop !== undefined) {
             const main = document.querySelector('.main-content');
@@ -494,7 +522,7 @@
         }
         const tab = {
             id: id,
-            label: tabLabels[id],
+            label: labelFor(id),
             url: urlForSidebarLink(link),
             html: null,
             currentTab: defaultTabForGroup(id),
@@ -529,7 +557,7 @@
         }
         const tab = existing || {
             id: id,
-            label: tabLabels[id],
+            label: labelFor(id),
             url: href,
             html: null,
             currentTab: defaultTabForGroup(id),
@@ -586,7 +614,7 @@
         const url = currentUrl();
         tabs = saved.map(function(tab) {
             if (tab.id === 'my_prs' && groupForUrl(tab.url) === 'my_prs_merged') tab.id = 'my_prs_merged';
-            return Object.assign(tab, { label: tabLabels[tab.id], html: null });
+            return Object.assign(tab, { label: labelFor(tab.id), html: null });
         }).filter(function(tab, index, all) {
             return all.findIndex(function(other) { return other.id === tab.id; }) === index;
         });
@@ -594,7 +622,7 @@
         if (!activeTab) {
             activeTab = {
                 id: currentGroup,
-                label: tabLabels[currentGroup],
+                label: labelFor(currentGroup),
                 url: url,
                 currentTab: layout.dataset.currentTab || defaultTabForGroup(currentGroup),
                 currentRepo: layout.dataset.currentRepo || '',
@@ -700,14 +728,14 @@
         const id = window.history.state && window.history.state.prdashTabId;
         let tab = tabs.find(function(item) { return item.id === id; });
         if (!tab) {
-            const group = tabLabels[id] ? id : groupForUrl(currentUrl());
+            const group = isKnownTab(id) ? id : groupForUrl(currentUrl());
             tab = tabs.find(function(item) { return item.id === group; });
         }
         if (!tab) {
             const group = groupForUrl(currentUrl());
             tab = {
                 id: group,
-                label: tabLabels[group],
+                label: labelFor(group),
                 url: currentUrl(),
                 html: null,
                 currentTab: defaultTabForGroup(group),
@@ -738,14 +766,14 @@
         if (state.htmx) return;
         let tab = tabs.find(function(item) { return item.id === state.prdashTabId; });
         if (!tab) {
-            const group = tabLabels[state.prdashTabId] ? state.prdashTabId : groupForUrl(currentUrl());
+            const group = isKnownTab(state.prdashTabId) ? state.prdashTabId : groupForUrl(currentUrl());
             tab = tabs.find(function(item) { return item.id === group; });
         }
         if (!tab) {
             const group = groupForUrl(currentUrl());
             tab = {
                 id: group,
-                label: tabLabels[group],
+                label: labelFor(group),
                 url: currentUrl(),
                 html: null,
                 currentTab: defaultTabForGroup(group),
@@ -773,7 +801,7 @@
         activeTab = tab;
         updateSidebarSelection();
         setSearchState(tab.search);
-        document.title = tab.title || (tabLabels[tab.id] + ' - PR Dashboard');
+        document.title = tab.title || (labelFor(tab.id) + ' - PR Dashboard');
         const list = content();
         restoreContent(list, tab.html);
         const main = document.querySelector('.main-content');

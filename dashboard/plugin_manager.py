@@ -966,6 +966,26 @@ class PluginManager:
                 )
         return current_value
 
+    def pr_list_pages(self, user, request=None):
+        _, _, active_workers = self._activate_user_plugins(user, request)
+        pages = []
+        for plugin_id, worker in sorted(active_workers.items()):
+            for page in worker.manifest.get('pr_list_pages', ()):
+                pages.append({
+                    'plugin_id': plugin_id,
+                    'name': page['name'],
+                    'title': page['title'],
+                    'source': page['source'],
+                    'tab': f'plugin:{plugin_id}:{page["name"]}',
+                })
+        return pages
+
+    def pr_list_page(self, user, plugin_id, name, request=None):
+        for page in self.pr_list_pages(user, request):
+            if page['plugin_id'] == plugin_id and page['name'] == name:
+                return page
+        return None
+
     def render_slot(self, slot, template_context, wrap=False, **extra_context):
         """Render enabled UI contributions for one template slot
         wrap=True tags each in an id/data-plugin-name container."""

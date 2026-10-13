@@ -2,7 +2,7 @@
 
 A plugin is a Python object with metadata, `initialize`, and `shutdown`, loaded
 inside its own worker subprocess from a local source manifest or an installed
-wheel entry point. Set `PluginMetadata.api_version` to `2.0`. For source plugins,
+wheel entry point. Set `PluginMetadata.api_version` to `2.1`. For source plugins,
 set the manifest `api_version` to the same value.
 
 ## Minimal plugin
@@ -93,7 +93,7 @@ my-plugin/
   "id": "example",
   "name": "Example",
   "version": "1.0.0",
-  "api_version": "2.0",
+  "api_version": "2.1",
   "description": "Small example plugin.",
   "entrypoint": "my_prdash_plugin.plugin:plugin",
   "python_path": "src"
@@ -217,6 +217,28 @@ prs = [pr for pr in prs if pr_search.matches(pr, saved_state)]
 
 `matches` follows the browser rules: free-text words match fuzzily, repo, label,
 and author pills match exactly, and a state with `open` false matches every PR.
+
+## PR list pages
+
+A plugin can add its own PR list to the sidebar:
+
+```python
+from prdash.plugin_api import PR_SOURCE_OPEN_ALL, PluginPrListPage
+
+registrar.register_pr_list_page(PluginPrListPage(
+    name='triage',
+    title='Triage',
+    source=PR_SOURCE_OPEN_ALL,
+))
+```
+
+The page is served at `/prs/_plugins/<plugin-id>/triage/` and its
+`PullRequestListContext.active_tab` is `plugin:<plugin-id>:triage`. Hooks should
+check the active tab before changing a page they do not own. The `open_all`
+source lists open PRs of every author except the current user in the tracked
+repositories. A `pr_list.query` hook can narrow it with
+`fetch_options['updated_since']`, an ISO date such as `'2026-01-31'`, and should
+add the same value to `cache_vary`.
 
 ## Dependencies and configuration
 

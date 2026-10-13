@@ -20,6 +20,7 @@ from .plugin_manager import plugin_manager
 from prdash.plugin_api import (
     PR_LIST_PROCESS_HOOK,
     PR_LIST_QUERY_HOOK,
+    PR_SOURCE_OPEN_ALL,
     PullRequestListContext,
     PullRequestQuery,
 )
@@ -117,7 +118,8 @@ def home(request):
 
 def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
                   owner=None, repo=None, post_filter=None, post_filter_factory=None,
-                  base_fetch_options=None, query_defaults=None, author_required=False):
+                  base_fetch_options=None, query_defaults=None, author_required=False,
+                  plugin_page=None):
     """
     Generic PR list view helper.
 
@@ -128,6 +130,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         owner/repo: If provided, filters to single repo
         post_filter: Optional callable(prs, username) -> filtered prs
         post_filter_factory: Optional callable(client) -> post_filter function
+        plugin_page: The plugin PR list page being served, from plugin_manager.pr_list_page
     """
     repos = TrackedRepository.objects.filter(user=request.user)
     client = GitHubClient(request.user)
@@ -245,7 +248,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         'author': 'PRs by Author',
         'author_merged': 'PRs by Author',
     }
-    page_title = tab_titles.get(active_tab, 'My PRs')
+    page_title = plugin_page['title'] if plugin_page else tab_titles.get(active_tab, 'My PRs')
     if current_repo:
         page_title = f'{page_title} - {current_repo.full_name}'
     page_title = f'{page_title} - PR Dashboard'
@@ -279,6 +282,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         'page_title': page_title,
         'stale_data': stale_data,
         'pr_render_hash': render_hash,
+        'plugin_page': plugin_page,
     }
 
     if request.headers.get('HX-Request') == 'true':
@@ -308,6 +312,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         response['HX-Trigger'] = json.dumps(triggers)
         return response
 
+    context['plugin_pages'] = plugin_manager.pr_list_pages(request.user, request)
     response = render(request, 'dashboard/pr_list.html', context)
     add_never_cache_headers(response)
     return response
@@ -459,6 +464,28 @@ def repo_assigned_list(request, owner, repo):
     )
 
 
+_PLUGIN_PAGE_FETCHERS = {
+    PR_SOURCE_OPEN_ALL: lambda c, repos, options: c.get_all_open_prs(
+        repos, exclude_author=c.get_username(), **options
+    ),
+}
+
+
+@login_required
+def plugin_pr_list(request, plugin_id, name):
+    page = plugin_manager.pr_list_page(request.user, plugin_id, name, request)
+    if page is None or page['source'] not in _PLUGIN_PAGE_FETCHERS:
+        raise Http404
+    return _pr_list_view(
+        request,
+        fetch_prs=_PLUGIN_PAGE_FETCHERS[page['source']],
+        active_tab=page['tab'],
+        tab_changed=page['tab'],
+        post_filter=_exclude_own_prs,
+        plugin_page=page,
+    )
+
+
 def _render_repo_list(request, trigger='repoToggled', errors=None):
     """Render the repo list partial with appropriate HX-Trigger."""
     repos = TrackedRepository.objects.filter(user=request.user)
@@ -526,6 +553,7 @@ def settings(request):
     context = {
         'pat': pat,
         'prefs': prefs,
+        'auto_refresh_rows': prefs.get_auto_refresh_rows(plugin_manager.pr_list_pages(request.user, request)),
         'plugins': plugin_manager.plugin_statuses(request.user, request),
         'plugin_discovery_errors': plugin_manager.discovery_errors,
     }
@@ -607,12 +635,23 @@ def save_preferences(request):
         defaults[f'auto_refresh_{category}'] = request.POST.get(f'auto_refresh_{category}') == 'on'
         defaults[f'auto_refresh_interval_{category}'] = parse_interval(f'auto_refresh_interval_{category}')
 
+    # Pages of currently disabled plugins keep their saved settings.
+    plugin_pages = plugin_manager.pr_list_pages(request.user, request)
+    plugin_auto_refresh = dict(_get_user_preferences(request.user).plugin_auto_refresh)
+    for page in plugin_pages:
+        tab = page['tab']
+        plugin_auto_refresh[tab] = {
+            'enabled': request.POST.get(f'auto_refresh_{tab}') == 'on',
+            'interval': parse_interval(f'auto_refresh_interval_{tab}'),
+        }
+    defaults['plugin_auto_refresh'] = plugin_auto_refresh
+
     prefs, _ = UserPreferences.objects.update_or_create(
         user=request.user,
         defaults=defaults,
     )
 
-    context = {'prefs': prefs, 'success': True}
+    context = {'prefs': prefs, 'auto_refresh_rows': prefs.get_auto_refresh_rows(plugin_pages), 'success': True}
     return render(request, 'dashboard/partials/_preferences_form.html', context)
 
 

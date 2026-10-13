@@ -13,7 +13,7 @@ over a JSON protocol on standard input and output.
 - `PluginUserData` stores plugin-owned, named collections of per-user JSON values.
 - `plugins/` contains the reference implementations. It is not core code.
 
-The current API version is `2.0`. A plugin API with the same major version is
+The current API version is `2.1`. A plugin API with the same major version is
 compatible. A future incompatible contract will use a new major version.
 
 ## Lifecycle
@@ -45,6 +45,10 @@ Plugins register through the scoped registrar passed to `initialize`:
   `/plugins/<plugin-id>/<route>/`; a disabled plugin route returns 404.
 - Services expose plugin-owned operations under names scoped by plugin id.
   Arguments and results cross the worker boundary as JSON-compatible values.
+- PR list pages add a sidebar view served by the core PR list at
+  `/prs/_plugins/<plugin-id>/<name>/`. The page runs the usual `pr_list` hooks
+  with active tab `plugin:<plugin-id>:<name>` and has its own auto-refresh
+  setting. The page `source` picks the core fetcher, currently `open_all`.
 
 Commands are not a plugin runtime capability. Lazy, per-user activation
 does not fit Django command discovery through `INSTALLED_APPS`. A plugin that needs

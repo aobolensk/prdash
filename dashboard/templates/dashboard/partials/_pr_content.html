@@ -1,6 +1,8 @@
 {% load dashboard_tags plugin_tags %}
 
-{% if current_repo %}
+{% if plugin_page %}
+    {% url 'dashboard:plugin_pr_list' plugin_page.plugin_id plugin_page.name as current_url %}
+{% elif current_repo %}
     {% if active_tab == 'review_requests' %}
         {% url 'dashboard:repo_review_requests_list' current_repo.owner current_repo.name as current_url %}
     {% elif active_tab == 'assigned' %}
@@ -42,7 +44,9 @@
 
 <div class="content-header">
     <h1>
-        {% if current_repo %}
+        {% if plugin_page %}
+            {{ plugin_page.title }}
+        {% elif current_repo %}
             {{ current_repo.full_name }}
         {% elif active_tab == 'review_requests' %}
             Review Requests

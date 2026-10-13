@@ -14,7 +14,7 @@
             <label>Auto-refresh tabs</label>
             <p class="form-help">Select which tabs should automatically refresh, and how often.</p>
             <div class="checkbox-group">
-                {% for row in prefs.get_auto_refresh_rows %}
+                {% for row in auto_refresh_rows %}
                 {% include 'dashboard/partials/_auto_refresh_row.html' with row=row %}
                 {% endfor %}
             </div>

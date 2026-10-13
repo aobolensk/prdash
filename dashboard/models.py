@@ -132,6 +132,8 @@ class UserPreferences(models.Model):
     pr_list_page_size = models.PositiveIntegerField(
         default=25, choices=PR_LIST_PAGE_SIZE_CHOICES
     )
+    # Plugin PR list page tab id -> {'enabled': bool, 'interval': minutes}
+    plugin_auto_refresh = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -148,26 +150,35 @@ class UserPreferences(models.Model):
         'assigned': 'assigned',
     }
 
+    def _plugin_auto_refresh_for_tab(self, tab):
+        entry = (self.plugin_auto_refresh or {}).get(tab)
+        return entry if isinstance(entry, dict) else {}
+
+    def _plugin_auto_refresh_interval(self, tab):
+        interval = self._plugin_auto_refresh_for_tab(tab).get('interval')
+        valid_intervals = [value for value, _ in AUTO_REFRESH_INTERVAL_CHOICES]
+        return interval if interval in valid_intervals else 5
+
     def is_auto_refresh_enabled_for_tab(self, tab):
         """Check if auto-refresh is enabled for a specific tab."""
         category = self.TAB_CATEGORIES.get(tab)
         if category is None:
-            return False
+            return bool(self._plugin_auto_refresh_for_tab(tab).get('enabled'))
         return getattr(self, f'auto_refresh_{category}')
 
     def get_auto_refresh_interval_for_tab(self, tab):
         """Return the auto-refresh interval in minutes for a specific tab."""
         category = self.TAB_CATEGORIES.get(tab)
         if category is None:
-            return 5
+            return self._plugin_auto_refresh_interval(tab)
         return getattr(self, f'auto_refresh_interval_{category}')
 
     def get_auto_refresh_interval_seconds_for_tab(self, tab):
         return self.get_auto_refresh_interval_for_tab(tab) * 60
 
-    def get_auto_refresh_rows(self):
+    def get_auto_refresh_rows(self, plugin_pages=()):
         """Return per-tab-category auto-refresh settings for rendering in the preferences form."""
-        return [
+        rows = [
             {
                 'category': category,
                 'label': label,
@@ -177,3 +188,14 @@ class UserPreferences(models.Model):
             }
             for category, label in AUTO_REFRESH_CATEGORIES
         ]
+        rows.extend(
+            {
+                'category': page['tab'],
+                'label': page['title'],
+                'enabled': self.is_auto_refresh_enabled_for_tab(page['tab']),
+                'interval': self.get_auto_refresh_interval_for_tab(page['tab']),
+                'interval_choices': AUTO_REFRESH_INTERVAL_CHOICES,
+            }
+            for page in plugin_pages
+        )
+        return rows

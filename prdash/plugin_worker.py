@@ -10,11 +10,13 @@ from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, fields as dataclass_fields, is_dataclass
 from importlib import import_module, resources
 import inspect
+import re
 import sys
 import threading
 from typing import Mapping
 
 from prdash.plugin_api import (
+    PR_LIST_PAGE_SOURCES,
     PR_LIST_QUERY_HOOK,
     PluginJsonResponse,
     PluginNoContent,
@@ -28,6 +30,8 @@ from prdash.plugin_api import (
 )
 from prdash.plugin_protocol import ProtocolError, read_message, write_message
 
+_PAGE_NAME_PATTERN = re.compile(r'^[a-z0-9][a-z0-9-]*$')
+
 
 @dataclass
 class _Registration:
@@ -35,6 +39,7 @@ class _Registration:
     ui: list = field(default_factory=list)
     routes: dict = field(default_factory=dict)
     services: dict = field(default_factory=dict)
+    pages: dict = field(default_factory=dict)
 
 
 class _Connection:
@@ -112,6 +117,15 @@ class _WorkerRegistrar:
         if name in self._registration.services:
             raise ValueError(f'Duplicate plugin service: {name}')
         self._registration.services[name] = handler
+
+    def register_pr_list_page(self, page):
+        if not _PAGE_NAME_PATTERN.fullmatch(page.name or '') or not page.title:
+            raise ValueError('Plugin PR list pages require a slug name and a title')
+        if page.source not in PR_LIST_PAGE_SOURCES:
+            raise ValueError(f'Unknown PR list page source: {page.source!r}')
+        if page.name in self._registration.pages:
+            raise ValueError(f'Duplicate PR list page: {page.name}')
+        self._registration.pages[page.name] = page
 
     def call_service(self, user_id, plugin_id, name, args):
         result = self._user_callback('call_service', {
@@ -253,6 +267,10 @@ def _describe(plugin, registration):
         'hooks': [{'name': name, 'priority': priority} for name, priority, _cb in registration.hooks],
         'routes': list(registration.routes.keys()),
         'services': list(registration.services.keys()),
+        'pr_list_pages': [
+            {'name': page.name, 'title': page.title, 'source': page.source}
+            for page in registration.pages.values()
+        ],
         'ui': ui,
     }
 

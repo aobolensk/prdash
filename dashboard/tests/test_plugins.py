@@ -1326,3 +1326,72 @@ class PluginStreamingRuntimeTests(TestCase):
         events = list(self.manager.dispatch_stream(self._request(), 'stream-plugin', 'plain'))
 
         self.assertEqual(events, [{'final': True, 'response': {'type': 'json', 'data': {'ok': True}, 'status': 200}}])
+
+
+_PAGE_PLUGIN_SOURCE = '''
+from prdash.plugin_api import PLUGIN_API_VERSION, PluginMetadata, PluginPrListPage
+
+
+class PagePlugin:
+    metadata = PluginMetadata(
+        plugin_id='page-plugin', name='Page Plugin', version='1.0.0', api_version=PLUGIN_API_VERSION,
+    )
+
+    def initialize(self, registrar):
+        registrar.register_pr_list_page(PluginPrListPage(name='triage', title='Triage'))
+
+    def shutdown(self):
+        pass
+'''
+
+
+class PluginPrListPageTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='pageuser', password='testpass')
+        tempdir = TemporaryDirectory()
+        self.addCleanup(tempdir.cleanup)
+        root = Path(tempdir.name)
+        plugin_dir = root / 'page-plugin'
+        plugin_dir.mkdir()
+        (plugin_dir / 'page_plugin.py').write_text(_PAGE_PLUGIN_SOURCE + '\nplugin = PagePlugin()\n',
+                                                   encoding='utf-8')
+        (plugin_dir / 'prdash-plugin.json').write_text(json.dumps({
+            'id': 'page-plugin',
+            'name': 'page-plugin',
+            'version': '1.0.0',
+            'api_version': PLUGIN_API_VERSION,
+            'entrypoint': 'page_plugin:plugin',
+            'python_path': '.',
+        }), encoding='utf-8')
+        self.manager = PluginManager()
+        with override_settings(PRDASH_PLUGIN_PATHS=[str(root)]):
+            self.manager.discover()
+        self.addCleanup(self.manager._shutdown_all)
+
+    def test_pages_are_listed_only_for_users_with_the_plugin_enabled(self):
+        self.assertEqual(self.manager.pr_list_pages(self.user), [])
+
+        self.manager.configure_user(self.user, {'page-plugin'})
+
+        page = {
+            'plugin_id': 'page-plugin', 'name': 'triage', 'title': 'Triage', 'source': 'open_all',
+            'tab': 'plugin:page-plugin:triage',
+        }
+        self.assertEqual(self.manager.pr_list_pages(self.user), [page])
+        self.assertEqual(self.manager.pr_list_page(self.user, 'page-plugin', 'triage'), page)
+        self.assertIsNone(self.manager.pr_list_page(self.user, 'page-plugin', 'missing'))
+
+    def test_invalid_pages_are_rejected_at_registration(self):
+        from prdash.plugin_api import PluginPrListPage
+
+        registrar = _WorkerRegistrar(MagicMock(), _Registration(), {})
+        registrar.register_pr_list_page(PluginPrListPage(name='triage', title='Triage'))
+
+        for page in (
+            PluginPrListPage(name='Bad Name', title='Bad'),
+            PluginPrListPage(name='untitled', title=''),
+            PluginPrListPage(name='other', title='Other', source='closed'),
+            PluginPrListPage(name='triage', title='Again'),
+        ):
+            with self.assertRaises(ValueError):
+                registrar.register_pr_list_page(page)

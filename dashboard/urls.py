@@ -28,6 +28,8 @@ urlpatterns = [
     path('prs/review-requests/reviewed/', views.review_reviewed_list, name='review_reviewed_list'),
     path('prs/review-requests/approved/', views.review_approved_list, name='review_approved_list'),
     path('prs/assigned/', views.assigned_list, name='assigned_list'),
+    # GitHub owner names cannot contain underscores, so this never shadows a repo URL.
+    path('prs/_plugins/<slug:plugin_id>/<slug:name>/', views.plugin_pr_list, name='plugin_pr_list'),
     path('prs/<str:owner>/<str:repo>/', views.repo_pr_list, name='repo_pr_list'),
     path('prs/<str:owner>/<str:repo>/merged/', views.repo_merged_pr_list, name='repo_merged_pr_list'),
     path('prs/<str:owner>/<str:repo>/review-requests/',

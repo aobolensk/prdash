@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 
-PLUGIN_API_VERSION = '2.0'
+PLUGIN_API_VERSION = '2.1'
 GITHUB_API_VERSION = '2022-11-28'
 
 PR_LIST_QUERY_HOOK = 'pr_list.query'
@@ -19,6 +19,9 @@ HEADER_STATUS_SLOT = 'header.status'
 HEAD_SLOT = 'head'
 PR_CARD_ACTIONS_SLOT = 'pr_card.actions'
 PR_CARD_BADGES_SLOT = 'pr_card.badges'
+
+PR_SOURCE_OPEN_ALL = 'open_all'  # Open PRs from every author except the current user
+PR_LIST_PAGE_SOURCES = (PR_SOURCE_OPEN_ALL,)
 
 
 @dataclass(frozen=True)
@@ -57,6 +60,15 @@ class UIContribution:
     template: TemplateResource
     order: int = 100
     context_provider: 'UIContextProvider | None' = None
+
+
+@dataclass(frozen=True)
+class PluginPrListPage:
+    """A sidebar PR list page at /prs/_plugins/<plugin_id>/<name>/ with active_tab 'plugin:<plugin_id>:<name>'."""
+
+    name: str
+    title: str
+    source: str = PR_SOURCE_OPEN_ALL
 
 
 @dataclass(frozen=True)
@@ -188,6 +200,9 @@ class PluginRegistrar(Protocol):
         ...
 
     def register_service(self, name: str, handler: Callable[[Mapping[str, Any]], Any]) -> None:
+        ...
+
+    def register_pr_list_page(self, page: PluginPrListPage) -> None:
         ...
 
     def call_service(self, user_id: int, plugin_id: str, name: str, args: Mapping[str, Any]) -> Any:
