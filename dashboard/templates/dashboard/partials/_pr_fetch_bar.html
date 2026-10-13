@@ -1,0 +1,23 @@
+{% load dashboard_tags %}
+<div class="pr-fetch-bar" id="pr-fetch-bar"
+     data-fetch-url="{{ pr_fetch.url }}"
+     data-state="{{ pr_fetch.job.state|default:'idle' }}">
+    <button type="button" class="btn btn-primary btn-small pr-fetch-btn"
+            {% if pr_fetch.job.state == 'running' %}disabled{% endif %}>
+        {% if pr_fetch.snapshot %}Fetch again{% else %}Fetch PRs{% endif %}
+    </button>
+    <div class="pr-fetch-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+         {% if pr_fetch.job.state != 'running' %}hidden{% endif %}>
+        <div class="pr-fetch-progress-fill"></div>
+    </div>
+    <span class="pr-fetch-status" aria-live="polite">
+        {% if pr_fetch.job.state == 'running' %}
+            {{ pr_fetch.job.phase }}
+        {% elif not pr_fetch.snapshot %}
+            Not fetched yet. This page only queries GitHub when you click Fetch.
+        {% else %}
+            {{ pr_fetch.snapshot.prs|length }} PR{{ pr_fetch.snapshot.prs|length|pluralize }},
+            <span data-timestamp="{{ pr_fetch.snapshot.fetched_at|date:'c' }}" data-time-prefix="fetched">fetched {{ pr_fetch.snapshot.fetched_at|time_ago }}</span>{% if pr_fetch.snapshot.partial %}, some could not be loaded{% endif %}
+        {% endif %}
+    </span>
+</div>

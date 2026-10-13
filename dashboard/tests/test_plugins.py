@@ -1444,7 +1444,7 @@ class PluginPrListPageTests(TestCase):
 
         page = {
             'plugin_id': 'page-plugin', 'name': 'triage', 'title': 'Triage', 'source': 'open_all',
-            'tab': 'plugin:page-plugin:triage',
+            'fetch_on_demand': False, 'tab': 'plugin:page-plugin:triage',
         }
         self.assertEqual(self.manager.pr_list_pages(self.user), [page])
         self.assertEqual(self.manager.pr_list_page(self.user, 'page-plugin', 'triage'), page)

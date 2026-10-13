@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from dashboard.github_client import CIStatus, PullRequestInfo, ReviewStatus
 from dashboard.models import PersonalAccessToken, TrackedRepository, UserPreferences
+from dashboard import views
 from dashboard.views import _parse_repo_input
 
 
@@ -680,7 +681,7 @@ class PluginPrListPageViewTests(TestCase):
 
     PAGE = {
         'plugin_id': 'page-plugin', 'name': 'triage', 'title': 'Triage', 'source': 'open_all',
-        'tab': 'plugin:page-plugin:triage',
+        'fetch_on_demand': False, 'tab': 'plugin:page-plugin:triage',
     }
 
     def setUp(self):
@@ -778,3 +779,107 @@ class PluginPrListPageViewTests(TestCase):
         self.assertFalse(prefs.is_auto_refresh_enabled_for_tab('plugin:other:page'))
         self.assertContains(response, 'name="auto_refresh_plugin:page-plugin:triage"')
         self.assertContains(response, 'Triage')
+
+
+class FetchOnDemandPageTests(PluginPrListPageViewTests):
+    PAGE = {**PluginPrListPageViewTests.PAGE, 'fetch_on_demand': True}
+
+    def setUp(self):
+        super().setUp()
+        views._pr_fetch_jobs.clear()
+        self.addCleanup(views._pr_fetch_jobs.clear)
+        self.fetch_url = reverse('dashboard:plugin_pr_list_fetch', args=['page-plugin', 'triage'])
+        TrackedRepository.objects.create(user=self.user, owner='o', name='r')
+
+    def fetch(self):
+        response = self.client.post(self.fetch_url)
+        for job in list(views._pr_fetch_jobs.values()):
+            job['thread'].join(5)
+        return response
+
+    @patch('dashboard.views.GitHubClient')
+    def test_page_does_not_fetch_until_asked(self, mock_github_client):
+        mock_client = self.mock_client(mock_github_client, [self.make_pr(1)])
+
+        response = self.client.get(self.url)
+        status = self.client.get(self.fetch_url).json()
+
+        mock_client.get_all_open_prs.assert_not_called()
+        self.assertContains(response, 'id="pr-fetch-bar"')
+        self.assertContains(response, 'Not fetched yet')
+        self.assertNotContains(response, 'PR 1')
+        self.assertEqual(status, {'state': 'idle'})
+
+    @patch('dashboard.views.GitHubClient')
+    def test_fetch_reports_progress_and_the_page_renders_its_result(self, mock_github_client):
+        mock_client = self.mock_client(mock_github_client, [self.make_pr(1), self.make_pr(2, author='testuser')])
+
+        def get_all_open_prs(repos, exclude_author=None, progress=None):
+            progress('Searching repositories', 1, 1)
+            return [self.make_pr(1), self.make_pr(2, author='testuser')]
+
+        mock_client.get_all_open_prs.side_effect = get_all_open_prs
+        started = self.fetch()
+        status = self.client.get(self.fetch_url).json()
+        page = self.client.get(self.url)
+
+        self.assertEqual(started.status_code, 200)
+        self.assertEqual(mock_client.get_all_open_prs.call_count, 1)
+        self.assertEqual(status['state'], 'done')
+        self.assertEqual((status['phase'], status['done'], status['total'], status['count']),
+                         ('Searching repositories', 1, 1, 2))
+        self.assertContains(page, 'PR 1')
+        self.assertNotContains(page, 'PR 2')
+        self.assertContains(page, 'fetched just now')
+        self.assertEqual(mock_client.get_all_open_prs.call_count, 1)
+
+    @patch('dashboard.views.GitHubClient')
+    def test_refresh_after_a_fetch_rerenders_even_without_new_prs(self, mock_github_client):
+        self.mock_client(mock_github_client, [])
+        poll = {'HTTP_HX_REQUEST': 'true', 'HTTP_HX_TRIGGER': 'auto-refresh-container'}
+        before = self.client.get(self.url, **poll)
+
+        self.fetch()
+        after = self.client.get(self.url, HTTP_X_PR_RENDER_HASH=before.context['pr_render_hash'], **poll)
+
+        self.assertEqual(after.status_code, 200)
+        self.assertContains(after, '0 PRs')
+
+    @patch('dashboard.views.GitHubClient')
+    def test_partial_fetch_keeps_the_previous_complete_list(self, mock_github_client):
+        mock_client = self.mock_client(mock_github_client, [self.make_pr(1)])
+        self.fetch()
+        mock_client.get_all_open_prs.return_value = []
+        mock_client.warnings = ['Rate limit hit. Not loaded: o/r']
+
+        self.fetch()
+        status = self.client.get(self.fetch_url).json()
+        page = self.client.get(self.url)
+
+        self.assertEqual(status['warnings'], ['Rate limit hit. Not loaded: o/r'])
+        self.assertContains(page, 'PR 1')
+
+    @patch('dashboard.views.GitHubClient')
+    def test_failed_fetch_is_reported(self, mock_github_client):
+        mock_client = self.mock_client(mock_github_client, [])
+        mock_client.get_all_open_prs.side_effect = RuntimeError('boom')
+
+        with self.assertLogs('dashboard.views', level='ERROR'):
+            self.fetch()
+        status = self.client.get(self.fetch_url).json()
+
+        self.assertEqual((status['state'], status['errors']), ('failed', ['Fetching pull requests failed']))
+
+    @patch('dashboard.views.GitHubClient')
+    def test_fetch_endpoint_is_only_for_fetch_on_demand_pages(self, mock_github_client):
+        self.mock_client(mock_github_client, [])
+        with patch('dashboard.views.plugin_manager.pr_list_page', return_value=PluginPrListPageViewTests.PAGE):
+            response = self.client.post(self.fetch_url)
+
+        self.assertEqual(response.status_code, 404)
+
+    # These inherited tests assume a fetch on every load.
+    test_full_page_lists_open_prs_of_others_and_links_the_page = None
+    test_poll_rerenders_when_only_an_annotation_changes = None
+    test_plugin_page_auto_refresh_is_saved_and_used = None
+    test_unknown_page_returns_404 = None

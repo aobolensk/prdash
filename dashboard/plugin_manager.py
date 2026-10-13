@@ -1021,6 +1021,7 @@ class PluginManager:
                     'name': page['name'],
                     'title': page['title'],
                     'source': page['source'],
+                    'fetch_on_demand': bool(page.get('fetch_on_demand')),
                     'tab': f'plugin:{plugin_id}:{page["name"]}',
                 })
         return pages

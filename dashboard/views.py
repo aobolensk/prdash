@@ -1,18 +1,21 @@
 from django.shortcuts import render, redirect, get_object_or_404
-from django.http import Http404, HttpResponse, StreamingHttpResponse
+from django.http import Http404, HttpResponse, JsonResponse, StreamingHttpResponse
 from django.contrib.auth.decorators import login_required
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_http_methods, require_POST
 from django.core.cache import cache
 from django.core.paginator import Paginator
+from django.db import connections
 from django.urls import reverse
 from django.utils.cache import add_never_cache_headers
 from django.utils import timezone
 from dataclasses import asdict
 import hashlib
 import json
+import logging
 from mimetypes import guess_type
 import re
 import requests
+import threading
 
 from .models import TrackedRepository, PersonalAccessToken, UserPreferences, AUTO_REFRESH_CATEGORIES
 from .github_client import GitHubClient
@@ -27,10 +30,19 @@ from prdash.plugin_api import (
 
 PR_COUNT_CACHE_TTL = 300  # 5 minutes
 PR_RESULTS_CACHE_TTL = 3600  # 1 hour, fallback for failed refreshes
+PR_SNAPSHOT_CACHE_TTL = 86400  # 1 day, the list a fetch-on-demand page renders
+PR_FETCH_JOB_RETENTION = 3600  # Seconds a finished fetch job stays queryable
+
+logger = logging.getLogger(__name__)
+
+# Keyed by _pr_fetch_key().
+_pr_fetch_jobs = {}
+_pr_fetch_jobs_lock = threading.Lock()
 
 
 def _compute_pr_render_hash(
-    prs, *, auto_refresh_enabled, auto_refresh_interval, current_username, page_number, stale_data, render_path
+    prs, *, auto_refresh_enabled, auto_refresh_interval, current_username, page_number, stale_data, render_path,
+    pr_fetch=None,
 ):
     """Hash the data that determines the rendered _pr_content.html output for a poll.
 
@@ -47,6 +59,13 @@ def _compute_pr_render_hash(
             'page_number': page_number,
             'stale_data': stale_data,
             'render_path': render_path,
+            'pr_fetch': pr_fetch and {
+                'snapshot': pr_fetch['snapshot'] and {
+                    'fetched_at': pr_fetch['snapshot']['fetched_at'],
+                    'partial': pr_fetch['snapshot']['partial'],
+                },
+                'job_state': (pr_fetch['job'] or {}).get('state'),
+            },
         },
         sort_keys=True,
         default=str,
@@ -116,6 +135,32 @@ def home(request):
     return render(request, 'dashboard/home.html')
 
 
+def _run_pr_list_query(request, current_username, active_tab, owner=None, repo=None, query_defaults=None):
+    plugin_context = PullRequestListContext(
+        request=request,
+        active_tab=active_tab,
+        current_username=current_username,
+        current_repo=(owner, repo) if owner and repo else None,
+        query_defaults=query_defaults or {},
+    )
+    query = plugin_manager.run_hook(
+        PR_LIST_QUERY_HOOK,
+        PullRequestQuery(),
+        plugin_context,
+        request.user,
+        request,
+    )
+    plugin_context.query = query
+    return plugin_context, query
+
+
+def _query_cache_vary(query, author=None):
+    cache_vary = dict(query.cache_vary)
+    if author is not None:
+        cache_vary['author'] = author
+    return hashlib.sha256(json.dumps(cache_vary, sort_keys=True).encode()).hexdigest()
+
+
 def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
                   owner=None, repo=None, post_filter=None, post_filter_factory=None,
                   base_fetch_options=None, query_defaults=None, author_required=False,
@@ -135,21 +180,9 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
     repos = TrackedRepository.objects.filter(user=request.user)
     client = GitHubClient(request.user)
     current_username = client.get_username()
-    plugin_context = PullRequestListContext(
-        request=request,
-        active_tab=active_tab,
-        current_username=current_username,
-        current_repo=(owner, repo) if owner and repo else None,
-        query_defaults=query_defaults or {},
+    plugin_context, query = _run_pr_list_query(
+        request, current_username, active_tab, owner, repo, query_defaults,
     )
-    query = plugin_manager.run_hook(
-        PR_LIST_QUERY_HOOK,
-        PullRequestQuery(),
-        plugin_context,
-        request.user,
-        request,
-    )
-    plugin_context.query = query
     author = query.parameters.get('author') or None
     if author_required:
         author = request.GET.get('author', '').strip() or None
@@ -158,12 +191,22 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
     if author_required and author:
         fetch_options['author'] = author
 
+    cache_gen = cache.get(f"pr_results_gen:{request.user.id}", 0)
+    query_cache_vary = _query_cache_vary(query, (author or '') if author_required else None)
+    fetch_on_demand = bool(plugin_page and plugin_page['fetch_on_demand'])
+    pr_fetch = None
+
     if owner and repo:
         current_repo = get_object_or_404(
             TrackedRepository, user=request.user, owner=owner, name=repo
         )
         prs = fetch_prs(client, owner, repo, fetch_options) if author or not author_required else []
         repo_changed = f'{owner}/{repo}'
+    elif fetch_on_demand:
+        current_repo = None
+        pr_fetch = _pr_fetch_context(request.user, plugin_page, query_cache_vary)
+        prs = list(pr_fetch['snapshot']['prs']) if pr_fetch['snapshot'] else []
+        repo_changed = ''
     else:
         current_repo = None
         enabled_repos = repos.filter(enabled=True)
@@ -171,20 +214,16 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         prs = fetch_prs(client, repo_tuples, fetch_options) if author or not author_required else []
         repo_changed = ''
 
-    cache_gen = cache.get(f"pr_results_gen:{request.user.id}", 0)
-    cache_vary = dict(query.cache_vary)
-    if author_required:
-        cache_vary['author'] = author or ''
-    query_cache_vary = hashlib.sha256(
-        json.dumps(cache_vary, sort_keys=True).encode()
-    ).hexdigest()
     results_cache_key = (
         f"pr_results:{request.user.id}:{cache_gen}:{request.path}:"
         f"{query_cache_vary}"
     )
     fetch_had_issues = bool(client.errors or client.warnings)
     stale_data = False
-    if fetch_had_issues:
+    if fetch_on_demand:
+        # Nothing was fetched, so the snapshot is only stale if its own fetch was partial.
+        stale_data = bool(pr_fetch['snapshot'] and pr_fetch['snapshot']['partial'])
+    elif fetch_had_issues:
         # A partial result is not a complete snapshot, so prefer the last clean fetch.
         cached_prs = cache.get(results_cache_key)
         if cached_prs is not None:
@@ -261,6 +300,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         page_number=page_obj.number if page_obj else None,
         stale_data=stale_data,
         render_path=request.get_full_path(),
+        pr_fetch=pr_fetch,
     )
 
     context = {
@@ -283,6 +323,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         'stale_data': stale_data,
         'pr_render_hash': render_hash,
         'plugin_page': plugin_page,
+        'pr_fetch': pr_fetch,
     }
 
     if request.headers.get('HX-Request') == 'true':
@@ -293,7 +334,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
             'staleData': stale_data,
             'prCounts': pr_counts,
         }
-        if not stale_data:
+        if not stale_data and not fetch_on_demand:
             triggers['refreshedAt'] = timezone.now().isoformat()
         triggers.update(client.get_notification_triggers())
 
@@ -484,6 +525,96 @@ def plugin_pr_list(request, plugin_id, name):
         post_filter=_exclude_own_prs,
         plugin_page=page,
     )
+
+
+def _pr_fetch_key(user, page, query_cache_vary):
+    cache_gen = cache.get(f"pr_results_gen:{user.id}", 0)
+    return f"{user.id}:{cache_gen}:{page['tab']}:{query_cache_vary}"
+
+
+def _pr_fetch_job(key):
+    with _pr_fetch_jobs_lock:
+        job = _pr_fetch_jobs.get(key)
+        if job is None:
+            return None
+        if job['state'] == 'running' and not job['thread'].is_alive():
+            job.update(state='failed', errors=['The fetch stopped unexpectedly'], finished_at=timezone.now())
+        state = {name: value for name, value in job.items() if name != 'thread'}
+    state['elapsed_seconds'] = round(((state['finished_at'] or timezone.now()) - state['started_at']).total_seconds())
+    return state
+
+
+def _pr_fetch_context(user, page, query_cache_vary):
+    key = _pr_fetch_key(user, page, query_cache_vary)
+    return {
+        'url': reverse('dashboard:plugin_pr_list_fetch', args=[page['plugin_id'], page['name']]),
+        'snapshot': cache.get(f'pr_snapshot:{key}'),
+        'job': _pr_fetch_job(key),
+    }
+
+
+def _start_pr_fetch(user, key, fetch_prs, repo_tuples, fetch_options):
+    """Start a background fetch unless one for the same key is running."""
+    now = timezone.now()
+    with _pr_fetch_jobs_lock:
+        for job_key, job in list(_pr_fetch_jobs.items()):
+            if job['finished_at'] and (now - job['finished_at']).total_seconds() > PR_FETCH_JOB_RETENTION:
+                del _pr_fetch_jobs[job_key]
+        job = _pr_fetch_jobs.get(key)
+        if job and job['state'] == 'running' and job['thread'].is_alive():
+            return
+        job = {
+            'state': 'running', 'phase': 'Starting', 'done': 0, 'total': 0, 'count': 0,
+            'errors': [], 'warnings': [], 'started_at': now, 'finished_at': None,
+        }
+        job['thread'] = threading.Thread(
+            target=_run_pr_fetch, args=(user, key, job, fetch_prs, repo_tuples, fetch_options), daemon=True,
+        )
+        _pr_fetch_jobs[key] = job
+        job['thread'].start()
+
+
+def _run_pr_fetch(user, key, job, fetch_prs, repo_tuples, fetch_options):
+    def progress(phase, done, total):
+        with _pr_fetch_jobs_lock:
+            job.update(phase=phase, done=done, total=total)
+
+    try:
+        client = GitHubClient(user)
+        prs = fetch_prs(client, repo_tuples, {**fetch_options, 'progress': progress})
+        partial = bool(client.errors or client.warnings)
+        snapshot_key = f'pr_snapshot:{key}'
+        previous = cache.get(snapshot_key)
+        # Like pr_results, a partial fetch does not replace a complete earlier one.
+        if not partial or previous is None or previous['partial']:
+            cache.set(
+                snapshot_key, {'prs': prs, 'fetched_at': timezone.now(), 'partial': partial}, PR_SNAPSHOT_CACHE_TTL,
+            )
+        result = {'state': 'done', 'count': len(prs), 'errors': client.errors, 'warnings': client.warnings}
+    except Exception:
+        logger.exception('Fetching pull requests failed for %s', key)
+        result = {'state': 'failed', 'errors': ['Fetching pull requests failed']}
+    finally:
+        connections.close_all()
+    with _pr_fetch_jobs_lock:
+        job.update(result, finished_at=timezone.now())
+
+
+@login_required
+@require_http_methods(['GET', 'POST'])
+def plugin_pr_list_fetch(request, plugin_id, name):
+    """The query string must match the page so plugin query hooks pick the same fetch options."""
+    page = plugin_manager.pr_list_page(request.user, plugin_id, name, request)
+    if page is None or not page['fetch_on_demand'] or page['source'] not in _PLUGIN_PAGE_FETCHERS:
+        raise Http404
+    _, query = _run_pr_list_query(request, GitHubClient(request.user).get_username(), page['tab'])
+    key = _pr_fetch_key(request.user, page, _query_cache_vary(query))
+    if request.method == 'POST':
+        repo_tuples = [(r.owner, r.name) for r in TrackedRepository.objects.filter(user=request.user, enabled=True)]
+        _start_pr_fetch(request.user, key, _PLUGIN_PAGE_FETCHERS[page['source']], repo_tuples, query.fetch_options)
+    response = JsonResponse(_pr_fetch_job(key) or {'state': 'idle'})
+    add_never_cache_headers(response)
+    return response
 
 
 def _render_repo_list(request, trigger='repoToggled', errors=None):

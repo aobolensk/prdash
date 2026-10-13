@@ -73,6 +73,8 @@
             {% else %}
             <p>Add a repository to start tracking pull requests.</p>
             {% endif %}
+        {% elif pr_fetch and not pr_fetch.snapshot and repos %}
+            <p>Click Fetch PRs to load this list from GitHub.</p>
         {% elif repos %}
             {% if active_tab == 'merged' %}
                 <p>No merged pull requests found.</p>

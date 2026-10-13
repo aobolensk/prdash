@@ -894,6 +894,105 @@ function formatTimestampTitles(root = document) {
     });
 }
 
+// Fetch-on-demand pages query GitHub only when asked, in a server job polled here.
+const PR_FETCH_POLL_MS = 1000;
+let prFetchPollingUrl = null;
+let prFetchTimer = null;
+
+function prFetchUrl(bar) {
+    // The same fields the list request sends, so plugin query hooks pick the same fetch options.
+    const params = new URLSearchParams();
+    document.querySelectorAll('.filter-toolbar [name]').forEach(field => {
+        if (field.disabled || field.value === undefined) return;
+        if ((field.type === 'checkbox' || field.type === 'radio') && !field.checked) return;
+        params.append(field.name, field.value);
+    });
+    const query = params.toString();
+    return query ? `${bar.dataset.fetchUrl}?${query}` : bar.dataset.fetchUrl;
+}
+
+function renderPrFetchStatus(bar, status) {
+    const running = status.state === 'running';
+    bar.dataset.state = status.state;
+    bar.querySelector('.pr-fetch-btn').disabled = running;
+    const progress = bar.querySelector('.pr-fetch-progress');
+    progress.hidden = !running;
+    if (!running) return;
+    const determinate = status.total > 0;
+    const percent = determinate ? Math.round(100 * status.done / status.total) : 0;
+    progress.classList.toggle('indeterminate', !determinate);
+    progress.querySelector('.pr-fetch-progress-fill').style.width = determinate ? `${percent}%` : '';
+    if (determinate) progress.setAttribute('aria-valuenow', percent);
+    else progress.removeAttribute('aria-valuenow');
+    const count = determinate ? ` ${status.done}/${status.total}` : '';
+    bar.querySelector('.pr-fetch-status').textContent = `${status.phase}${count} (${status.elapsed_seconds}s)`;
+}
+
+function finishPrFetch(status) {
+    (status.errors || []).forEach(message => showToast(message, 'error'));
+    (status.warnings || []).forEach(message => showToast(message, 'warning'));
+    htmx.trigger(document.body, 'manualRefresh');
+    if (status.state === 'done') {
+        document.dispatchEvent(new CustomEvent('prdash:pullRequestsFetched', { detail: status }));
+    }
+}
+
+function pollPrFetch(bar) {
+    const url = prFetchUrl(bar);
+    if (prFetchPollingUrl === url) return;
+    window.clearTimeout(prFetchTimer);
+    prFetchPollingUrl = url;
+    function tick() {
+        fetch(url, { credentials: 'same-origin' }).then(response => {
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return response.json();
+        }).then(status => {
+            if (prFetchPollingUrl !== url) return;
+            const current = document.getElementById('pr-fetch-bar');
+            if (!current || prFetchUrl(current) !== url) {
+                // The page moved on to another list, which resumes its own fetch if one runs.
+                prFetchPollingUrl = null;
+                return;
+            }
+            renderPrFetchStatus(current, status);
+            if (status.state === 'running') {
+                prFetchTimer = window.setTimeout(tick, PR_FETCH_POLL_MS);
+                return;
+            }
+            prFetchPollingUrl = null;
+            finishPrFetch(status);
+        }).catch(() => {
+            if (prFetchPollingUrl === url) prFetchTimer = window.setTimeout(tick, PR_FETCH_POLL_MS * 3);
+        });
+    }
+    tick();
+}
+
+function startPrFetch(bar) {
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]');
+    bar.querySelector('.pr-fetch-btn').disabled = true;
+    fetch(prFetchUrl(bar), {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'X-CSRFToken': csrfToken ? csrfToken.value : '' },
+    }).then(response => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+    }).then(status => {
+        renderPrFetchStatus(bar, status);
+        prFetchPollingUrl = null;
+        pollPrFetch(bar);
+    }).catch(() => {
+        bar.querySelector('.pr-fetch-btn').disabled = false;
+        showToast('Could not start fetching pull requests', 'error');
+    });
+}
+
+function bindPrFetchBar() {
+    const bar = document.getElementById('pr-fetch-bar');
+    if (bar && bar.dataset.state === 'running') pollPrFetch(bar);
+}
+
 function buildPluginSettingsNav() {
     const nav = document.getElementById('settings-nav-plugins');
     if (!nav) return;
@@ -929,6 +1028,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (initialLastUpdated) syncClockOffset(initialLastUpdated);
     formatLastUpdated();
     formatRelativeTimes();
+    bindPrFetchBar();
     setInterval(formatLastUpdated, 15000);
     // Whole-minute resolution, so a coarser tick than the header above.
     setInterval(formatRelativeTimes, 60000);
@@ -1017,6 +1117,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const target = evt.detail.target;
         if (target && target.id === 'pr-content') {
             syncPrSearchState();
+            bindPrFetchBar();
         }
         if (target && target.id === 'plugin-settings-container') {
             buildPluginSettingsNav();
@@ -1026,6 +1127,12 @@ document.addEventListener('DOMContentLoaded', function() {
     document.body.addEventListener('click', function(evt) {
         if (evt.target.closest('#pr-search-toggle')) {
             togglePrSearch();
+            return;
+        }
+        const fetchBar = document.getElementById('pr-fetch-bar');
+        if (fetchBar && (evt.target.closest('#pr-refresh-btn') || evt.target.closest('.pr-fetch-btn'))) {
+            // Refreshing a fetch-on-demand page is the explicit request to query GitHub.
+            if (fetchBar.dataset.state !== 'running') startPrFetch(fetchBar);
             return;
         }
         if (evt.target.closest('#pr-refresh-btn')) {
@@ -1175,6 +1282,11 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     document.body.addEventListener('repoToggled', function() {
+        if (document.getElementById('pr-fetch-bar')) {
+            // Only re-render a fetch-on-demand page, fetching stays an explicit request.
+            htmx.trigger(document.body, 'manualRefresh');
+            return;
+        }
         const refreshBtn = document.getElementById('pr-refresh-btn');
         if (refreshBtn) {
             refreshBtn.click();

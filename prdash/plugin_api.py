@@ -64,11 +64,15 @@ class UIContribution:
 
 @dataclass(frozen=True)
 class PluginPrListPage:
-    """A sidebar PR list page at /prs/_plugins/<plugin_id>/<name>/ with active_tab 'plugin:<plugin_id>:<name>'."""
+    """A sidebar PR list page at /prs/_plugins/<plugin_id>/<name>/ with active_tab 'plugin:<plugin_id>:<name>'.
+
+    A `fetch_on_demand` page queries GitHub only when asked and otherwise renders the last fetched list.
+    """
 
     name: str
     title: str
     source: str = PR_SOURCE_OPEN_ALL
+    fetch_on_demand: bool = False
 
 
 @dataclass(frozen=True)

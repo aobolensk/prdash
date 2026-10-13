@@ -245,6 +245,14 @@ label pills of the state, so the hook should add
 `pr_list.process` hook still applies `pr_search.matches` for free text and
 author pills.
 
+With `fetch_on_demand=True` the page does not query GitHub when it loads or
+auto-refreshes. It renders the last fetched list, and a Fetch button (or the
+refresh button) starts a background fetch whose progress the page shows. The
+fetch request carries the page filter fields, so the `pr_list.query` hook sees
+the same `query_params` and picks the same `fetch_options`. A fetch is kept per
+`cache_vary`, and the browser dispatches `prdash:pullRequestsFetched` on
+`document` when one completes.
+
 A `pr_list.process` hook may reorder PRs and attach per-PR data under its own
 plugin id:
 

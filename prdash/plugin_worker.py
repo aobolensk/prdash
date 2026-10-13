@@ -271,7 +271,8 @@ def _describe(plugin, registration):
         'routes': list(registration.routes.keys()),
         'services': list(registration.services.keys()),
         'pr_list_pages': [
-            {'name': page.name, 'title': page.title, 'source': page.source}
+            {'name': page.name, 'title': page.title, 'source': page.source,
+             'fetch_on_demand': bool(page.fetch_on_demand)}
             for page in registration.pages.values()
         ],
         'ui': ui,

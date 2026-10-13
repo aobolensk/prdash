@@ -1369,6 +1369,47 @@ mark.pr-hl-typo {
     height: 14px;
 }
 
+/* Fetch-on-demand bar */
+.pr-fetch-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    font-size: 0.85rem;
+    color: var(--color-text-secondary);
+}
+
+.pr-fetch-progress {
+    position: relative;
+    flex: 0 0 200px;
+    height: 6px;
+    overflow: hidden;
+    border-radius: 3px;
+    background-color: var(--color-bg-tertiary);
+}
+
+.pr-fetch-progress[hidden] {
+    display: none;
+}
+
+.pr-fetch-progress-fill {
+    height: 100%;
+    width: 0;
+    background-color: var(--color-primary);
+    transition: width 0.3s ease;
+}
+
+.pr-fetch-progress.indeterminate .pr-fetch-progress-fill {
+    position: absolute;
+    width: 30%;
+    animation: pr-fetch-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes pr-fetch-indeterminate {
+    from { left: -30%; }
+    to { left: 100%; }
+}
+
 /* Auto-refresh indicator */
 .auto-refresh-indicator {
     display: flex;

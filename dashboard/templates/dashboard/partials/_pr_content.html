@@ -59,7 +59,9 @@
         {% endif %}
     </h1>
     <div class="refresh-wrapper">
+        {% if not pr_fetch %}
         <span class="last-updated" data-updated="{% now 'c' %}" title="Last updated {% now 'N j, Y, H:i:s' %}">just now</span>
+        {% endif %}
         <span class="stale-indicator" id="stale-indicator" {% if not stale_data %}hidden{% endif %}
               title="Couldn't confirm the latest state from GitHub. Showing the last known list">
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -89,6 +91,8 @@
         </button>
     </div>
 </div>
+
+{% if pr_fetch %}{% include 'dashboard/partials/_pr_fetch_bar.html' %}{% endif %}
 
 <div class="filter-toolbar">
     {% if active_tab == 'open' or active_tab == 'merged' or active_tab == 'author' or active_tab == 'author_merged' %}
