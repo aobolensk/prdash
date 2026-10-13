@@ -268,6 +268,13 @@ dependencies=(PluginDependency('other-plugin', '>=1.2,<2'),)
 The user must enable both plugins. prdash does not activate dependencies
 implicitly.
 
+A source plugin that imports modules of another source plugin also lists it in
+its manifest, which puts the dependency `python_path` on the worker import path:
+
+```json
+"dependencies": ["other-plugin"]
+```
+
 Deployment configuration is read once during initialization:
 
 ```python

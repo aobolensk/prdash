@@ -1328,7 +1328,33 @@ class PluginStreamingRuntimeTests(TestCase):
         self.assertEqual(events, [{'final': True, 'response': {'type': 'json', 'data': {'ok': True}, 'status': 200}}])
 
 
+_PAGE_HELPERS_SOURCE = '''
+def rank_of(index):
+    return index + 1
+'''
+
+_HELPERS_PLUGIN_SOURCE = '''
+from prdash.plugin_api import PLUGIN_API_VERSION, PluginMetadata
+
+
+class HelpersPlugin:
+    metadata = PluginMetadata(
+        plugin_id='page-helpers', name='Page Helpers', version='1.0.0', api_version=PLUGIN_API_VERSION,
+    )
+
+    def initialize(self, registrar):
+        pass
+
+    def shutdown(self):
+        pass
+
+
+plugin = HelpersPlugin()
+'''
+
 _PAGE_PLUGIN_SOURCE = '''
+from page_helpers import rank_of
+
 from prdash.plugin_api import (
     PLUGIN_API_VERSION, PR_LIST_PROCESS_HOOK, PluginMetadata, PluginPrListPage, TemplateResource,
     UIContribution,
@@ -1354,7 +1380,7 @@ class PagePlugin:
     def process(prs, context, config):
         prs = list(reversed(prs))
         for index, pr in enumerate(prs):
-            pr['plugin_annotations']['page-plugin'] = {'rank': index + 1}
+            pr['plugin_annotations']['page-plugin'] = {'rank': rank_of(index)}
             pr['plugin_annotations']['other-plugin'] = 'forged'
         return prs
 '''
@@ -1366,6 +1392,10 @@ class PluginPrListPageTests(TestCase):
         tempdir = TemporaryDirectory()
         self.addCleanup(tempdir.cleanup)
         root = Path(tempdir.name)
+        helpers_dir = root / 'page-helpers'
+        helpers_dir.mkdir()
+        (helpers_dir / 'page_helpers.py').write_text(_PAGE_HELPERS_SOURCE, encoding='utf-8')
+        (helpers_dir / 'helpers_plugin.py').write_text(_HELPERS_PLUGIN_SOURCE, encoding='utf-8')
         plugin_dir = root / 'page-plugin'
         assets_dir = plugin_dir / 'page_assets'
         assets_dir.mkdir(parents=True)
@@ -1373,14 +1403,19 @@ class PluginPrListPageTests(TestCase):
         (assets_dir / 'badge.html').write_text('rank {{ plugin_annotation.rank }}', encoding='utf-8')
         (plugin_dir / 'page_plugin.py').write_text(_PAGE_PLUGIN_SOURCE + '\nplugin = PagePlugin()\n',
                                                    encoding='utf-8')
-        (plugin_dir / 'prdash-plugin.json').write_text(json.dumps({
-            'id': 'page-plugin',
-            'name': 'page-plugin',
-            'version': '1.0.0',
-            'api_version': PLUGIN_API_VERSION,
-            'entrypoint': 'page_plugin:plugin',
-            'python_path': '.',
-        }), encoding='utf-8')
+        for plugin_id, module_name, dependencies in (
+            ('page-helpers', 'helpers_plugin', []),
+            ('page-plugin', 'page_plugin', ['page-helpers']),
+        ):
+            (root / plugin_id / 'prdash-plugin.json').write_text(json.dumps({
+                'id': plugin_id,
+                'name': plugin_id,
+                'version': '1.0.0',
+                'api_version': PLUGIN_API_VERSION,
+                'entrypoint': f'{module_name}:plugin',
+                'python_path': '.',
+                'dependencies': dependencies,
+            }), encoding='utf-8')
         self.manager = PluginManager()
         with override_settings(PRDASH_PLUGIN_PATHS=[str(root)]):
             self.manager.discover()
@@ -1405,7 +1440,7 @@ class PluginPrListPageTests(TestCase):
     def test_pages_are_listed_only_for_users_with_the_plugin_enabled(self):
         self.assertEqual(self.manager.pr_list_pages(self.user), [])
 
-        self.manager.configure_user(self.user, {'page-plugin'})
+        self.manager.configure_user(self.user, {'page-helpers', 'page-plugin'})
 
         page = {
             'plugin_id': 'page-plugin', 'name': 'triage', 'title': 'Triage', 'source': 'open_all',
@@ -1416,7 +1451,7 @@ class PluginPrListPageTests(TestCase):
         self.assertIsNone(self.manager.pr_list_page(self.user, 'page-plugin', 'missing'))
 
     def test_process_hook_annotations_are_scoped_to_the_calling_plugin(self):
-        self.manager.configure_user(self.user, {'page-plugin'})
+        self.manager.configure_user(self.user, {'page-helpers', 'page-plugin'})
         context = PullRequestListContext(request=None, active_tab='plugin:page-plugin:triage', current_username=None)
         prs = [self.make_pr(1, {'other-plugin': 'kept'}), self.make_pr(2)]
 
@@ -1431,7 +1466,7 @@ class PluginPrListPageTests(TestCase):
         )
 
     def test_card_slots_receive_the_plugin_annotation(self):
-        self.manager.configure_user(self.user, {'page-plugin'})
+        self.manager.configure_user(self.user, {'page-helpers', 'page-plugin'})
         request = RequestFactory().get('/prs/')
         request.user = self.user
 
@@ -1455,3 +1490,8 @@ class PluginPrListPageTests(TestCase):
         ):
             with self.assertRaises(ValueError):
                 registrar.register_pr_list_page(page)
+
+    def test_manifest_dependencies_must_be_plugin_ids(self):
+        with self.assertRaises(ValueError):
+            PluginManager._manifest_dependency_ids({'dependencies': 'page-helpers'})
+        self.assertEqual(PluginManager._manifest_dependency_ids({}), ())

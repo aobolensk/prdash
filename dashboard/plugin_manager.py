@@ -87,6 +87,7 @@ class PluginDescriptor:
     def __init__(
         self, plugin_id, name, version, description, entrypoint, source,
         *, api_version=None, python_path=None, asset_root=None, load_error=None,
+        dependency_ids=(),
     ):
         self.plugin_id = plugin_id
         self.name = name
@@ -98,6 +99,8 @@ class PluginDescriptor:
         self.python_path = python_path
         self.asset_root = asset_root
         self.load_error = load_error
+        # From the manifest, so import paths exist before plugin code runs.
+        self.dependency_ids = tuple(dependency_ids)
 
 
 class _WorkerHandle:
@@ -165,12 +168,30 @@ class PluginManager:
                             (manifest_path.parent / data.get('python_path', '.')).resolve(),
                             data['entrypoint'],
                         ),
+                        dependency_ids=self._manifest_dependency_ids(data),
                     )
                     self._add_descriptor(descriptor)
                 except (OSError, ValueError, KeyError, TypeError) as error:
                     message = f'Invalid plugin manifest {manifest_path}: {error}'
                     logger.warning(message)
                     self.discovery_errors.append(message)
+
+    @staticmethod
+    def _manifest_dependency_ids(data):
+        dependency_ids = data.get('dependencies', [])
+        if not isinstance(dependency_ids, list) or not all(
+            isinstance(item, str) and IDENTIFIER_PATTERN.fullmatch(item) for item in dependency_ids
+        ):
+            raise ValueError('"dependencies" must be a list of plugin ids')
+        return tuple(dependency_ids)
+
+    def _dependency_python_paths(self, descriptor):
+        paths = []
+        for dependency_id in descriptor.dependency_ids:
+            dependency = self.descriptors.get(dependency_id)
+            if dependency is not None and dependency.python_path:
+                paths.append(str(dependency.python_path))
+        return paths
 
     def _discover_entry_points(self):
         for entry_point in metadata.entry_points(group=ENTRY_POINT_GROUP):
@@ -541,6 +562,7 @@ class PluginManager:
                 manifest = self._call(worker, 'initialize', {
                     'entrypoint': descriptor.entrypoint,
                     'python_path': str(descriptor.python_path) if descriptor.python_path else None,
+                    'dependency_python_paths': self._dependency_python_paths(descriptor),
                     'deployment_config': dict(
                         getattr(settings, 'PRDASH_PLUGIN_CONFIG', {}).get(plugin_id, {})
                     ),

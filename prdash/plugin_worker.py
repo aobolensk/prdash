@@ -231,6 +231,9 @@ def _initialize(conn, params):
     python_path = params.get('python_path')
     if python_path:
         sys.path.insert(0, python_path)
+    # Dependency packages resolve after the plugin itself, so its own modules win on a name clash.
+    for index, dependency_path in enumerate(params.get('dependency_python_paths') or ()):
+        sys.path.insert(1 + index, dependency_path)
     candidate = _load_object(params['entrypoint'])
     plugin = _materialize(candidate)
     registration = _Registration()

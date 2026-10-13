@@ -90,6 +90,11 @@ Dependencies on other plugins use `PluginDependency(plugin_id, version_specifier
 The dependency must be installed and explicitly enabled for the same user. Version
 specifiers use the standard Python packaging syntax.
 
+A source manifest may list plugin ids under `"dependencies"`. Their `python_path`
+directories are added to the worker import path after the plugin own path, so the
+plugin can import modules of a dependency. Wheel plugins share the environment
+and do not need this.
+
 Source manifests expose compatibility metadata without importing implementation
 code. Wheel plugins are checked again when their entry point is loaded.
 
