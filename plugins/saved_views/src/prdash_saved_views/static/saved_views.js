@@ -1,5 +1,6 @@
 (function() {
     let swapListenerBound = false;
+    const boundRoots = new WeakSet();
 
     function categoryData(root) {
         const data = root.querySelector('#saved-search-categories-data');
@@ -39,8 +40,8 @@
     function bind() {
         const root = document.getElementById('saved-search-categories');
         const search = window.prdash && window.prdash.pullRequestSearch;
-        if (!root || !search || root.dataset.bound) return;
-        root.dataset.bound = 'true';
+        if (!root || !search || boundRoots.has(root)) return;
+        boundRoots.add(root);
         if (!swapListenerBound) {
             document.body.addEventListener('htmx:afterSwap', bind);
             swapListenerBound = true;
