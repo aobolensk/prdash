@@ -417,6 +417,15 @@ def _invoke_service(registration, params, registrar):
         return {'result': handler(params.get('args', {}))}
 
 
+def _shutdown_after_interrupt(plugin):
+    if plugin is None:
+        return
+    try:
+        plugin.shutdown()
+    except (Exception, KeyboardInterrupt):
+        pass
+
+
 def main():
     stdin = sys.stdin.buffer
     stdout = sys.stdout.buffer
@@ -429,6 +438,9 @@ def main():
         try:
             message = read_message(stdin)
         except ProtocolError:
+            return
+        except KeyboardInterrupt:
+            _shutdown_after_interrupt(plugin)
             return
         if message.get('type') != 'call':
             continue
@@ -467,6 +479,10 @@ def main():
                 'ok': False,
                 'error': str(error) or error.__class__.__name__,
             })
+        except KeyboardInterrupt:
+            if op != 'shutdown':
+                _shutdown_after_interrupt(plugin)
+            return
 
 
 if __name__ == '__main__':
