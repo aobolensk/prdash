@@ -1,4 +1,5 @@
 from prdash.plugin_api import (
+    PERMISSION_NETWORK,
     HEADER_STATUS_SLOT,
     HEAD_SLOT,
     PLUGIN_API_VERSION,
@@ -29,6 +30,7 @@ class GitHubStatusPlugin:
         name='GitHub Status',
         version='1.1.0',
         api_version=PLUGIN_API_VERSION,
+        permissions=(PERMISSION_NETWORK,),
         description='Track GitHub API and pull request service availability.',
     )
 

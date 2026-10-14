@@ -2,7 +2,7 @@
 
 A plugin is a Python object with metadata, `initialize`, and `shutdown`, loaded
 inside its own worker subprocess from a local source manifest or an installed
-wheel entry point. Set `PluginMetadata.api_version` to `2.1`. For source plugins,
+wheel entry point. Set `PluginMetadata.api_version` to `3.0`. For source plugins,
 set the manifest `api_version` to the same value.
 
 ## Minimal plugin
@@ -93,7 +93,8 @@ my-plugin/
   "id": "example",
   "name": "Example",
   "version": "1.0.0",
-  "api_version": "2.1",
+  "api_version": "3.0",
+  "permissions": ["github.token"],
   "description": "Small example plugin.",
   "entrypoint": "my_prdash_plugin.plugin:plugin",
   "python_path": "src"
@@ -266,6 +267,28 @@ def process(prs, context, config):
 Card slot templates, such as `pr_card.badges`, read it as `plugin_annotation`.
 PRs also carry `last_commit_at` and `review_status.last_reviewed_at`, a mapping
 from reviewer login to the time of their latest review of any state.
+
+## Permissions
+
+Declare elevated access in metadata and, for source plugins, the manifest. The
+two must match:
+
+```python
+from prdash.plugin_api import PERMISSION_GITHUB_TOKEN
+
+permissions=(PERMISSION_GITHUB_TOKEN,)
+```
+
+| Permission | Allows |
+| --- | --- |
+| `github.token` | `resolve_github_token` |
+| `github.read` | `get_username`, `fetch_open_prs`, `fetch_merged_prs`, `fetch_reviews_for_stats` |
+| `repos.read` | `list_tracked_repositories` |
+| `plugins.call` | `call_service`, only for plugins listed in `dependencies` |
+| `network` | Disclosure for own network requests, not enforced |
+
+The user must approve the permissions in Settings. Calls without an approved
+permission raise `PermissionError`.
 
 ## Dependencies and configuration
 

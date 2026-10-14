@@ -39,6 +39,11 @@ from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
 from prdash.plugin_api import (
+    PERMISSION_GITHUB_READ,
+    PERMISSION_GITHUB_TOKEN,
+    PERMISSION_PLUGINS_CALL,
+    PERMISSION_REPOS_READ,
+    PERMISSIONS,
     PLUGIN_API_VERSION,
     PR_LIST_PROCESS_HOOK,
     PR_LIST_QUERY_HOOK,
@@ -71,6 +76,15 @@ _USER_SCOPED_CALLBACKS = frozenset({
     'call_service', 'get_username', 'fetch_open_prs',
     'fetch_merged_prs', 'fetch_reviews_for_stats',
 })
+_CALLBACK_PERMISSIONS = {
+    'resolve_github_token': PERMISSION_GITHUB_TOKEN,
+    'get_username': PERMISSION_GITHUB_READ,
+    'fetch_open_prs': PERMISSION_GITHUB_READ,
+    'fetch_merged_prs': PERMISSION_GITHUB_READ,
+    'fetch_reviews_for_stats': PERMISSION_GITHUB_READ,
+    'list_tracked_repositories': PERMISSION_REPOS_READ,
+    'call_service': PERMISSION_PLUGINS_CALL,
+}
 
 
 class PluginActivationError(RuntimeError):
@@ -87,7 +101,7 @@ class PluginDescriptor:
     def __init__(
         self, plugin_id, name, version, description, entrypoint, source,
         *, api_version=None, python_path=None, asset_root=None, load_error=None,
-        dependency_ids=(),
+        dependency_ids=(), permissions=None,
     ):
         self.plugin_id = plugin_id
         self.name = name
@@ -101,6 +115,8 @@ class PluginDescriptor:
         self.load_error = load_error
         # From the manifest, so import paths exist before plugin code runs.
         self.dependency_ids = tuple(dependency_ids)
+        # None until known: entry point plugins declare permissions only once loaded.
+        self.permissions = None if permissions is None else tuple(permissions)
 
 
 class _WorkerHandle:
@@ -169,6 +185,7 @@ class PluginManager:
                             data['entrypoint'],
                         ),
                         dependency_ids=self._manifest_dependency_ids(data),
+                        permissions=self._manifest_permissions(data),
                     )
                     self._add_descriptor(descriptor)
                 except (OSError, ValueError, KeyError, TypeError) as error:
@@ -184,6 +201,13 @@ class PluginManager:
         ):
             raise ValueError('"dependencies" must be a list of plugin ids')
         return tuple(dependency_ids)
+
+    @staticmethod
+    def _manifest_permissions(data):
+        permissions = data.get('permissions', [])
+        if not isinstance(permissions, list) or not all(item in PERMISSIONS for item in permissions):
+            raise ValueError(f'"permissions" must be a list of: {", ".join(PERMISSIONS)}')
+        return tuple(permissions)
 
     def _dependency_python_paths(self, descriptor):
         paths = []
@@ -411,6 +435,25 @@ class PluginManager:
                 'error': str(error) or error.__class__.__name__,
             })
 
+    def _check_callback_permission(self, worker, op, params, user):
+        required = _CALLBACK_PERMISSIONS.get(op)
+        if required is None:
+            return
+        plugin_id = worker.plugin_id
+        descriptor = self.descriptors.get(plugin_id)
+        declared = worker.metadata.permissions if worker.metadata else (
+            descriptor.permissions if descriptor and descriptor.permissions else ()
+        )
+        state = self._state_map(user).get(plugin_id)
+        if required not in declared or required not in set(state.granted_permissions or () if state else ()):
+            raise PermissionError(f'Plugin {plugin_id!r} lacks the {required!r} permission')
+        if op == 'call_service' and params['plugin_id'] not in {
+            dependency.plugin_id for dependency in (worker.metadata.dependencies if worker.metadata else ())
+        }:
+            raise PermissionError(
+                f'Plugin {plugin_id!r} may only call services of plugins it depends on'
+            )
+
     def _handle_callback(self, worker, op, params, callback_user_id=None):
         """Execute one callback for the active host user and this worker's plugin_id."""
         plugin_id = worker.plugin_id
@@ -419,6 +462,7 @@ class PluginManager:
         if callback_user_id is None:
             raise PermissionError('User-scoped plugin callbacks require an active user')
         user = self._get_user(callback_user_id)
+        self._check_callback_permission(worker, op, params, user)
 
         if op == 'get_user_config':
             return {'config': self.get_user_config(user, plugin_id)}
@@ -508,6 +552,7 @@ class PluginManager:
                 PluginDependency(dep['plugin_id'], dep['version'])
                 for dep in data.get('dependencies', ())
             ),
+            permissions=tuple(data.get('permissions', ())),
         )
 
     def load(self, plugin_id, enabled_plugin_ids):
@@ -572,6 +617,10 @@ class PluginManager:
                 descriptor.name = plugin_metadata.name
                 descriptor.description = plugin_metadata.description
                 descriptor.api_version = plugin_metadata.api_version
+                descriptor.permissions = plugin_metadata.permissions
+                descriptor.dependency_ids = tuple(
+                    dependency.plugin_id for dependency in plugin_metadata.dependencies
+                )
                 self._validate_dependencies(plugin_metadata, enabled_plugin_ids)
 
                 for dependency in plugin_metadata.dependencies:
@@ -621,6 +670,14 @@ class PluginManager:
                 f'Requires plugin API {plugin_metadata.api_version}, '
                 f'but prdash provides {PLUGIN_API_VERSION}'
             )
+        unknown = [name for name in plugin_metadata.permissions if name not in PERMISSIONS]
+        if unknown:
+            raise ValueError(f'Unknown permissions: {", ".join(unknown)}')
+        if (
+            descriptor.permissions is not None
+            and set(descriptor.permissions) != set(plugin_metadata.permissions)
+        ):
+            raise ValueError('Manifest permissions do not match the plugin metadata')
 
     def _validate_dependencies(self, plugin_metadata, enabled_plugin_ids):
         for dependency in plugin_metadata.dependencies:
@@ -694,11 +751,20 @@ class PluginManager:
             setattr(request, cache_name, states)
         return states
 
+    def _missing_permissions(self, state, plugin_id):
+        """Declared permissions the user has not approved, empty while still unknown."""
+        descriptor = self.descriptors.get(plugin_id)
+        if descriptor is None or not descriptor.permissions:
+            return ()
+        granted = set(state.granted_permissions or ()) if state else set()
+        return tuple(name for name in descriptor.permissions if name not in granted)
+
     def _enabled_ids(self, user, request=None):
         return {
             plugin_id
             for plugin_id, state in self._state_map(user, request).items()
             if state.enabled and plugin_id in self.descriptors
+            and not self._missing_permissions(state, plugin_id)
         }
 
     def _activate_user_plugins(self, user, request=None):
@@ -710,36 +776,46 @@ class PluginManager:
             worker = self.load(plugin_id, enabled_ids)
             if worker is not None:
                 active_workers[plugin_id] = worker
+        # Entry point plugins reveal their permissions only after loading.
+        enabled_ids = self._enabled_ids(user, request)
+        active_workers = {
+            plugin_id: worker for plugin_id, worker in active_workers.items()
+            if plugin_id in enabled_ids
+        }
         return states, enabled_ids, active_workers
 
-    def configure_user(self, user, enabled_plugin_ids):
-        """Persist the explicit enabled set and update this process registry."""
+    def configure_user(self, user, enabled_plugin_ids, approved_permissions=None):
+        """Persist the explicit enabled set and approved permissions, and update this process registry."""
+        approved_permissions = approved_permissions or {}
         selected = set(enabled_plugin_ids) & self.descriptors.keys()
         state_model = self._state_model()
         with transaction.atomic():
-            enabled = set(
-                state_model.objects.filter(user=user, enabled=True)
-                .values_list('plugin_id', flat=True)
-            ) & self.descriptors.keys()
+            enabled = self._enabled_ids(user)
             state_model.objects.filter(user=user).exclude(plugin_id__in=selected).update(enabled=False)
             for plugin_id in selected:
                 state_model.objects.update_or_create(
                     user=user,
                     plugin_id=plugin_id,
-                    defaults={'enabled': True},
+                    defaults={
+                        'enabled': True,
+                        'granted_permissions': sorted(
+                            set(approved_permissions.get(plugin_id, ())) & PERMISSIONS.keys()
+                        ),
+                    },
                 )
 
         for descriptor in self.descriptors.values():
             descriptor.load_error = None
         self._activation_errors = {}
-        for plugin_id in selected:
-            self.load(plugin_id, selected)
+        active = self._enabled_ids(user)
+        for plugin_id in active:
+            self.load(plugin_id, active)
 
         for plugin_id in set(self._workers) - selected:
             if not state_model.objects.filter(plugin_id=plugin_id, enabled=True).exists():
                 self.unload(plugin_id)
 
-        return selected != enabled
+        return active != enabled
 
     def plugin_statuses(self, user, request=None):
         states, enabled_ids, _ = self._activate_user_plugins(user, request)
@@ -750,6 +826,15 @@ class PluginManager:
             activation_error = self._activation_errors.get(
                 (frozenset(enabled_ids), descriptor.plugin_id)
             )
+            missing = self._missing_permissions(state, descriptor.plugin_id)
+            requires = [
+                self._requirement_status(dependency_id, states, enabled_ids)
+                for dependency_id in descriptor.dependency_ids
+            ]
+            unmet = [item for item in requires if item['problem']]
+            error = descriptor.load_error or activation_error
+            if unmet and error == activation_error:
+                error = None
             statuses.append({
                 'id': descriptor.plugin_id,
                 'name': descriptor.name,
@@ -758,9 +843,35 @@ class PluginManager:
                 'source': descriptor.source,
                 'enabled': bool(state and state.enabled),
                 'loaded': descriptor.plugin_id in self._workers,
-                'error': descriptor.load_error or activation_error,
+                'error': error,
+                'permissions': [
+                    {'name': name, 'description': PERMISSIONS[name]}
+                    for name in descriptor.permissions or ()
+                ],
+                'needs_approval': bool(state and state.enabled and missing),
+                'requires': requires,
+                'unmet_requires': unmet if state and state.enabled else [],
             })
         return statuses
+
+    def _requirement_status(self, dependency_id, states, enabled_ids):
+        descriptor = self.descriptors.get(dependency_id)
+        state = states.get(dependency_id)
+        if descriptor is None:
+            problem = 'not installed'
+        elif not (state and state.enabled):
+            problem = 'disabled'
+        elif dependency_id not in enabled_ids:
+            problem = 'permissions not approved'
+        elif descriptor.load_error or dependency_id not in self._workers:
+            problem = 'failed to load'
+        else:
+            problem = ''
+        return {
+            'id': dependency_id,
+            'name': descriptor.name if descriptor else dependency_id,
+            'problem': problem,
+        }
 
     def get_user_config(self, user, plugin_id):
         try:

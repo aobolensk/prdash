@@ -2,7 +2,8 @@
   "id": "github-status",
   "name": "GitHub Status",
   "version": "1.1.0",
-  "api_version": "2.0",
+  "api_version": "3.0",
+  "permissions": ["network"],
   "description": "Track GitHub API and pull request service availability.",
   "entrypoint": "prdash_github_status.plugin:plugin",
   "python_path": "src"

@@ -793,6 +793,10 @@ def save_plugins(request):
     plugins_changed = plugin_manager.configure_user(
         request.user,
         request.POST.getlist('enabled_plugins'),
+        {
+            plugin_id: request.POST.getlist(f'permissions_{plugin_id}')
+            for plugin_id in request.POST.getlist('enabled_plugins')
+        },
     )
     context = {
         'plugins': plugin_manager.plugin_statuses(request.user),

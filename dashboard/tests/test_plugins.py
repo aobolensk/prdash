@@ -105,7 +105,7 @@ class PluginRuntimeTests(TestCase):
         self.user = User.objects.create_user(username='testuser', password='testpass')
         self.factory = RequestFactory()
 
-    def manager_with_plugin(self):
+    def manager_with_plugin(self, permissions=()):
         tempdir = TemporaryDirectory()
         self.addCleanup(tempdir.cleanup)
         root = Path(tempdir.name)
@@ -119,7 +119,7 @@ from prdash.plugin_api import PLUGIN_API_VERSION, PluginJsonResponse, PluginMeta
 class HookPlugin:
     metadata = PluginMetadata(
         plugin_id='hook-plugin', name='Hook Plugin', version='1.0.0',
-        api_version=PLUGIN_API_VERSION,
+        api_version=PLUGIN_API_VERSION, permissions={tuple(permissions)!r},
     )
 
     def initialize(self, registrar):
@@ -162,6 +162,7 @@ plugin = HookPlugin()
             'version': '1.0.0',
             'api_version': PLUGIN_API_VERSION,
             'entrypoint': 'hook_plugin:plugin',
+            'permissions': list(permissions),
         }), encoding='utf-8')
         manager = PluginManager()
         with override_settings(PRDASH_PLUGIN_PATHS=[str(root)]):
@@ -214,10 +215,11 @@ plugin = HookPlugin()
         )
 
     def test_route_callbacks_are_bound_to_the_request_user(self):
-        manager = self.manager_with_plugin()
+        permissions = ('github.token', 'repos.read')
+        manager = self.manager_with_plugin(permissions)
         other_user = User.objects.create_user(username='other', password='testpass')
-        manager.configure_user(self.user, {'hook-plugin'})
-        manager.configure_user(other_user, {'hook-plugin'})
+        manager.configure_user(self.user, {'hook-plugin'}, {'hook-plugin': permissions})
+        manager.configure_user(other_user, {'hook-plugin'}, {'hook-plugin': permissions})
 
         manager.update_user_config(self.user, 'hook-plugin', {'owner': 'first'})
         manager.update_user_config(other_user, 'hook-plugin', {'owner': 'other'})
@@ -254,6 +256,29 @@ plugin = HookPlugin()
             'repositories': [{'owner': 'other', 'name': 'repo', 'enabled': True}],
             'token': 'other-token',
         })
+
+    def test_callbacks_require_a_declared_and_approved_permission(self):
+        undeclared = self.manager_with_plugin()
+        undeclared.configure_user(self.user, {'hook-plugin'})
+        request = self.factory.get('/plugins/hook-plugin/inspect_user/', {'user_id': self.user.id})
+        request.user = self.user
+        self.assertEqual(undeclared.dispatch(request, 'hook-plugin', 'inspect_user').status_code, 500)
+
+    def test_plugin_stays_disabled_until_its_permissions_are_approved(self):
+        permissions = ('github.token', 'repos.read')
+        manager = self.manager_with_plugin(permissions)
+        manager.configure_user(self.user, {'hook-plugin'})
+        status = manager.plugin_statuses(self.user)[0]
+        self.assertTrue(status['needs_approval'])
+        self.assertEqual([item['name'] for item in status['permissions']], list(permissions))
+        self.assertEqual(manager._enabled_ids(self.user), set())
+
+        manager.configure_user(self.user, {'hook-plugin'}, {'hook-plugin': ['github.token']})
+        self.assertEqual(manager._enabled_ids(self.user), set())
+
+        manager.configure_user(self.user, {'hook-plugin'}, {'hook-plugin': permissions})
+        self.assertFalse(manager.plugin_statuses(self.user)[0]['needs_approval'])
+        self.assertEqual(manager._enabled_ids(self.user), {'hook-plugin'})
 
     def test_user_scoped_callbacks_are_denied_without_an_active_user(self):
         connection = MagicMock()
@@ -472,10 +497,12 @@ plugin = DependentPlugin()
         self.assertTrue(with_dependency_statuses['dependent']['loaded'])
         self.assertEqual(without_dependency, 1)
         self.assertEqual(without_dependency_slot, '')
-        self.assertIn(
-            'must be enabled first',
-            without_dependency_statuses['dependent']['error'],
+        self.assertIsNone(without_dependency_statuses['dependent']['error'])
+        self.assertEqual(
+            [(item['id'], item['problem']) for item in without_dependency_statuses['dependent']['unmet_requires']],
+            [('dependency', 'disabled')],
         )
+        self.assertEqual(with_dependency_statuses['dependent']['unmet_requires'], [])
 
 
 class ReferencePluginIntegrationTests(TestCase):
@@ -544,6 +571,7 @@ class ReferencePluginIntegrationTests(TestCase):
             user=self.user,
             plugin_id='github-status',
             enabled=True,
+            granted_permissions=['network'],
         ).exists())
         self.assertContains(response, 'Refresh the page to apply the changes.')
         self.assertContains(response, reverse('dashboard:pr_list'))
@@ -589,6 +617,7 @@ class ReferencePluginIntegrationTests(TestCase):
             user=self.user,
             plugin_id='github-actions-rerun-failed-jobs',
             enabled=True,
+            granted_permissions=['github.token', 'network'],
         )
         github_client = MagicMock()
         github_client.get_all_user_prs.return_value = [PullRequestInfo(
@@ -636,6 +665,7 @@ class ReferencePluginIntegrationTests(TestCase):
             user=self.user,
             plugin_id='github-pr-preview',
             enabled=True,
+            granted_permissions=['github.token', 'network'],
         )
         github_client = MagicMock()
         github_client.get_all_user_prs.return_value = [PullRequestInfo(
@@ -1202,6 +1232,7 @@ class ReferencePluginIntegrationTests(TestCase):
             user=self.user,
             plugin_id='github-status',
             enabled=True,
+            granted_permissions=['network'],
         )
         with patch(
             'prdash_github_status.plugin.get_github_status',
@@ -1247,7 +1278,7 @@ class StreamPlugin:
         plugin_id='stream-plugin',
         name='Stream Plugin',
         version='1.0.0',
-        api_version='2.0',
+        api_version='3.0',
     )
 
     def initialize(self, registrar):
@@ -1287,7 +1318,7 @@ class PluginStreamingRuntimeTests(TestCase):
             'id': 'stream-plugin',
             'name': 'Stream Plugin',
             'version': '1.0.0',
-            'api_version': '2.0',
+            'api_version': '3.0',
             'entrypoint': 'stream_plugin:StreamPlugin',
         }
         (plugin_dir / 'prdash-plugin.json').write_text(json.dumps(manifest), encoding='utf-8')

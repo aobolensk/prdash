@@ -53,6 +53,7 @@ class PluginConfiguration(models.Model):
     plugin_id = models.CharField(max_length=128)
     enabled = models.BooleanField(default=False)
     config = models.JSONField(default=dict, blank=True)
+    granted_permissions = models.JSONField(default=list, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

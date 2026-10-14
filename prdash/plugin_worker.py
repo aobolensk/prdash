@@ -262,6 +262,7 @@ def _describe(plugin, registration):
             'version': metadata.version,
             'api_version': metadata.api_version,
             'description': metadata.description,
+            'permissions': list(metadata.permissions),
             'dependencies': [
                 {'plugin_id': dep.plugin_id, 'version': dep.version}
                 for dep in metadata.dependencies

@@ -13,7 +13,7 @@ over a JSON protocol on standard input and output.
 - `PluginUserData` stores plugin-owned, named collections of per-user JSON values.
 - `plugins/` contains the reference implementations. It is not core code.
 
-The current API version is `2.1`. A plugin API with the same major version is
+The current API version is `3.0`. A plugin API with the same major version is
 compatible. A future incompatible contract will use a new major version.
 
 ## Lifecycle
@@ -100,6 +100,20 @@ and do not need this.
 
 Source manifests expose compatibility metadata without importing implementation
 code. Wheel plugins are checked again when their entry point is loaded.
+
+## Permissions
+
+Callbacks that expose GitHub credentials or data, tracked repositories, or other
+plugins require a permission declared in `PluginMetadata.permissions` (and in the
+source manifest) and approved by the user in Settings. A plugin whose declared
+permissions are not all approved is treated as disabled until the user approves
+them again, for example after an update adds one. A plugin may call services only
+of plugins it lists in `dependencies`. The `network` permission is disclosure
+only, because the worker is not an OS sandbox.
+
+Settings shows each plugin permissions, and for a plugin with unmet dependencies
+shows which dependency is disabled, missing, or failed. Approved permissions are
+stored in `PluginConfiguration.granted_permissions`.
 
 ## Failure boundaries
 

@@ -1,4 +1,6 @@
 from prdash.plugin_api import (
+    PERMISSION_GITHUB_READ,
+    PERMISSION_REPOS_READ,
     HEAD_SLOT,
     HEADER_STATUS_SLOT,
     PLUGIN_API_VERSION,
@@ -33,6 +35,7 @@ class StatsPlugin:
         name='Stats',
         version='1.0.0',
         api_version=PLUGIN_API_VERSION,
+        permissions=(PERMISSION_GITHUB_READ, PERMISSION_REPOS_READ,),
         description='PR velocity, review, health, and collaboration analytics.',
     )
 

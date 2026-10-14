@@ -9,8 +9,23 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 
-PLUGIN_API_VERSION = '2.1'
+PLUGIN_API_VERSION = '3.0'
 GITHUB_API_VERSION = '2022-11-28'
+
+PERMISSION_GITHUB_TOKEN = 'github.token'
+PERMISSION_GITHUB_READ = 'github.read'
+PERMISSION_REPOS_READ = 'repos.read'
+PERMISSION_PLUGINS_CALL = 'plugins.call'
+PERMISSION_NETWORK = 'network'
+
+# Elevated permissions a plugin must declare and the user must approve.
+PERMISSIONS = {
+    PERMISSION_GITHUB_TOKEN: 'Read your GitHub access token',
+    PERMISSION_GITHUB_READ: 'Fetch pull requests and reviews from GitHub as you',
+    PERMISSION_REPOS_READ: 'See which repositories you track',
+    PERMISSION_PLUGINS_CALL: 'Call services of the plugins it depends on',
+    PERMISSION_NETWORK: 'Make its own network requests (disclosure only, not enforced)',
+}
 
 PR_LIST_QUERY_HOOK = 'pr_list.query'
 PR_LIST_PROCESS_HOOK = 'pr_list.process'
@@ -42,6 +57,7 @@ class PluginMetadata:
     api_version: str
     description: str = ''
     dependencies: tuple[PluginDependency, ...] = ()
+    permissions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

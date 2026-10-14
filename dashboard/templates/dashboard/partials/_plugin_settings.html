@@ -28,12 +28,30 @@
                     <input type="checkbox"
                            name="enabled_plugins"
                            value="{{ plugin.id }}"
-                           {% if plugin.enabled %}checked{% endif %}>
+                           {% if plugin.enabled and not plugin.needs_approval %}checked{% endif %}>
                     <span>{{ plugin.name }} <span class="settings-optional">v{{ plugin.version }}</span></span>
                 </label>
                 {% if plugin.description %}
                 <p class="form-help">{{ plugin.description }}</p>
                 {% endif %}
+                {% if plugin.permissions %}
+                <div class="form-help">
+                    <strong>Requests elevated access:</strong>
+                    <ul>
+                        {% for permission in plugin.permissions %}
+                        <li>{{ permission.description }} <code>{{ permission.name }}</code></li>
+                        {% endfor %}
+                    </ul>
+                    {% for permission in plugin.permissions %}<input type="hidden" name="permissions_{{ plugin.id }}" value="{{ permission.name }}">{% endfor %}
+                    Enabling this plugin approves the access listed above.
+                </div>
+                {% endif %}
+                {% if plugin.needs_approval %}
+                <div class="alert alert-error">Disabled: its permissions changed or were not approved. Tick it and save to approve.</div>
+                {% endif %}
+                {% for requirement in plugin.unmet_requires %}
+                <div class="alert alert-error">Disabled: requires {{ requirement.name }} ({{ requirement.problem }}).</div>
+                {% endfor %}
                 {% if plugin.error %}
                 <div class="alert alert-error">Could not load: {{ plugin.error }}</div>
                 {% endif %}

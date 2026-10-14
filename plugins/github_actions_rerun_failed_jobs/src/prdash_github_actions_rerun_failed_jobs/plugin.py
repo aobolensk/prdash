@@ -4,6 +4,8 @@ import re
 import requests
 
 from prdash.plugin_api import (
+    PERMISSION_GITHUB_TOKEN,
+    PERMISSION_NETWORK,
     GITHUB_API_VERSION,
     HEAD_SLOT,
     PLUGIN_API_VERSION,
@@ -26,6 +28,7 @@ class GitHubActionsRerunFailedJobsPlugin:
         name='GitHub Actions Re-run Failed Jobs',
         version='1.0.0',
         api_version=PLUGIN_API_VERSION,
+        permissions=(PERMISSION_GITHUB_TOKEN, PERMISSION_NETWORK,),
         description='Re-run failed GitHub Actions jobs from pull request cards.',
     )
 

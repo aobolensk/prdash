@@ -5,6 +5,8 @@ import re
 import requests
 
 from prdash.plugin_api import (
+    PERMISSION_GITHUB_TOKEN,
+    PERMISSION_NETWORK,
     GITHUB_API_VERSION,
     HEAD_SLOT,
     PLUGIN_API_VERSION,
@@ -32,6 +34,7 @@ class GitHubPRPreviewPlugin:
         name='GitHub PR Preview',
         version='1.0.0',
         api_version=PLUGIN_API_VERSION,
+        permissions=(PERMISSION_GITHUB_TOKEN, PERMISSION_NETWORK,),
         description='Review pull request diffs and publish inline comments.',
     )
 
