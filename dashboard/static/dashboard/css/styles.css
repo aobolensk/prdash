@@ -1921,6 +1921,84 @@ mark.pr-hl-typo {
     padding-left: 26px;
 }
 
+.plugin-permissions {
+    margin: 4px 0 0 26px;
+    font-size: 13px;
+    color: var(--color-text-secondary);
+}
+
+.plugin-permissions summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border: 1px solid var(--color-warning);
+    border-radius: 12px;
+    background-color: rgba(154, 103, 0, 0.1);
+    color: var(--color-warning);
+    font-weight: 500;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+}
+
+[data-theme="dark"] .plugin-permissions summary {
+    background-color: rgba(210, 153, 34, 0.1);
+}
+
+[data-theme="dark"] .plugin-permissions summary:hover {
+    background-color: rgba(210, 153, 34, 0.18);
+}
+
+.plugin-permissions summary::-webkit-details-marker {
+    display: none;
+}
+
+.plugin-permissions summary:hover {
+    background-color: rgba(154, 103, 0, 0.18);
+}
+
+.plugin-permissions-count {
+    min-width: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background-color: var(--color-warning);
+    color: var(--color-bg);
+    font-size: 11px;
+    line-height: 18px;
+    text-align: center;
+}
+
+.plugin-permissions-chevron {
+    transition: transform 0.15s ease;
+}
+
+.plugin-permissions[open] .plugin-permissions-chevron {
+    transform: rotate(90deg);
+}
+
+.plugin-permissions-body {
+    margin-top: 6px;
+    padding: 8px 12px;
+    border-left: 3px solid var(--color-warning);
+    border-radius: 0 6px 6px 0;
+    background-color: var(--color-bg-secondary);
+}
+
+.plugin-permissions-body ul {
+    margin: 0 0 6px;
+    padding-left: 18px;
+}
+
+.plugin-permissions-body li + li {
+    margin-top: 2px;
+}
+
+.plugin-permissions-body p {
+    margin: 0;
+    color: var(--color-text-muted);
+}
+
 .interval-subfield {
     display: flex;
     align-items: center;

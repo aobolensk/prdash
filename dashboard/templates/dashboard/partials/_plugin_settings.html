@@ -35,16 +35,23 @@
                 <p class="form-help">{{ plugin.description }}</p>
                 {% endif %}
                 {% if plugin.permissions %}
-                <div class="form-help">
-                    <strong>Requests elevated access:</strong>
-                    <ul>
-                        {% for permission in plugin.permissions %}
-                        <li>{{ permission.description }} <code>{{ permission.name }}</code></li>
-                        {% endfor %}
-                    </ul>
+                <details class="plugin-permissions"{% if plugin.needs_approval %} open{% endif %}>
+                    <summary>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                        Requests elevated access
+                        <span class="plugin-permissions-count">{{ plugin.permissions|length }}</span>
+                        <svg class="plugin-permissions-chevron" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                    </summary>
+                    <div class="plugin-permissions-body">
+                        <ul>
+                            {% for permission in plugin.permissions %}
+                            <li>{{ permission.description }} <code>{{ permission.name }}</code></li>
+                            {% endfor %}
+                        </ul>
+                        <p>Enabling this plugin approves the access listed above.</p>
+                    </div>
                     {% for permission in plugin.permissions %}<input type="hidden" name="permissions_{{ plugin.id }}" value="{{ permission.name }}">{% endfor %}
-                    Enabling this plugin approves the access listed above.
-                </div>
+                </details>
                 {% endif %}
                 {% if plugin.needs_approval %}
                 <div class="alert alert-error">Disabled: its permissions changed or were not approved. Tick it and save to approve.</div>
