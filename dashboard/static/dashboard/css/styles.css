@@ -2019,3 +2019,22 @@ mark.pr-hl-typo {
 .select-input {
     max-width: 200px;
 }
+
+.app-tooltip {
+    position: fixed;
+    z-index: 10000;
+    max-width: 320px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    background: var(--color-text);
+    color: var(--color-bg);
+    font-size: 12px;
+    line-height: 1.4;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.08s;
+}
+
+.app-tooltip-visible {
+    opacity: 1;
+}

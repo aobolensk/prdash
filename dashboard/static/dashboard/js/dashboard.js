@@ -1487,3 +1487,64 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 });
+
+// Replaces the native title tooltip (fixed browser delay). Title is stashed while shown, then restored.
+(function() {
+    const SHOW_DELAY_MS = 150;
+    const tip = document.createElement('div');
+    tip.className = 'app-tooltip';
+    tip.setAttribute('role', 'tooltip');
+    document.body.appendChild(tip);
+    let current = null;
+    let stashedTitle = '';
+    let timer = null;
+
+    function place(target) {
+        const rect = target.getBoundingClientRect();
+        const tipRect = tip.getBoundingClientRect();
+        let left = rect.left + rect.width / 2 - tipRect.width / 2;
+        left = Math.max(4, Math.min(left, window.innerWidth - tipRect.width - 4));
+        let top = rect.bottom + 6;
+        if (top + tipRect.height > window.innerHeight - 4) {
+            top = rect.top - tipRect.height - 6;
+        }
+        tip.style.left = left + 'px';
+        tip.style.top = Math.max(4, top) + 'px';
+    }
+
+    function hide() {
+        clearTimeout(timer);
+        tip.classList.remove('app-tooltip-visible');
+        if (current) {
+            if (!current.hasAttribute('title')) current.setAttribute('title', stashedTitle);
+            current = null;
+        }
+    }
+
+    function activate(evt) {
+        const target = evt.target.closest ? evt.target.closest('[title]') : null;
+        if (!target || target === current) return;
+        hide();
+        stashedTitle = target.getAttribute('title');
+        if (!stashedTitle) return;
+        target.removeAttribute('title');
+        current = target;
+        timer = setTimeout(() => {
+            tip.textContent = stashedTitle;
+            place(target);
+            tip.classList.add('app-tooltip-visible');
+        }, SHOW_DELAY_MS);
+    }
+
+    document.addEventListener('mouseover', activate);
+    document.addEventListener('focusin', activate);
+    document.addEventListener('mouseout', (evt) => {
+        if (current && !current.contains(evt.relatedTarget)) hide();
+    });
+    document.addEventListener('focusout', hide);
+    document.addEventListener('keydown', (evt) => {
+        if (evt.key === 'Escape') hide();
+    });
+    document.addEventListener('scroll', hide, true);
+    document.addEventListener('htmx:beforeSwap', hide);
+})();
