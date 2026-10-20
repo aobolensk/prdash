@@ -874,6 +874,36 @@ class GitHubClientConsolidatedSearchTests(TestCase):
         self.assertEqual(result[('org', 'repo1')], list(range(101)))
 
     @patch('dashboard.github_client.requests.get')
+    def test_search_prs_consolidated_scopes_query_to_tracked_repos(self, mock_get):
+        mock_get.return_value = self._empty_search_response()
+
+        self.client._search_prs_consolidated('is:pr is:open author:testuser', self.repos)
+
+        self.assertEqual(
+            mock_get.call_args.kwargs['params']['q'],
+            'is:pr is:open author:testuser repo:org/repo1 repo:org/repo2 repo:org/repo3',
+        )
+
+    @patch('dashboard.github_client.SEARCH_QUERY_MAX_LENGTH', 50)
+    @patch('dashboard.github_client.requests.get')
+    def test_search_prs_consolidated_skips_repo_scope_for_long_queries(self, mock_get):
+        mock_get.return_value = self._empty_search_response()
+
+        self.client._search_prs_consolidated('is:pr is:open author:testuser', self.repos)
+
+        self.assertEqual(mock_get.call_args.kwargs['params']['q'], 'is:pr is:open author:testuser')
+
+    @patch('dashboard.github_client.requests.get')
+    def test_search_prs_consolidated_retries_unscoped_when_repo_scope_rejected(self, mock_get):
+        mock_get.side_effect = [MagicMock(status_code=422), self._empty_search_response()]
+
+        self.client._search_prs_consolidated('is:pr is:open author:testuser', self.repos)
+
+        self.assertEqual(mock_get.call_count, 2)
+        self.assertEqual(mock_get.call_args.kwargs['params']['q'], 'is:pr is:open author:testuser')
+        self.assertEqual(self.client.warnings, [])
+
+    @patch('dashboard.github_client.requests.get')
     def test_search_prs_consolidated_non_rate_limit_403_reports_error(self, mock_get):
         response = MagicMock(status_code=403, text='SAML SSO enforcement required')
         response.json.side_effect = ValueError
@@ -894,7 +924,7 @@ class GitHubClientBatchFetchConcurrencyTests(TestCase):
         self.client = GitHubClient(user=None)
 
     def test_fetch_prs_multi_repo_graphql_runs_batches_concurrently(self):
-        pr_data = {('org', 'repo1'): list(range(150))}  # 3 batches of 50
+        pr_data = {('org', 'repo1'): list(range(GRAPHQL_PR_BATCH_SIZE * 3))}  # 3 batches
         sleep_seconds = self.SLEEP_SECONDS
 
         def slow_batch(prs):

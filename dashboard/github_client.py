@@ -32,6 +32,7 @@ GRAPHQL_RETRY_BACKOFF_SECONDS = 1.0
 GRAPHQL_TIMEOUT_SECONDS = 20
 GRAPHQL_TRANSIENT_STATUS_CODES = {502, 503, 504}
 GRAPHQL_RATE_LIMIT_COOLDOWN_SECONDS = 60
+SEARCH_QUERY_MAX_LENGTH = 2000
 
 PR_GRAPHQL_FIELDS = '''
     number
@@ -776,8 +777,7 @@ class GitHubClient:
         if not all_prs:
             return []
 
-        batch_size = 50
-        batches = list(self._iter_chunks(all_prs, batch_size))
+        batches = list(self._iter_chunks(all_prs, GRAPHQL_PR_BATCH_SIZE))
 
         result = []
         done = 0
@@ -1529,6 +1529,13 @@ class GitHubClient:
             'X-GitHub-Api-Version': GITHUB_API_VERSION,
         }
 
+        # Scoping to tracked repos saves pages of untracked results. Past the
+        # URL length GitHub accepts, search everything and filter instead.
+        unscoped_query = query
+        repo_qualifiers = ' '.join(f'repo:{owner}/{name}' for owner, name in repos)
+        if len(query) + len(repo_qualifiers) < SEARCH_QUERY_MAX_LENGTH:
+            query = f'{query} {repo_qualifiers}'
+
         tracked_repos = {(owner.lower(), name.lower()) for owner, name in repos}
         result: dict[tuple[str, str], list[int]] = {}
         found = 0
@@ -1548,6 +1555,11 @@ class GitHubClient:
                     headers=headers,
                     timeout=30,
                 )
+
+                if response.status_code == 422 and page == 1 and query != unscoped_query:
+                    # GitHub rejects repo qualifiers when none of the repos are accessible
+                    query = unscoped_query
+                    continue
 
                 if response.status_code == 403:
                     if 'rate limit' in response.text.lower():
