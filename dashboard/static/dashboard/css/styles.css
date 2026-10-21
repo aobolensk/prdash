@@ -1987,7 +1987,19 @@ mark.pr-hl-typo {
 
 .plugin-permissions-body ul {
     margin: 0 0 6px;
-    padding-left: 18px;
+    padding-left: 0;
+    list-style: none;
+}
+
+.plugin-permissions-body li {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.plugin-permission-icon {
+    flex-shrink: 0;
+    color: var(--color-warning);
 }
 
 .plugin-permissions-body li + li {
