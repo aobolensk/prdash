@@ -2,22 +2,35 @@ const html = require("eslint-plugin-html");
 const js = require("@eslint/js");
 const globals = require("globals");
 
+const browserGlobals = {
+  ...globals.browser,
+  htmx: "readonly",
+  Chart: "readonly",
+};
+
 module.exports = [
   js.configs.recommended,
   {
-    files: ["**/*.html"],
-    plugins: { html },
+    files: ["**/*.js", "**/*.html"],
     languageOptions: {
       ecmaVersion: 2021,
       sourceType: "script",
-      globals: {
-        ...globals.browser,
-        htmx: "readonly",
-        Chart: "readonly",
-      },
+      globals: browserGlobals,
     },
     rules: {
       "no-unused-vars": ["error", { args: "none" }],
+    },
+  },
+  {
+    files: ["**/*.html"],
+    plugins: { html },
+  },
+  {
+    files: ["**/pr_list.js"],
+    languageOptions: {
+      globals: {
+        showToast: "readonly",
+      },
     },
   },
   {

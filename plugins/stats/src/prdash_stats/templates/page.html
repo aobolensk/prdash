@@ -68,7 +68,7 @@
                 </div>
                 <div class="refresh-wrapper">
                     <span class="refresh-spinner htmx-indicator" id="stats-refresh-spinner"></span>
-                    <button class="btn btn-secondary" id="stats-refresh-btn"
+                    <button class="btn btn-secondary" id="stats-refresh-btn" type="button"
                             hx-get="{% url 'dashboard:plugin_route' plugin_id=plugin_id route='content' %}?days={% if days == -1 %}all{% else %}{{ days }}{% endif %}"
                             hx-target="#stats-content"
                             hx-swap="innerHTML"

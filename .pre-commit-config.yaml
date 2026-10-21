@@ -1,4 +1,9 @@
 repos:
+  - repo: https://github.com/djlint/djLint
+    rev: v1.46.6
+    hooks:
+      - id: djlint-django
+        args: [--lint, "--ignore=H021,H023,T002"]
   - repo: local
     hooks:
       - id: flake8
@@ -16,6 +21,6 @@ repos:
           - eslint-plugin-html@^8
           - globals@^15
           - "@eslint/js@^9"
-        types_or: [html]
+        types_or: [javascript, html]
         exclude: '\.min\.js$'
         pass_filenames: true
