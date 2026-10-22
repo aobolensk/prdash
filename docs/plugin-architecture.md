@@ -11,9 +11,10 @@ over a JSON protocol on standard input and output.
 - `dashboard.plugin_manager` owns discovery, registrations, isolation, and dispatch.
 - `PluginConfiguration` stores per-user activation and plugin-owned JSON settings.
 - `PluginUserData` stores plugin-owned, named collections of per-user JSON values.
+- `PluginUserSecret` stores plugin-owned, per-user secret strings encrypted at rest.
 - `plugins/` contains the reference implementations. It is not core code.
 
-The current API version is `3.0`. A plugin API with the same major version is
+The current API version is `3.1`. A plugin API with the same major version is
 compatible. A future incompatible contract will use a new major version.
 
 ## Lifecycle
@@ -83,6 +84,10 @@ There are two configuration scopes:
   `reorder_user_data` with a plugin-defined collection name and key. The core
   stores opaque JSON and does not impose a schema, so this supports saved views,
   rules, bookmarks, and similar user-created plugin data.
+- User-owned secrets, such as third-party API keys, live in `PluginUserSecret`.
+  A plugin uses `get_user_secret`, `set_user_secret`, and `delete_user_secret`
+  with a plugin-defined key. Values are encrypted with a key derived from the
+  Django `SECRET_KEY`, so plugins never handle encryption keys themselves.
 
 The framework intentionally does not interpret arbitrary plugin schemas.
 

@@ -94,6 +94,27 @@ class PluginUserData(models.Model):
         return f"{self.plugin_id}:{self.collection}:{self.key} for {self.user.username}"
 
 
+class PluginUserSecret(models.Model):
+    """A plugin-owned secret string scoped to a user, encrypted at rest."""
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='plugin_user_secrets')
+    plugin_id = models.CharField(max_length=128)
+    key = models.CharField(max_length=64)
+    value = EncryptedCharField(max_length=2048)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'plugin_id', 'key'],
+                name='unique_plugin_user_secret_key',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.plugin_id}:{self.key} for {self.user.username}"
+
+
 AUTO_REFRESH_INTERVAL_CHOICES = [
     (1, '1 minute'), (2, '2 minutes'), (5, '5 minutes'), (10, '10 minutes'),
     (15, '15 minutes'), (30, '30 minutes'), (60, '1 hour'),

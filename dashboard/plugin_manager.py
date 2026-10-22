@@ -60,6 +60,7 @@ ENTRY_POINT_GROUP = 'prdash.plugins'
 SOURCE_MANIFEST = 'prdash-plugin.json'
 IDENTIFIER_PATTERN = re.compile(r'^[a-z0-9][a-z0-9_-]*$')
 ASSET_NAME_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]*$')
+MAX_SECRET_LENGTH = 1024
 
 DEFAULT_CALL_TIMEOUT = getattr(settings, 'PRDASH_PLUGIN_CALL_TIMEOUT', 10.0)
 DEFAULT_ROUTE_TIMEOUT = getattr(settings, 'PRDASH_PLUGIN_ROUTE_TIMEOUT', 120.0)
@@ -72,6 +73,7 @@ _USER_SCOPED_CALLBACKS = frozenset({
     'get_user_config', 'update_user_config',
     'list_user_data', 'get_user_data', 'set_user_data',
     'delete_user_data', 'reorder_user_data',
+    'get_user_secret', 'set_user_secret', 'delete_user_secret',
     'resolve_github_token', 'list_tracked_repositories',
     'call_service', 'get_username', 'fetch_open_prs',
     'fetch_merged_prs', 'fetch_reviews_for_stats',
@@ -486,6 +488,13 @@ class PluginManager:
         if op == 'reorder_user_data':
             self.reorder_user_data(user, plugin_id, params['collection'], params['keys'])
             return {}
+        if op == 'get_user_secret':
+            return {'value': self.get_user_secret(user, plugin_id, params['key'])}
+        if op == 'set_user_secret':
+            self.set_user_secret(user, plugin_id, params['key'], params['value'])
+            return {}
+        if op == 'delete_user_secret':
+            return {'deleted': self.delete_user_secret(user, plugin_id, params['key'])}
         if op == 'resolve_github_token':
             from .github_client import GitHubClient
             return {'token': GitHubClient(user)._get_token()}
@@ -735,6 +744,16 @@ class PluginManager:
         if key is not None and (not isinstance(key, str) or not key or len(key) > 128):
             raise ValueError('Plugin data keys must be between 1 and 128 characters')
 
+    @staticmethod
+    def _user_secret_model():
+        from .models import PluginUserSecret
+        return PluginUserSecret
+
+    @staticmethod
+    def _validate_user_secret_key(key):
+        if not isinstance(key, str) or len(key) > 64 or not IDENTIFIER_PATTERN.fullmatch(key):
+            raise ValueError('Plugin secret keys require a simple name of at most 64 characters')
+
     def _state_map(self, user, request=None):
         cache_name = '_prdash_plugin_states'
         if request is not None and hasattr(request, cache_name):
@@ -952,6 +971,24 @@ class PluginManager:
             collection=collection,
             key=key,
         ).delete()
+        return bool(deleted)
+
+    def get_user_secret(self, user, plugin_id, key):
+        self._validate_user_secret_key(key)
+        row = self._user_secret_model().objects.filter(user=user, plugin_id=plugin_id, key=key).first()
+        return row.value if row else None
+
+    def set_user_secret(self, user, plugin_id, key, value):
+        self._validate_user_secret_key(key)
+        if not isinstance(value, str) or not value or len(value) > MAX_SECRET_LENGTH:
+            raise ValueError(f'Plugin secret values must be between 1 and {MAX_SECRET_LENGTH} characters')
+        self._user_secret_model().objects.update_or_create(
+            user=user, plugin_id=plugin_id, key=key, defaults={'value': value},
+        )
+
+    def delete_user_secret(self, user, plugin_id, key):
+        self._validate_user_secret_key(key)
+        deleted, _ = self._user_secret_model().objects.filter(user=user, plugin_id=plugin_id, key=key).delete()
         return bool(deleted)
 
     def reorder_user_data(self, user, plugin_id, collection, keys):

@@ -2,7 +2,9 @@ from django.contrib.auth.models import User
 from django.db import IntegrityError, connection
 from django.test import TestCase
 
-from dashboard.models import PersonalAccessToken, PluginConfiguration, PluginUserData, TrackedRepository
+from dashboard.models import (
+    PersonalAccessToken, PluginConfiguration, PluginUserData, PluginUserSecret, TrackedRepository,
+)
 
 
 class PersonalAccessTokenModelTests(TestCase):
@@ -129,3 +131,24 @@ class PluginUserDataModelTests(TestCase):
                 key='item-1',
                 value={'name': 'Other item'},
             )
+
+
+class PluginUserSecretModelTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='testuser', password='testpass')
+
+    def test_plugin_user_secret_is_encrypted_at_rest(self):
+        PluginUserSecret.objects.create(user=self.user, plugin_id='example', key='api_key', value='sk-plain')
+
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT value FROM dashboard_pluginusersecret')
+            stored = cursor.fetchone()[0]
+
+        self.assertNotIn('sk-plain', stored)
+        self.assertEqual(PluginUserSecret.objects.get().value, 'sk-plain')
+
+    def test_plugin_user_secret_is_unique_per_user_plugin_and_key(self):
+        PluginUserSecret.objects.create(user=self.user, plugin_id='example', key='api_key', value='first')
+
+        with self.assertRaises(IntegrityError):
+            PluginUserSecret.objects.create(user=self.user, plugin_id='example', key='api_key', value='second')

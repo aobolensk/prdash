@@ -207,6 +207,17 @@ class _WorkerRegistrar:
             'reorder_user_data', {'user_id': user_id, 'collection': collection, 'keys': list(keys)}
         )
 
+    def get_user_secret(self, user_id, key):
+        result = self._user_callback('get_user_secret', {'user_id': user_id, 'key': key})
+        return result['value']
+
+    def set_user_secret(self, user_id, key, value):
+        self._user_callback('set_user_secret', {'user_id': user_id, 'key': key, 'value': value})
+
+    def delete_user_secret(self, user_id, key):
+        result = self._user_callback('delete_user_secret', {'user_id': user_id, 'key': key})
+        return result['deleted']
+
 
 def _to_plugin_user_data(item):
     return PluginUserData(item['key'], item['value'], item['created_at'], item['updated_at'])

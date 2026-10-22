@@ -2,7 +2,7 @@
 
 A plugin is a Python object with metadata, `initialize`, and `shutdown`, loaded
 inside its own worker subprocess from a local source manifest or an installed
-wheel entry point. Set `PluginMetadata.api_version` to `3.0`. For source plugins,
+wheel entry point. Set `PluginMetadata.api_version` to `3.1`. For source plugins,
 set the manifest `api_version` to the same value.
 
 ## Minimal plugin
@@ -93,7 +93,7 @@ my-plugin/
   "id": "example",
   "name": "Example",
   "version": "1.0.0",
-  "api_version": "3.0",
+  "api_version": "3.1",
   "permissions": ["github.token"],
   "description": "Small example plugin.",
   "entrypoint": "my_prdash_plugin.plugin:plugin",
@@ -352,3 +352,18 @@ user_id = request.user_id
 if user_id is not None:
     registrar.reorder_user_data(user_id, 'saved_views', ('daily', 'weekly'))
 ```
+
+Store user-provided credentials as secrets instead of in plugin configuration.
+Secret keys are simple identifiers and values are strings of at most 1024
+characters, encrypted at rest:
+
+```python
+user_id = request.user_id
+if user_id is not None:
+    registrar.set_user_secret(user_id, 'api_key', submitted_key)
+    api_key = registrar.get_user_secret(user_id, 'api_key')
+    registrar.delete_user_secret(user_id, 'api_key')
+```
+
+Read a secret only when it is needed and never render the stored value back
+into a form.

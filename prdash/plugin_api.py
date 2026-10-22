@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 
-PLUGIN_API_VERSION = '3.0'
+PLUGIN_API_VERSION = '3.1'
 GITHUB_API_VERSION = '2022-11-28'
 
 PERMISSION_GITHUB_TOKEN = 'github.token'
@@ -273,6 +273,15 @@ class PluginRegistrar(Protocol):
         ...
 
     def reorder_user_data(self, user_id: int, collection: str, keys: Sequence[str]) -> None:
+        ...
+
+    def get_user_secret(self, user_id: int, key: str) -> str | None:
+        ...
+
+    def set_user_secret(self, user_id: int, key: str, value: str) -> None:
+        ...
+
+    def delete_user_secret(self, user_id: int, key: str) -> bool:
         ...
 
 

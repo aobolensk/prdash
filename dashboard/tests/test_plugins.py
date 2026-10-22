@@ -149,6 +149,7 @@ class HookPlugin:
         return PluginJsonResponse({{
             'config': self.registrar.get_user_config(user_id),
             'data': item.value if item else None,
+            'secret': self.registrar.get_user_secret(user_id, 'api_key'),
             'repositories': self.registrar.list_tracked_repositories(user_id),
             'token': self.registrar.resolve_github_token(user_id),
         }})
@@ -225,6 +226,8 @@ plugin = HookPlugin()
         manager.update_user_config(other_user, 'hook-plugin', {'owner': 'other'})
         manager.set_user_data(self.user, 'hook-plugin', 'private', 'secret', {'owner': 'first'})
         manager.set_user_data(other_user, 'hook-plugin', 'private', 'secret', {'owner': 'other'})
+        manager.set_user_secret(self.user, 'hook-plugin', 'api_key', 'first-key')
+        manager.set_user_secret(other_user, 'hook-plugin', 'api_key', 'other-key')
         TrackedRepository.objects.create(user=self.user, owner='first', name='repo')
         TrackedRepository.objects.create(user=other_user, owner='other', name='repo')
         PersonalAccessToken.objects.create(user=self.user, token='first-token')
@@ -246,6 +249,7 @@ plugin = HookPlugin()
         self.assertEqual(json.loads(first_response.content), {
             'config': {'owner': 'first'},
             'data': {'owner': 'first'},
+            'secret': 'first-key',
             'repositories': [{'owner': 'first', 'name': 'repo', 'enabled': True}],
             'token': 'first-token',
         })
@@ -253,6 +257,7 @@ plugin = HookPlugin()
         self.assertEqual(json.loads(other_response.content), {
             'config': {'owner': 'other'},
             'data': {'owner': 'other'},
+            'secret': 'other-key',
             'repositories': [{'owner': 'other', 'name': 'repo', 'enabled': True}],
             'token': 'other-token',
         })
@@ -331,6 +336,30 @@ plugin = HookPlugin()
                 'invalid',
                 {'value': float('nan')},
             )
+
+    def test_plugin_user_secrets_are_scoped_to_a_user_and_plugin(self):
+        manager = self.manager_with_plugin()
+        other_user = User.objects.create_user(username='other', password='testpass')
+
+        manager.set_user_secret(self.user, 'hook-plugin', 'api_key', 'first')
+        manager.set_user_secret(self.user, 'hook-plugin', 'api_key', 'second')
+
+        self.assertEqual(manager.get_user_secret(self.user, 'hook-plugin', 'api_key'), 'second')
+        self.assertIsNone(manager.get_user_secret(other_user, 'hook-plugin', 'api_key'))
+        self.assertIsNone(manager.get_user_secret(self.user, 'other-plugin', 'api_key'))
+        self.assertTrue(manager.delete_user_secret(self.user, 'hook-plugin', 'api_key'))
+        self.assertFalse(manager.delete_user_secret(self.user, 'hook-plugin', 'api_key'))
+        self.assertIsNone(manager.get_user_secret(self.user, 'hook-plugin', 'api_key'))
+
+    def test_plugin_user_secrets_reject_invalid_keys_and_values(self):
+        manager = self.manager_with_plugin()
+
+        for key in ('', 'Bad Key', 'x' * 65, None):
+            with self.assertRaisesMessage(ValueError, 'simple name'):
+                manager.set_user_secret(self.user, 'hook-plugin', key, 'value')
+        for value in ('', 'x' * 1025, 42):
+            with self.assertRaisesMessage(ValueError, 'between 1 and 1024'):
+                manager.set_user_secret(self.user, 'hook-plugin', 'api_key', value)
 
     def test_request_info_survives_form_data_stream_parsing(self):
         request = self.factory.post('/example/', {'value': 'test'})
