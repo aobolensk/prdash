@@ -1249,8 +1249,6 @@ document.addEventListener('DOMContentLoaded', function() {
             sidebarTab = 'my_prs';
         } else if (activeTab === 'author_prs' || activeTab === 'author_merged') {
             sidebarTab = 'author_prs';
-        } else if (activeTab === 'review_approved') {
-            sidebarTab = 'review_requests';
         }
         const sidebarLinks = document.querySelectorAll('.sidebar-link[data-tab]');
         sidebarLinks.forEach(link => {
@@ -1293,14 +1291,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    document.body.addEventListener('reviewTabChanged', function(evt) {
-        const reviewTab = evt.detail.value || evt.detail;
-        const dashboard = document.getElementById('dashboard-layout');
-        if (dashboard) {
-            dashboard.dataset.reviewTab = reviewTab;
-        }
-    });
-
     document.body.addEventListener('htmx:configRequest', function(evt) {
         const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]');
         if (csrfToken) {
@@ -1318,13 +1308,6 @@ document.addEventListener('DOMContentLoaded', function() {
         // Handle repo link clicks - use current tab's URL
         if (elt.classList.contains('repo-link') && elt.dataset.repo) {
             let currentTab = dashboard.dataset.currentTab || 'my_prs';
-            // For review_requests, check if we're on approved sub-tab
-            if (currentTab === 'review_requests') {
-                const reviewTab = dashboard.dataset.reviewTab || 'pending';
-                if (reviewTab === 'approved') {
-                    currentTab = 'review_approved';
-                }
-            }
             const url = elt.getAttribute('data-url-' + currentTab);
             if (url) {
                 evt.detail.path = url;
@@ -1342,7 +1325,6 @@ document.addEventListener('DOMContentLoaded', function() {
             let currentSidebarTab = currentTab;
             if (currentTab === 'merged') currentSidebarTab = 'my_prs';
             else if (currentTab === 'author_merged') currentSidebarTab = 'author_prs';
-            else if (currentTab === 'review_approved') currentSidebarTab = 'review_requests';
 
             // If clicking the same tab we're on, clear repo filter (use "all" URL)
             if (currentRepo && clickedTab === currentSidebarTab) {
@@ -1371,13 +1353,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (elt.classList.contains('repo-link') && elt.dataset.repo) {
             let currentTab = dashboard.dataset.currentTab || 'my_prs';
-            // For review_requests, check if we're on approved sub-tab
-            if (currentTab === 'review_requests') {
-                const reviewTab = dashboard.dataset.reviewTab || 'pending';
-                if (reviewTab === 'approved') {
-                    currentTab = 'review_approved';
-                }
-            }
             const url = elt.getAttribute('data-url-' + currentTab);
             if (url) {
                 elt.href = url;
@@ -1393,7 +1368,6 @@ document.addEventListener('DOMContentLoaded', function() {
             let currentSidebarTab = currentTab;
             if (currentTab === 'merged') currentSidebarTab = 'my_prs';
             else if (currentTab === 'author_merged') currentSidebarTab = 'author_prs';
-            else if (currentTab === 'review_approved') currentSidebarTab = 'review_requests';
 
             // If clicking the same tab we're on, clear repo filter (use "all" URL)
             if (currentRepo && clickedTab === currentSidebarTab) {

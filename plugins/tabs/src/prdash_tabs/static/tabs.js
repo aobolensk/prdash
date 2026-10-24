@@ -100,7 +100,7 @@
     function groupForTab(tab) {
         if (isPluginTab(tab)) return tab;
         if (tab === 'author' || tab === 'author_merged' || tab === 'author_prs') return 'author_prs';
-        if (tab === 'review_requests' || tab === 'review_approved') return 'review_requests';
+        if (tab === 'review_requests') return 'review_requests';
         if (tab === 'assigned') return 'assigned';
         return 'my_prs';
     }
@@ -161,7 +161,6 @@
             if (!tab.pendingRender) tab.html = contentHtml(list);
             tab.currentTab = layout.dataset.currentTab || defaultTabForGroup(tab.id);
             tab.currentRepo = layout.dataset.currentRepo || '';
-            tab.reviewTab = layout.dataset.reviewTab || 'pending';
             tab.title = document.title;
             tab.search = getSearchState();
             const main = document.querySelector('.main-content');
@@ -179,7 +178,6 @@
                     url: tab.url,
                     currentTab: tab.currentTab,
                     currentRepo: tab.currentRepo,
-                    reviewTab: tab.reviewTab,
                     title: tab.title,
                     search: tab.search,
                     scrollTop: tab.scrollTop
@@ -400,7 +398,6 @@
         const currentTab = activeTab.currentTab || defaultTabForGroup(activeTab.id);
         layout.dataset.currentTab = currentTab;
         layout.dataset.currentRepo = activeTab.currentRepo || '';
-        layout.dataset.reviewTab = activeTab.reviewTab || 'pending';
         const activeGroup = groupForTab(currentTab);
         document.querySelectorAll('.sidebar-link[data-tab]').forEach(function(link) {
             link.classList.toggle('active', link.dataset.tab === activeGroup);
@@ -449,7 +446,6 @@
         tab.pendingRender = true;
         tab.currentTab = tabForUrl(tab.id, url);
         tab.currentRepo = repoForUrl(tab.id, url);
-        tab.reviewTab = 'pending';
         activeTab = tab;
         setSearchState(tab.search);
         updateSidebarSelection();
@@ -527,7 +523,6 @@
             html: null,
             currentTab: defaultTabForGroup(id),
             currentRepo: '',
-            reviewTab: 'pending',
             search: null,
             scrollTop: 0
         };
@@ -562,7 +557,6 @@
             html: null,
             currentTab: defaultTabForGroup(id),
             currentRepo: '',
-            reviewTab: 'pending',
             search: null,
             scrollTop: 0
         };
@@ -591,7 +585,6 @@
                 html: null,
                 currentTab: 'my_prs',
                 currentRepo: '',
-                reviewTab: 'pending',
                 search: null,
                 scrollTop: 0
             });
@@ -626,7 +619,6 @@
                 url: url,
                 currentTab: layout.dataset.currentTab || defaultTabForGroup(currentGroup),
                 currentRepo: layout.dataset.currentRepo || '',
-                reviewTab: layout.dataset.reviewTab || 'pending',
                 search: null,
                 scrollTop: 0
             };
@@ -636,7 +628,6 @@
         activeTab.html = contentHtml(list);
         activeTab.currentTab = layout.dataset.currentTab || activeTab.currentTab || defaultTabForGroup(currentGroup);
         activeTab.currentRepo = layout.dataset.currentRepo || '';
-        activeTab.reviewTab = layout.dataset.reviewTab || activeTab.reviewTab || 'pending';
         activeTab.title = document.title;
         renderTabs();
         updateSidebarSelection();
@@ -740,7 +731,6 @@
                 html: null,
                 currentTab: defaultTabForGroup(group),
                 currentRepo: '',
-                reviewTab: 'pending',
                 search: null,
                 scrollTop: 0
             };
@@ -753,7 +743,6 @@
         tab.html = contentHtml(content());
         tab.currentTab = layout.dataset.currentTab || defaultTabForGroup(tab.id);
         tab.currentRepo = layout.dataset.currentRepo || '';
-        tab.reviewTab = layout.dataset.reviewTab || 'pending';
         tab.title = document.title;
         tab.search = getSearchState();
         updateSidebarSelection();
@@ -778,7 +767,6 @@
                 html: null,
                 currentTab: defaultTabForGroup(group),
                 currentRepo: '',
-                reviewTab: 'pending',
                 search: null,
                 scrollTop: 0
             };

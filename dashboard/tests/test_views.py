@@ -344,7 +344,6 @@ class HTMXResponseTests(TestCase):
             'my_prs': reverse('dashboard:repo_pr_list', args=['owner', 'repo']),
             'merged': reverse('dashboard:repo_merged_pr_list', args=['owner', 'repo']),
             'review_requests': reverse('dashboard:repo_review_requests_list', args=['owner', 'repo']),
-            'review_approved': reverse('dashboard:repo_review_approved_list', args=['owner', 'repo']),
             'assigned': reverse('dashboard:repo_assigned_list', args=['owner', 'repo']),
         }
 

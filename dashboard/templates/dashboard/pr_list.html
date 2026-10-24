@@ -13,8 +13,7 @@
 <div class="dashboard-layout"
      id="dashboard-layout"
      data-current-tab="{% if active_tab == 'review_requests' %}review_requests{% elif active_tab == 'assigned' %}assigned{% elif active_tab == 'merged' %}merged{% elif active_tab == 'author' %}author_prs{% elif active_tab == 'author_merged' %}author_merged{% elif plugin_page %}{{ active_tab }}{% else %}my_prs{% endif %}"
-     data-current-repo="{% if current_repo %}{{ current_repo.owner }}/{{ current_repo.name }}{% endif %}"
-     data-review-tab="{% if review_tab %}{{ review_tab }}{% else %}pending{% endif %}">
+     data-current-repo="{% if current_repo %}{{ current_repo.owner }}/{{ current_repo.name }}{% endif %}">
     <aside class="sidebar">
         <div class="sidebar-section">
             <h2 class="sidebar-title">Views</h2>
