@@ -629,13 +629,13 @@ class ReferencePluginIntegrationTests(TestCase):
         github_client.warnings = []
         mock_github_client.return_value = github_client
 
-        disabled_response = self.client.get(reverse('dashboard:pr_list'))
+        disabled_response = self.client.get(reverse('dashboard:pr_list'), HTTP_HX_REQUEST='true')
         PluginConfiguration.objects.create(
             user=self.user,
             plugin_id='pull-request-filters',
             enabled=True,
         )
-        enabled_response = self.client.get(reverse('dashboard:pr_list'))
+        enabled_response = self.client.get(reverse('dashboard:pr_list'), HTTP_HX_REQUEST='true')
 
         self.assertNotContains(disabled_response, 'CI Status')
         self.assertContains(enabled_response, 'CI Status')
@@ -676,7 +676,7 @@ class ReferencePluginIntegrationTests(TestCase):
         github_client.warnings = []
         mock_github_client.return_value = github_client
 
-        response = self.client.get(reverse('dashboard:pr_list'))
+        response = self.client.get(reverse('dashboard:pr_list'), HTTP_HX_REQUEST='true')
 
         self.assertContains(response, 'CI: 1/2')
         self.assertContains(response, 'Re-run failed CI jobs')
@@ -719,7 +719,7 @@ class ReferencePluginIntegrationTests(TestCase):
         github_client.warnings = []
         mock_github_client.return_value = github_client
 
-        response = self.client.get(reverse('dashboard:pr_list'))
+        response = self.client.get(reverse('dashboard:pr_list'), HTTP_HX_REQUEST='true')
 
         self.assertContains(response, 'Review pull request diff')
         self.assertContains(
@@ -771,7 +771,8 @@ class ReferencePluginIntegrationTests(TestCase):
             settings_url,
             {'single_format': '[{title}]({url})', 'list_format': '- {url}', 'separator': 'comma'},
         )
-        list_response = self.client.get(reverse('dashboard:pr_list'))
+        list_response = self.client.get(reverse('dashboard:pr_list'), HTTP_HX_REQUEST='true')
+        page_response = self.client.get(reverse('dashboard:pr_list'))
 
         self.assertContains(invalid_response, 'Formats must be 1 to 200 characters.')
         self.assertContains(settings_response, 'Export Links settings saved.')
@@ -782,7 +783,7 @@ class ReferencePluginIntegrationTests(TestCase):
         self.assertContains(list_response, 'export-links-all')
         self.assertContains(list_response, 'data-url="https://github.com/owner/repo/pull/123"')
         self.assertContains(
-            list_response,
+            page_response,
             '{"single": "[{title}]({url})", "list": "- {url}", "separator": ", "}',
         )
 
@@ -1074,7 +1075,7 @@ class ReferencePluginIntegrationTests(TestCase):
             data=json.dumps({'name': 'Needs attention', 'query': query}),
             content_type='application/json',
         )
-        list_response = self.client.get(reverse('dashboard:pr_list'))
+        list_response = self.client.get(reverse('dashboard:pr_list'), HTTP_HX_REQUEST='true')
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['category'], {'name': 'Needs attention', 'query': query})
@@ -1246,7 +1247,7 @@ class ReferencePluginIntegrationTests(TestCase):
         github_client.warnings = []
         mock_github_client.return_value = github_client
 
-        self.client.get(reverse('dashboard:pr_list'), {'author': 'octocat'})
+        self.client.get(reverse('dashboard:pr_list'), {'author': 'octocat'}, HTTP_HX_REQUEST='true')
 
         github_client.get_all_user_prs.assert_called_once_with([])
 

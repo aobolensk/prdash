@@ -358,7 +358,7 @@ class HTMXResponseTests(TestCase):
         for tab, url in repo_urls.items():
             self.assertIn(f'data-url-{tab}="{url}"', content)
 
-        response = self.client.get(repo_urls['my_prs'])
+        response = self.client.get(repo_urls['my_prs'], HTTP_HX_REQUEST='true')
 
         self.assertEqual(response.status_code, 200)
         mock_client.get_user_prs_for_repo.assert_called_once_with('owner', 'repo')
@@ -376,14 +376,23 @@ class HTMXResponseTests(TestCase):
         response = self.client.get(
             reverse('dashboard:author_pr_list'),
             {'author': 'octocat'},
+            HTTP_HX_REQUEST='true',
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, 'dashboard/pr_list.html')
+        self.assertTemplateUsed(response, 'dashboard/partials/_pr_content.html')
         mock_client.get_all_user_prs.assert_called_once_with([], author='octocat')
         self.assertContains(response, 'Pull Requests by octocat')
-        self.assertContains(response, 'PRs by Author')
-        self.assertContains(response, '<title>PRs by Author - PR Dashboard</title>', html=True)
+
+        page = self.client.get(reverse('dashboard:author_pr_list'), {'author': 'octocat'})
+
+        self.assertTemplateUsed(page, 'dashboard/pr_list.html')
+        self.assertContains(page, 'PRs by Author')
+        self.assertContains(page, '<title>PRs by Author - PR Dashboard</title>', html=True)
+        self.assertContains(page, 'hx-get="/prs/by-author/?author=octocat" hx-trigger="load"')
+        self.assertContains(page, 'class="filter-toolbar"')
+        self.assertContains(page, 'Pull Requests by octocat')
+        self.assertContains(page, 'Loading pull requests')
 
     @patch('dashboard.views.GitHubClient')
     def test_author_pr_list_without_author_does_not_fetch(self, mock_github_client):
@@ -394,7 +403,7 @@ class HTMXResponseTests(TestCase):
         mock_client.warnings = []
         mock_github_client.return_value = mock_client
 
-        response = self.client.get(reverse('dashboard:author_pr_list'))
+        response = self.client.get(reverse('dashboard:author_pr_list'), HTTP_HX_REQUEST='true')
 
         self.assertEqual(response.status_code, 200)
         mock_client.get_all_user_prs.assert_not_called()
@@ -413,6 +422,7 @@ class HTMXResponseTests(TestCase):
         response = self.client.get(
             reverse('dashboard:author_merged_pr_list'),
             {'author': 'octocat'},
+            HTTP_HX_REQUEST='true',
         )
 
         self.assertEqual(response.status_code, 200)
@@ -450,7 +460,7 @@ class HTMXResponseTests(TestCase):
         mock_client.warnings = []
         mock_github_client.return_value = mock_client
 
-        response = self.client.get(reverse('dashboard:pr_list'), {'page': 2})
+        response = self.client.get(reverse('dashboard:pr_list'), {'page': 2}, HTTP_HX_REQUEST='true')
         content = response.content.decode()
 
         self.assertEqual(response.status_code, 200)
@@ -722,12 +732,13 @@ class PluginPrListPageViewTests(TestCase):
         TrackedRepository.objects.create(user=self.user, owner='o', name='r')
         mock_client = self.mock_client(mock_github_client, [self.make_pr(1), self.make_pr(2, author='testuser')])
 
+        content = self.client.get(self.url, HTTP_HX_REQUEST='true')
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
         mock_client.get_all_open_prs.assert_called_once_with([('o', 'r')], exclude_author='testuser')
-        self.assertContains(response, 'PR 1')
-        self.assertNotContains(response, 'PR 2')
+        self.assertContains(content, 'PR 1')
+        self.assertNotContains(content, 'PR 2')
         self.assertContains(response, 'data-current-tab="plugin:page-plugin:triage"')
         self.assertContains(response, 'data-tab="plugin:page-plugin:triage"')
         self.assertContains(response, f'hx-get="{self.url}"')

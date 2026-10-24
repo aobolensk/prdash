@@ -1091,12 +1091,16 @@ a:hover {
     gap: 8px;
 }
 
-.refresh-spinner {
+.refresh-spinner,
+.pr-loading .loading-spinner {
     width: 16px;
     height: 16px;
     border: 2px solid var(--color-border);
     border-top-color: var(--color-primary);
     border-radius: 50%;
+}
+
+.refresh-spinner {
     display: none;
 }
 
@@ -1426,6 +1430,51 @@ mark.pr-hl-typo {
 @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }
+}
+
+.pr-skeleton-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+}
+
+.pr-skeleton {
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--color-bg-tertiary) 25%, var(--color-bg-secondary) 50%, var(--color-bg-tertiary) 75%);
+    background-size: 200% 100%;
+    animation: pr-skeleton-shimmer 1.5s infinite;
+}
+
+.pr-skeleton-title {
+    height: 16px;
+    width: 60%;
+}
+
+.pr-skeleton-meta {
+    height: 12px;
+    width: 35%;
+}
+
+@keyframes pr-skeleton-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+.pr-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 24px;
+    color: var(--color-text-secondary);
+    font-size: 14px;
+}
+
+.pr-loading .loading-spinner {
+    width: 20px;
+    height: 20px;
+    animation: spin 0.8s linear infinite;
 }
 
 .toast-container {

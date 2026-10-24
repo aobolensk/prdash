@@ -6,7 +6,7 @@ from django.core.cache import cache
 from django.core.paginator import Paginator
 from django.db import connections
 from django.urls import reverse
-from django.utils.cache import add_never_cache_headers
+from django.utils.cache import add_never_cache_headers, patch_vary_headers
 from django.utils import timezone
 from dataclasses import asdict
 import hashlib
@@ -161,6 +161,62 @@ def _query_cache_vary(query, author=None):
     return hashlib.sha256(json.dumps(cache_vary, sort_keys=True).encode()).hexdigest()
 
 
+def _cached_pr_counts(user):
+    return {
+        'my_prs': cache.get(f"pr_count:{user.id}:my_prs"),
+        'review_requests': cache.get(f"pr_count:{user.id}:review_requests"),
+        'assigned': cache.get(f"pr_count:{user.id}:assigned"),
+    }
+
+
+def _pr_list_page_title(active_tab, plugin_page, current_repo):
+    tab_titles = {
+        'review_requests': 'Review Requests',
+        'assigned': 'Assigned',
+        'merged': 'Merged PRs',
+        'author': 'PRs by Author',
+        'author_merged': 'PRs by Author',
+    }
+    page_title = plugin_page['title'] if plugin_page else tab_titles.get(active_tab, 'My PRs')
+    if current_repo:
+        page_title = f'{page_title} - {current_repo.full_name}'
+    return f'{page_title} - PR Dashboard'
+
+
+def _render_pr_list_page(request, context):
+    context['plugin_pages'] = plugin_manager.pr_list_pages(request.user, request)
+    response = render(request, 'dashboard/pr_list.html', context)
+    add_never_cache_headers(response)
+    patch_vary_headers(response, ['HX-Request'])
+    return response
+
+
+def _pr_list_shell(request, repos, active_tab, owner, repo, plugin_page, query, author):
+    """Serve everything except the PR list right away. The list loads via hx-trigger="load"."""
+    current_repo = None
+    if owner and repo:
+        current_repo = get_object_or_404(
+            TrackedRepository, user=request.user, owner=owner, name=repo
+        )
+    user_prefs = _get_user_preferences(request.user)
+    context = {
+        'repos': repos,
+        'current_repo': current_repo,
+        'active_tab': active_tab,
+        'author': author,
+        'filters': query.parameters,
+        'has_active_filters': query.affects_count,
+        'auto_refresh_enabled': user_prefs.is_auto_refresh_enabled_for_tab(active_tab),
+        'auto_refresh_interval': user_prefs.get_auto_refresh_interval_seconds_for_tab(active_tab),
+        'auto_refresh_interval_mins': user_prefs.get_auto_refresh_interval_for_tab(active_tab),
+        'pr_counts': _cached_pr_counts(request.user),
+        'page_title': _pr_list_page_title(active_tab, plugin_page, current_repo),
+        'plugin_page': plugin_page,
+        'defer_content_url': request.get_full_path(),
+    }
+    return _render_pr_list_page(request, context)
+
+
 def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
                   owner=None, repo=None, post_filter=None, post_filter_factory=None,
                   base_fetch_options=None, query_defaults=None, author_required=False,
@@ -178,6 +234,8 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         plugin_page: The plugin PR list page being served, from plugin_manager.pr_list_page
     """
     repos = TrackedRepository.objects.filter(user=request.user)
+    fetch_on_demand = bool(plugin_page and plugin_page['fetch_on_demand'])
+
     client = GitHubClient(request.user)
     current_username = client.get_username()
     plugin_context, query = _run_pr_list_query(
@@ -186,6 +244,9 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
     author = query.parameters.get('author') or None
     if author_required:
         author = request.GET.get('author', '').strip() or None
+    if request.headers.get('HX-Request') != 'true' and not fetch_on_demand:
+        return _pr_list_shell(request, repos, active_tab, owner, repo, plugin_page, query, author)
+
     fetch_options = dict(base_fetch_options or {})
     fetch_options.update(query.fetch_options)
     if author_required and author:
@@ -193,7 +254,6 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
 
     cache_gen = cache.get(f"pr_results_gen:{request.user.id}", 0)
     query_cache_vary = _query_cache_vary(query, (author or '') if author_required else None)
-    fetch_on_demand = bool(plugin_page and plugin_page['fetch_on_demand'])
     pr_fetch = None
 
     if owner and repo:
@@ -273,24 +333,8 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         page_obj = paginator.page(page_number)
         prs = page_obj.object_list
 
-    # Retrieve all cached counts for sidebar display
-    pr_counts = {
-        'my_prs': cache.get(f"pr_count:{request.user.id}:my_prs"),
-        'review_requests': cache.get(f"pr_count:{request.user.id}:review_requests"),
-        'assigned': cache.get(f"pr_count:{request.user.id}:assigned"),
-    }
-
-    tab_titles = {
-        'review_requests': 'Review Requests',
-        'assigned': 'Assigned',
-        'merged': 'Merged PRs',
-        'author': 'PRs by Author',
-        'author_merged': 'PRs by Author',
-    }
-    page_title = plugin_page['title'] if plugin_page else tab_titles.get(active_tab, 'My PRs')
-    if current_repo:
-        page_title = f'{page_title} - {current_repo.full_name}'
-    page_title = f'{page_title} - PR Dashboard'
+    pr_counts = _cached_pr_counts(request.user)
+    page_title = _pr_list_page_title(active_tab, plugin_page, current_repo)
 
     render_hash = _compute_pr_render_hash(
         prs,
@@ -350,13 +394,11 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
             return response
 
         response = render(request, 'dashboard/partials/_pr_content.html', context)
+        patch_vary_headers(response, ['HX-Request'])
         response['HX-Trigger'] = json.dumps(triggers)
         return response
 
-    context['plugin_pages'] = plugin_manager.pr_list_pages(request.user, request)
-    response = render(request, 'dashboard/pr_list.html', context)
-    add_never_cache_headers(response)
-    return response
+    return _render_pr_list_page(request, context)
 
 
 @login_required

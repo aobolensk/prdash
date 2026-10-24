@@ -59,7 +59,7 @@
         {% endif %}
     </h1>
     <div class="refresh-wrapper">
-        {% if not pr_fetch %}
+        {% if not pr_fetch and not defer_content_url %}
         <span class="last-updated" data-updated="{% now 'c' %}" title="Last updated {% now 'N j, Y, H:i:s' %}">just now</span>
         {% endif %}
         <span class="stale-indicator" id="stale-indicator" {% if not stale_data %}hidden{% endif %}
@@ -142,6 +142,20 @@
     {% plugin_slot 'pr_list.filters' current_url=current_url %}
 </div>
 
+{% if defer_content_url %}
+<div hx-get="{{ defer_content_url }}" hx-trigger="load" hx-target="#pr-content" hx-swap="innerHTML">
+    <div class="pr-loading" role="status">
+        <div class="loading-spinner"></div>
+        <span>Loading pull requests&hellip;</span>
+    </div>
+    <div class="pr-list" aria-hidden="true">
+        <div class="pr-card pr-skeleton-card"><div class="pr-skeleton pr-skeleton-title"></div><div class="pr-skeleton pr-skeleton-meta"></div></div>
+        <div class="pr-card pr-skeleton-card"><div class="pr-skeleton pr-skeleton-title"></div><div class="pr-skeleton pr-skeleton-meta"></div></div>
+        <div class="pr-card pr-skeleton-card"><div class="pr-skeleton pr-skeleton-title"></div><div class="pr-skeleton pr-skeleton-meta"></div></div>
+    </div>
+</div>
+{% else %}
 {% include 'dashboard/partials/_pr_list.html' with current_url=current_url %}
+{% endif %}
 
 </div>

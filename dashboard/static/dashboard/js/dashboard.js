@@ -1438,9 +1438,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Without this, an hx-trigger="load" region stays on its loading skeleton forever on failure.
     function showLoadFailure(evt) {
-        const target = evt.detail.target;
-        if (target && target.getAttribute('hx-trigger') === 'load') {
-            target.innerHTML = '<div class="alert alert-error">Failed to load content. Please try refreshing.</div>';
+        const loader = evt.detail.elt;
+        if (loader && loader.getAttribute('hx-trigger') === 'load') {
+            loader.innerHTML = '<div class="alert alert-error">Failed to load content. Please try refreshing.</div>';
         }
     }
     document.body.addEventListener('htmx:responseError', showLoadFailure);
