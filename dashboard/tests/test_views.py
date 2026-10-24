@@ -1,4 +1,6 @@
 import json
+import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth.models import User
@@ -893,3 +895,27 @@ class FetchOnDemandPageTests(PluginPrListPageViewTests):
     test_poll_rerenders_when_only_an_annotation_changes = None
     test_plugin_page_auto_refresh_is_saved_and_used = None
     test_unknown_page_returns_404 = None
+
+
+class PluginAssetCachingTests(TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.asset = Path(directory.name) / 'app.js'
+        self.asset.write_text('window.x = 1;', encoding='utf-8')
+        patcher = patch('dashboard.views.plugin_manager.asset_path', return_value=self.asset)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.url = reverse('dashboard:plugin_asset', args=['p', 'app.js'])
+
+    def test_serves_last_modified_and_honours_if_modified_since(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        last_modified = response['Last-Modified']
+
+        cached = self.client.get(self.url, HTTP_IF_MODIFIED_SINCE=last_modified)
+        self.assertEqual(cached.status_code, 304)
+        self.assertEqual(cached['Last-Modified'], last_modified)
+
+        stale = self.client.get(self.url, HTTP_IF_MODIFIED_SINCE='Mon, 01 Jan 2001 00:00:00 GMT')
+        self.assertEqual(stale.status_code, 200)

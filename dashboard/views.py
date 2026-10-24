@@ -1,5 +1,5 @@
 from django.shortcuts import render, redirect, get_object_or_404
-from django.http import Http404, HttpResponse, JsonResponse, StreamingHttpResponse
+from django.http import Http404, HttpResponse, HttpResponseNotModified, JsonResponse, StreamingHttpResponse
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_http_methods, require_POST
 from django.core.cache import cache
@@ -8,6 +8,8 @@ from django.db import connections
 from django.urls import reverse
 from django.utils.cache import add_never_cache_headers, patch_vary_headers
 from django.utils import timezone
+from django.utils.http import http_date
+from django.views.static import was_modified_since
 from dataclasses import asdict
 import hashlib
 import json
@@ -859,11 +861,15 @@ def plugin_asset(request, plugin_id, asset_name):
     """Serve a file from an installed plugin package static directory."""
     asset_path = plugin_manager.asset_path(plugin_id, asset_name)
     try:
-        content = asset_path.read_bytes()
+        mtime = asset_path.stat().st_mtime
+        if not was_modified_since(request.META.get('HTTP_IF_MODIFIED_SINCE'), mtime):
+            response = HttpResponseNotModified()
+        else:
+            content_type = guess_type(asset_path.name)[0] or 'application/octet-stream'
+            response = HttpResponse(asset_path.read_bytes(), content_type=content_type)
     except OSError as error:
         raise Http404 from error
-    content_type = guess_type(asset_path.name)[0] or 'application/octet-stream'
-    response = HttpResponse(content, content_type=content_type)
+    response['Last-Modified'] = http_date(mtime)
     response['X-Content-Type-Options'] = 'nosniff'
     response['Cache-Control'] = 'no-cache'
     return response
