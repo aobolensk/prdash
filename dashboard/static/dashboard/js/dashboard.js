@@ -1108,7 +1108,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const swappedLastUpdated = evt.detail.target.querySelector
             ? evt.detail.target.querySelector('.last-updated[data-updated]')
             : null;
-        if (swappedLastUpdated) syncClockOffset(swappedLastUpdated);
+        if (swappedLastUpdated && evt.detail.xhr) syncClockOffset(swappedLastUpdated);
         formatLastUpdated(evt.detail.target);
         formatRelativeTimes(evt.detail.target);
         // Only reconcile search state when #pr-content itself was swapped
