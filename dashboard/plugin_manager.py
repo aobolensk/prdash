@@ -97,6 +97,10 @@ class PluginCallError(RuntimeError):
     """A plugin worker failed to complete a call (crashed, timed out, or errored)."""
 
 
+class PluginWorkerGone(PluginCallError):
+    """The worker died before this call started, typically while it waited on the worker lock."""
+
+
 class PluginDescriptor:
     """Metadata available without starting a plugin's worker process."""
 
@@ -378,7 +382,7 @@ class PluginManager:
     def _call(self, worker, op, params, timeout=DEFAULT_CALL_TIMEOUT, callback_user_id=None):
         with worker.lock:
             if worker.dead:
-                raise PluginCallError('Plugin worker is no longer running')
+                raise PluginWorkerGone('Plugin worker is no longer running')
             call_id = worker.next_call_id()
             try:
                 write_message(worker.popen.stdin, {
@@ -401,7 +405,7 @@ class PluginManager:
         caller fully consumes or closes it."""
         with worker.lock:
             if worker.dead:
-                raise PluginCallError('Plugin worker is no longer running')
+                raise PluginWorkerGone('Plugin worker is no longer running')
             call_id = worker.next_call_id()
             try:
                 write_message(worker.popen.stdin, {
@@ -1232,16 +1236,20 @@ class PluginManager:
                 logger.exception('Plugin %s failed to render slot %s', plugin_id, slot)
         return mark_safe(''.join(rendered))
 
+    def _load_for_route(self, plugin_id, enabled_ids, route):
+        worker = self.load(plugin_id, enabled_ids)
+        if worker is not None and route not in worker.manifest['routes']:
+            raise Http404
+        return worker
+
     def dispatch(self, request, plugin_id, route):
         """Dispatch a request to an enabled plugin route."""
         enabled_ids = self._enabled_ids(request.user, request)
         if plugin_id not in enabled_ids:
             raise Http404
-        worker = self.load(plugin_id, enabled_ids)
+        worker = self._load_for_route(plugin_id, enabled_ids, route)
         if worker is None:
             return HttpResponseServerError('')
-        if route not in worker.manifest['routes']:
-            raise Http404
         config = dict(self._state_map(request.user, request)[plugin_id].config)
         callback_user_id = self._callback_user_id(getattr(request, 'user', None))
         route_params = {
@@ -1251,13 +1259,23 @@ class PluginManager:
             '_callback_user_id': callback_user_id,
         }
         try:
-            result = self._call(
-                worker,
-                'invoke_route',
-                route_params,
-                timeout=DEFAULT_ROUTE_TIMEOUT,
-                callback_user_id=callback_user_id,
-            )
+            for attempt in range(2):
+                try:
+                    result = self._call(
+                        worker,
+                        'invoke_route',
+                        route_params,
+                        timeout=DEFAULT_ROUTE_TIMEOUT,
+                        callback_user_id=callback_user_id,
+                    )
+                    break
+                except PluginWorkerGone:
+                    # Another request killed this worker while we queued on its lock: retry on a fresh one.
+                    if attempt:
+                        raise
+                    worker = self._load_for_route(plugin_id, enabled_ids, route)
+                    if worker is None:
+                        return HttpResponseServerError('')
             return self._response_from_payload(
                 result.get('response', {}), plugin_id, config, request,
             )
@@ -1273,12 +1291,10 @@ class PluginManager:
         enabled_ids = self._enabled_ids(request.user, request)
         if plugin_id not in enabled_ids:
             raise Http404
-        worker = self.load(plugin_id, enabled_ids)
+        worker = self._load_for_route(plugin_id, enabled_ids, route)
         if worker is None:
             yield {'final': True, 'error': 'Plugin worker is not available'}
             return
-        if route not in worker.manifest['routes']:
-            raise Http404
         config = dict(self._state_map(request.user, request)[plugin_id].config)
         callback_user_id = self._callback_user_id(getattr(request, 'user', None))
         route_params = {
@@ -1288,20 +1304,31 @@ class PluginManager:
             '_callback_user_id': callback_user_id,
         }
         try:
-            for kind, payload in self._call_streaming(
-                worker,
-                'invoke_route',
-                route_params,
-                timeout=DEFAULT_ROUTE_TIMEOUT,
-                callback_user_id=callback_user_id,
-            ):
-                if kind == 'chunk':
-                    yield {'chunk': payload}
-                else:
-                    response = self._stream_final_payload(
-                        payload.get('response', {}), plugin_id, config, request,
-                    )
-                    yield {'final': True, 'response': response}
+            for attempt in range(2):
+                try:
+                    for kind, payload in self._call_streaming(
+                        worker,
+                        'invoke_route',
+                        route_params,
+                        timeout=DEFAULT_ROUTE_TIMEOUT,
+                        callback_user_id=callback_user_id,
+                    ):
+                        if kind == 'chunk':
+                            yield {'chunk': payload}
+                        else:
+                            response = self._stream_final_payload(
+                                payload.get('response', {}), plugin_id, config, request,
+                            )
+                            yield {'final': True, 'response': response}
+                    return
+                except PluginWorkerGone:
+                    # Raised before any chunk is yielded, so a retry on a fresh worker is safe.
+                    if attempt:
+                        raise
+                    worker = self._load_for_route(plugin_id, enabled_ids, route)
+                    if worker is None:
+                        yield {'final': True, 'error': 'Plugin worker is not available'}
+                        return
         except Http404:
             raise
         except Exception:
