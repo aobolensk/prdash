@@ -141,6 +141,17 @@ class AuthenticationRequiredTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn('/accounts/login/', response.url)
 
+    def test_pr_list_htmx_login_redirect_navigates_the_page(self):
+        response = self.client.get(
+            reverse('dashboard:pr_list'),
+            HTTP_HX_REQUEST='true',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('/accounts/login/', response['HX-Redirect'])
+        self.assertIn('next=', response['HX-Redirect'])
+        self.assertEqual(response.content, b'')
+
     def test_settings_requires_login(self):
         """Verify login required for settings."""
         response = self.client.get(reverse('dashboard:settings'))

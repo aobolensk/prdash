@@ -66,6 +66,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'allauth.account.middleware.AccountMiddleware',
     'django_htmx.middleware.HtmxMiddleware',
+    'dashboard.middleware.HtmxLoginRedirectMiddleware',
 ]
 
 ROOT_URLCONF = 'prdash.urls'
