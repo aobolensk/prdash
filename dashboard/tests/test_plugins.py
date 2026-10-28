@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 from django.contrib.auth.models import User
 from django.http import Http404
-from django.template import Context
+from django.template import Context, engines
 from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
@@ -19,7 +19,7 @@ from dashboard.models import (
     TrackedRepository,
 )
 from dashboard.github_client import CIStatus, PullRequestInfo, ReviewStatus
-from dashboard.plugin_manager import PluginDescriptor, PluginManager, plugin_manager
+from dashboard.plugin_manager import PluginDescriptor, PluginManager, _compile_template, plugin_manager
 from prdash.plugin_worker import _Registration, _WorkerRegistrar
 from prdash.plugin_api import (
     PLUGIN_API_VERSION,
@@ -1536,6 +1536,24 @@ class PluginPrListPageTests(TestCase):
         )
 
         self.assertEqual(rendered, 'rank 3')
+
+    def test_card_slot_template_is_compiled_once_across_cards(self):
+        self.manager.configure_user(self.user, {'page-helpers', 'page-plugin'})
+        request = RequestFactory().get('/prs/')
+        request.user = self.user
+        _compile_template.cache_clear()
+        engine = engines['django']
+
+        with patch.object(engine, 'from_string', wraps=engine.from_string) as from_string:
+            rendered = [
+                self.manager.render_slot(
+                    'example', Context({'request': request}), pr=self.make_pr(n, {'page-plugin': {'rank': n}}),
+                )
+                for n in (1, 2, 3)
+            ]
+
+        self.assertEqual(rendered, ['rank 1', 'rank 2', 'rank 3'])
+        from_string.assert_called_once()
 
     def test_invalid_pages_are_rejected_at_registration(self):
         from prdash.plugin_api import PluginPrListPage

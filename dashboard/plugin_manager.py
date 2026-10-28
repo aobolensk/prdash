@@ -10,6 +10,7 @@ sandbox. The host enforces user scope through the callback surface below.
 
 from collections.abc import Mapping
 from dataclasses import asdict
+from functools import lru_cache
 from importlib import metadata
 import json
 import logging
@@ -87,6 +88,12 @@ _CALLBACK_PERMISSIONS = {
     'list_tracked_repositories': PERMISSION_REPOS_READ,
     'call_service': PERMISSION_PLUGINS_CALL,
 }
+
+
+@lru_cache(maxsize=256)
+def _compile_template(source):
+    """Keyed by source, so edited plugin templates miss the cache."""
+    return engines['django'].from_string(source)
 
 
 class PluginActivationError(RuntimeError):
@@ -1222,7 +1229,7 @@ class PluginManager:
                     if not isinstance(provided, Mapping):
                         raise TypeError('Plugin UI context providers must return a mapping')
                     context.update(provided)
-                template = engines['django'].from_string(ui['template_source'])
+                template = _compile_template(ui['template_source'])
                 output = template.render(context, request)
                 if wrap:
                     output = format_html(
@@ -1345,13 +1352,13 @@ class PluginManager:
         if response_type == 'template':
             context = dict(response.get('context', {}))
             for key, nested in response.get('nested', {}).items():
-                nested_template = engines['django'].from_string(nested['source'])
+                nested_template = _compile_template(nested['source'])
                 nested_context = dict(nested['context'])
                 nested_context['plugin_id'] = plugin_id
                 context[key] = nested_template.render(nested_context, request)
             context['plugin_id'] = plugin_id
             context['plugin_config'] = config
-            template = engines['django'].from_string(response['source'])
+            template = _compile_template(response['source'])
             content = template.render(context, request)
             return {'type': 'html', 'content': content, 'status': response.get('status', 200)}
         if response_type == 'json':
