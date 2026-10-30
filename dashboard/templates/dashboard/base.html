@@ -19,10 +19,6 @@
                 <a href="{% url 'dashboard:home' %}" class="logo">PR Dashboard</a>
             </div>
             <div class="header-actions">
-                <button id="theme-toggle" class="theme-toggle" aria-label="Toggle theme" type="button">
-                    <span class="theme-icon-light">&#9728;</span>
-                    <span class="theme-icon-dark">&#9790;</span>
-                </button>
                 {% if user.is_authenticated %}
                     {% plugin_slot 'header.status' %}
                     {% github_account_info user as gh_account %}

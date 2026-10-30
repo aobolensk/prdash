@@ -8,6 +8,7 @@
         <div class="sidebar-title">Categories</div>
         <a href="#settings-pat" class="sidebar-link">Personal Access Token</a>
         <a href="#settings-preferences" class="sidebar-link">Dashboard Preferences</a>
+        <a href="#settings-appearance" class="sidebar-link">Appearance</a>
         <a href="#settings-plugins" class="sidebar-link">Plugins</a>
         <div id="settings-nav-plugins" class="settings-nav-subsection"></div>
     </nav>
@@ -56,6 +57,21 @@
 
             <div id="preferences-form-container">
                 {% include 'dashboard/partials/_preferences_form.html' %}
+            </div>
+        </div>
+
+        <div class="settings-section" id="settings-appearance">
+            <h2>Appearance</h2>
+            <p class="settings-description">
+                Customize how the dashboard looks in this browser.
+            </p>
+
+            <div class="form-group">
+                <label for="theme-select">Color theme</label>
+                <select id="theme-select" class="filter-select">
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                </select>
             </div>
         </div>
 

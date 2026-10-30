@@ -1049,22 +1049,32 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Theme toggle functionality
+    // Theme selection (Appearance settings)
     const html = document.documentElement;
-    const themeToggle = document.getElementById('theme-toggle');
+    const themeSelect = document.getElementById('theme-select');
 
     // Load saved theme or default to light
-    const savedTheme = localStorage.getItem('theme') || 'light';
-    html.setAttribute('data-theme', savedTheme);
+    function applySavedTheme() {
+        const theme = localStorage.getItem('theme') || 'light';
+        html.setAttribute('data-theme', theme);
+        if (themeSelect) themeSelect.value = theme;
+    }
+    applySavedTheme();
 
-    if (themeToggle) {
-        themeToggle.addEventListener('click', () => {
-            const currentTheme = html.getAttribute('data-theme');
-            const newTheme = currentTheme === 'light' ? 'dark' : 'light';
-            html.setAttribute('data-theme', newTheme);
-            localStorage.setItem('theme', newTheme);
+    if (themeSelect) {
+        themeSelect.addEventListener('change', () => {
+            localStorage.setItem('theme', themeSelect.value);
+            applySavedTheme();
         });
     }
+
+    // The theme can change on the Settings page while this page sits in bfcache or in another tab.
+    window.addEventListener('pageshow', function(e) {
+        if (e.persisted) applySavedTheme();
+    });
+    window.addEventListener('storage', function(e) {
+        if (e.key === 'theme') applySavedTheme();
+    });
 
     // Sidebar collapse toggle
     const dashboardLayout = document.getElementById('dashboard-layout');

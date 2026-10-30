@@ -120,30 +120,6 @@ a:hover {
     border-radius: 50%;
 }
 
-/* Theme toggle */
-.theme-toggle {
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 8px;
-    border-radius: 6px;
-    color: var(--header-text);
-    font-size: 18px;
-    line-height: 1;
-}
-
-.theme-toggle:hover {
-    background-color: rgba(255, 255, 255, 0.1);
-}
-
-[data-theme="light"] .theme-icon-dark {
-    display: none;
-}
-
-[data-theme="dark"] .theme-icon-light {
-    display: none;
-}
-
 /* Buttons */
 .btn {
     display: inline-flex;
