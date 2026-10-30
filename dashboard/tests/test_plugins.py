@@ -620,6 +620,42 @@ class ReferencePluginIntegrationTests(TestCase):
 
         self.assertNotContains(response, 'Refresh the page to apply the changes.')
 
+    def test_plugin_settings_form_renders_on_its_own_subpage(self):
+        subpage_url = reverse('dashboard:plugin_settings', kwargs={'plugin_id': 'export-links'})
+        self.assertEqual(self.client.get(subpage_url).status_code, 404)
+
+        PluginConfiguration.objects.create(user=self.user, plugin_id='export-links', enabled=True)
+        settings_response = self.client.get(reverse('dashboard:settings'))
+        subpage_response = self.client.get(subpage_url)
+
+        self.assertContains(settings_response, f'href="{subpage_url}"')
+        self.assertNotContains(settings_response, 'Save Export Links Settings')
+        self.assertContains(subpage_response, 'Save Export Links Settings')
+        self.assertContains(subpage_response, f'href="{reverse("dashboard:settings")}#settings-plugins"')
+
+    def test_saving_plugins_refreshes_settings_nav_links(self):
+        response = self.client.post(
+            reverse('dashboard:save_plugins'),
+            {'enabled_plugins': ['export-links']},
+            HTTP_HX_REQUEST='true',
+        )
+
+        self.assertContains(response, 'id="settings-nav-plugins" class="settings-nav-subsection" hx-swap-oob="true"')
+        self.assertContains(
+            response,
+            f'<a href="{reverse("dashboard:plugin_settings", kwargs={"plugin_id": "export-links"})}" '
+            'class="sidebar-link sidebar-link-sub">',
+        )
+
+    def test_plugin_settings_subpage_404s_for_plugin_without_settings(self):
+        PluginConfiguration.objects.create(user=self.user, plugin_id='pull-request-filters', enabled=True)
+
+        response = self.client.get(
+            reverse('dashboard:plugin_settings', kwargs={'plugin_id': 'pull-request-filters'})
+        )
+
+        self.assertEqual(response.status_code, 404)
+
     @patch('dashboard.views.GitHubClient')
     def test_filter_ui_only_appears_when_plugin_is_enabled(self, mock_github_client):
         github_client = MagicMock()

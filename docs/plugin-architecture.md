@@ -78,7 +78,8 @@ There are two configuration scopes:
   validates them through `registrar.get_user_config(user_id)` and
   `registrar.update_user_config(user_id, values)`. The user id comes from the
   request snapshot. A plugin can contribute its own form to the `settings` slot
-  and handle it through a registered route.
+  and handle it through a registered route. The form renders on the plugin
+  settings subpage at `/settings/plugins/<plugin-id>/`.
 - User-owned collections live in `PluginUserData`. A plugin uses
   `list_user_data`, `get_user_data`, `set_user_data`, `delete_user_data`, and
   `reorder_user_data` with a plugin-defined collection name and key. The core

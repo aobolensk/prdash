@@ -1,4 +1,3 @@
-{% load plugin_tags %}
 <div class="preferences-form-wrapper">
     {% if success %}
     <div class="alert alert-success">
@@ -33,6 +32,9 @@
                 </label>
                 {% if plugin.description %}
                 <p class="form-help">{{ plugin.description }}</p>
+                {% endif %}
+                {% if plugin.has_settings %}
+                <a href="{% url 'dashboard:plugin_settings' plugin.id %}" class="plugin-settings-link">Configure {{ plugin.name }}</a>
                 {% endif %}
                 {% if plugin.permissions %}
                 <details class="plugin-permissions"{% if plugin.needs_approval %} open{% endif %}>
@@ -81,6 +83,5 @@
         <p class="form-help">No plugins discovered.</p>
         {% endif %}
     </form>
-
-    {% plugin_slot 'settings' wrap=True %}
 </div>
+{% if success %}{% include 'dashboard/partials/_settings_nav_plugins.html' with oob=True %}{% endif %}

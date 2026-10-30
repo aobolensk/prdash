@@ -34,7 +34,6 @@ from django.http import (
     RawPostDataException,
 )
 from django.template import engines
-from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
@@ -848,7 +847,7 @@ class PluginManager:
         return active != enabled
 
     def plugin_statuses(self, user, request=None):
-        states, enabled_ids, _ = self._activate_user_plugins(user, request)
+        states, enabled_ids, active_workers = self._activate_user_plugins(user, request)
 
         statuses = []
         for descriptor in sorted(self.descriptors.values(), key=lambda item: item.name.lower()):
@@ -865,6 +864,7 @@ class PluginManager:
             error = descriptor.load_error or activation_error
             if unmet and error == activation_error:
                 error = None
+            worker = active_workers.get(descriptor.plugin_id)
             statuses.append({
                 'id': descriptor.plugin_id,
                 'name': descriptor.name,
@@ -881,6 +881,7 @@ class PluginManager:
                 'needs_approval': bool(state and state.enabled and missing),
                 'requires': requires,
                 'unmet_requires': unmet if state and state.enabled else [],
+                'has_settings': bool(worker and any(ui['slot'] == 'settings' for ui in worker.manifest['ui'])),
             })
         return statuses
 
@@ -1191,15 +1192,16 @@ class PluginManager:
                 return page
         return None
 
-    def render_slot(self, slot, template_context, wrap=False, **extra_context):
-        """Render enabled UI contributions for one template slot
-        wrap=True tags each in an id/data-plugin-name container."""
+    def render_slot(self, slot, template_context, only_plugin_id=None, **extra_context):
+        """Render enabled UI contributions for one template slot, optionally from a single plugin."""
         request = template_context.get('request')
         user = getattr(request, 'user', None)
         states, _, active_workers = self._activate_user_plugins(user, request)
 
         contributions = []
         for plugin_id, worker in active_workers.items():
+            if only_plugin_id is not None and plugin_id != only_plugin_id:
+                continue
             for index, ui in enumerate(worker.manifest['ui']):
                 if ui['slot'] == slot:
                     contributions.append((ui['order'], plugin_id, index, ui, worker))
@@ -1230,15 +1232,7 @@ class PluginManager:
                         raise TypeError('Plugin UI context providers must return a mapping')
                     context.update(provided)
                 template = _compile_template(ui['template_source'])
-                output = template.render(context, request)
-                if wrap:
-                    output = format_html(
-                        '<div class="plugin-settings-section" id="plugin-settings-{}" data-plugin-name="{}">{}</div>',
-                        plugin_id,
-                        self.descriptors[plugin_id].name,
-                        mark_safe(output),
-                    )
-                rendered.append(output)
+                rendered.append(template.render(context, request))
             except Exception:
                 logger.exception('Plugin %s failed to render slot %s', plugin_id, slot)
         return mark_safe(''.join(rendered))

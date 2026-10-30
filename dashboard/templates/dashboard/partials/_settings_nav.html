@@ -1,0 +1,9 @@
+<nav class="settings-nav">
+    <div class="sidebar-title">Categories</div>
+    {% url 'dashboard:settings' as settings_url %}
+    <a href="{{ settings_url }}#settings-pat" class="sidebar-link">Personal Access Token</a>
+    <a href="{{ settings_url }}#settings-preferences" class="sidebar-link">Dashboard Preferences</a>
+    <a href="{{ settings_url }}#settings-appearance" class="sidebar-link">Appearance</a>
+    <a href="{{ settings_url }}#settings-plugins" class="sidebar-link">Plugins</a>
+    {% include 'dashboard/partials/_settings_nav_plugins.html' %}
+</nav>

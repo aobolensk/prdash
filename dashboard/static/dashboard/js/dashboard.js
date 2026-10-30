@@ -993,35 +993,26 @@ function bindPrFetchBar() {
     if (bar && bar.dataset.state === 'running') pollPrFetch(bar);
 }
 
-function buildPluginSettingsNav() {
-    const nav = document.getElementById('settings-nav-plugins');
-    if (!nav) return;
-    nav.innerHTML = '';
-    document.querySelectorAll('#plugin-settings-container .plugin-settings-section').forEach(function(section) {
-        const link = document.createElement('a');
-        link.href = '#' + section.id;
-        link.className = 'sidebar-link sidebar-link-sub';
-        link.textContent = section.dataset.pluginName || section.id;
-        nav.appendChild(link);
-    });
+function sameOriginReferrer() {
+    if (!document.referrer) return null;
+    const referrer = new URL(document.referrer);
+    return referrer.origin === window.location.origin ? referrer : null;
 }
 
 document.addEventListener('DOMContentLoaded', function() {
     formatTimestampTitles();
-    buildPluginSettingsNav();
 
     // replaceState avoids polluting the back-stack that "Back to Dashboard" walks with history.back().
     const settingsNav = document.querySelector('.settings-nav');
     if (settingsNav) {
         settingsNav.addEventListener('click', function(e) {
-            const link = e.target.closest('a[href^="#"]');
-            if (!link) return;
-            const href = link.getAttribute('href');
-            const target = document.getElementById(href.slice(1));
+            const link = e.target.closest('a[href*="#"]');
+            if (!link || link.pathname !== window.location.pathname) return;
+            const target = document.getElementById(link.hash.slice(1));
             if (!target) return;
             e.preventDefault();
             target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            history.replaceState(null, '', href);
+            history.replaceState(null, '', link.hash);
         });
     }
     const initialLastUpdated = document.querySelector('.last-updated[data-updated]');
@@ -1041,13 +1032,20 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // Coming from a plugin settings subpage, history.back() would return there instead of to the dashboard.
+    const referrer = sameOriginReferrer();
     const backToDashboardLink = document.getElementById('back-to-dashboard-link');
-    if (backToDashboardLink && document.referrer && new URL(document.referrer).origin === window.location.origin) {
-        backToDashboardLink.addEventListener('click', function(e) {
+    const backToSettingsLink = document.getElementById('back-to-settings-link');
+    [
+        [backToDashboardLink, () => !referrer.pathname.startsWith(window.location.pathname)],
+        [backToSettingsLink, () => referrer.pathname === backToSettingsLink.pathname],
+    ].forEach(function([link, cameFromTarget]) {
+        if (!link || !referrer || !cameFromTarget()) return;
+        link.addEventListener('click', function(e) {
             e.preventDefault();
             history.back();
         });
-    }
+    });
 
     // Theme selection (Appearance settings)
     const html = document.documentElement;
@@ -1128,9 +1126,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (target && target.id === 'pr-content') {
             syncPrSearchState();
             bindPrFetchBar();
-        }
-        if (target && target.id === 'plugin-settings-container') {
-            buildPluginSettingsNav();
         }
     });
 

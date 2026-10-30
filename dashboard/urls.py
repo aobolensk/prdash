@@ -49,4 +49,5 @@ urlpatterns = [
     path('settings/pat/delete/', views.delete_pat, name='delete_pat'),
     path('settings/preferences/save/', views.save_preferences, name='save_preferences'),
     path('settings/plugins/save/', views.save_plugins, name='save_plugins'),
+    path('settings/plugins/<slug:plugin_id>/', views.plugin_settings, name='plugin_settings'),
 ]

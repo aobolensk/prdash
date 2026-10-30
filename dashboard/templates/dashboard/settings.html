@@ -4,14 +4,7 @@
 
 {% block content %}
 <div class="settings-layout">
-    <nav class="settings-nav">
-        <div class="sidebar-title">Categories</div>
-        <a href="#settings-pat" class="sidebar-link">Personal Access Token</a>
-        <a href="#settings-preferences" class="sidebar-link">Dashboard Preferences</a>
-        <a href="#settings-appearance" class="sidebar-link">Appearance</a>
-        <a href="#settings-plugins" class="sidebar-link">Plugins</a>
-        <div id="settings-nav-plugins" class="settings-nav-subsection"></div>
-    </nav>
+    {% include 'dashboard/partials/_settings_nav.html' %}
 
     <div class="settings-container">
         <div class="settings-header">

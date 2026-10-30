@@ -1,0 +1,5 @@
+<div id="settings-nav-plugins" class="settings-nav-subsection"{% if oob %} hx-swap-oob="true"{% endif %}>
+    {% for item in plugins %}{% if item.has_settings %}
+    <a href="{% url 'dashboard:plugin_settings' item.id %}" class="sidebar-link sidebar-link-sub{% if item.id == plugin.id %} active{% endif %}">{{ item.name }}</a>
+    {% endif %}{% endfor %}
+</div>

@@ -1570,9 +1570,14 @@ mark.pr-hl-typo {
     margin-bottom: 32px;
 }
 
-.settings-section,
-.plugin-settings-section {
+.settings-section {
     scroll-margin-top: 24px;
+}
+
+.plugin-settings-link {
+    display: inline-block;
+    margin-top: 4px;
+    font-size: 13px;
 }
 
 .settings-section h2 {

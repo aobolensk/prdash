@@ -1,0 +1,24 @@
+{% extends 'dashboard/base.html' %}
+{% load plugin_tags %}
+
+{% block title %}{{ plugin.name }} Settings - PR Dashboard{% endblock %}
+
+{% block content %}
+<div class="settings-layout">
+    {% include 'dashboard/partials/_settings_nav.html' %}
+
+    <div class="settings-container">
+        <div class="settings-header">
+            <h1>{{ plugin.name }}</h1>
+            <a href="{% url 'dashboard:settings' %}#settings-plugins" class="btn btn-secondary" id="back-to-settings-link">Back to Settings</a>
+        </div>
+
+        <div class="settings-section">
+            {% if plugin.description %}
+            <p class="settings-description">{{ plugin.description }}</p>
+            {% endif %}
+            {% plugin_slot 'settings' only_plugin_id=plugin.id %}
+        </div>
+    </div>
+</div>
+{% endblock %}

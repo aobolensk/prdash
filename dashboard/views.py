@@ -736,6 +736,16 @@ def settings(request):
 
 
 @login_required
+def plugin_settings(request, plugin_id):
+    """Settings subpage holding the settings slot contribution of one enabled plugin."""
+    plugins = plugin_manager.plugin_statuses(request.user, request)
+    plugin = next((item for item in plugins if item['id'] == plugin_id and item['has_settings']), None)
+    if plugin is None:
+        raise Http404
+    return render(request, 'dashboard/plugin_settings.html', {'plugins': plugins, 'plugin': plugin})
+
+
+@login_required
 @require_POST
 def save_pat(request):
     """Save or update Personal Access Token."""
