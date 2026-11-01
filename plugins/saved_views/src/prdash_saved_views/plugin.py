@@ -181,7 +181,7 @@ class SavedViewsPlugin:
                 raise ValueError('Search pill is invalid')
             kind = pill.get('kind')
             pill_value = pill.get('value')
-            if kind not in PILL_KINDS or not isinstance(pill_value, str):
+            if not isinstance(kind, str) or kind not in PILL_KINDS or not isinstance(pill_value, str):
                 raise ValueError('Search pill is invalid')
             pill_value = pill_value.strip()
             if not pill_value or len(pill_value) > MAX_PILL_VALUE_LENGTH:

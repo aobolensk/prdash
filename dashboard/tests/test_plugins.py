@@ -1222,6 +1222,33 @@ class ReferencePluginIntegrationTests(TestCase):
             plugin_id='saved-views',
         ).exists())
 
+    def test_saved_search_category_rejects_non_string_pill_kind(self):
+        PluginConfiguration.objects.create(
+            user=self.user,
+            plugin_id='saved-views',
+            enabled=True,
+        )
+        url = reverse(
+            'dashboard:plugin_route',
+            kwargs={'plugin_id': 'saved-views', 'route': 'categories'},
+        )
+
+        for kind in ([], {}):
+            with self.subTest(kind=kind):
+                response = self.client.post(
+                    url,
+                    data=json.dumps({
+                        'name': 'Bad',
+                        'query': {
+                            'include': {'text': '', 'pills': [{'kind': kind, 'value': 'urgent'}]},
+                            'exclude': {'text': '', 'pills': []},
+                        },
+                    }),
+                    content_type='application/json',
+                )
+
+                self.assertEqual(response.status_code, 400)
+
     def test_saved_search_category_rejects_non_object_payload(self):
         PluginConfiguration.objects.create(
             user=self.user,
