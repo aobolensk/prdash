@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import requests
 from django.contrib.auth.models import User
 from django.http import Http404
 from django.template import Context, engines
@@ -1079,6 +1080,47 @@ class ReferencePluginIntegrationTests(TestCase):
             json.loads(response.headers['HX-Trigger'])['githubActionsRerunFailedJobsToast'],
             {
                 'message': 'OAuth App access is restricted by this organization.',
+                'type': 'error',
+            },
+        )
+
+    @patch('requests.put')
+    def test_rerun_plugin_reports_branch_update_network_errors(self, mock_put):
+        mock_put.side_effect = requests.exceptions.ConnectionError
+        plugin = self._plugin(
+            'github_actions_rerun_failed_jobs',
+            'prdash_github_actions_rerun_failed_jobs',
+            'GitHubActionsRerunFailedJobsPlugin',
+        )
+        response = plugin.update_branch(self._request_info('POST', form_params={
+            'owner': 'owner',
+            'repository': 'repo',
+            'pr_number': '123',
+        }), {})
+
+        self.assertEqual(
+            response.data,
+            {'outcome': 'error', 'message': 'GitHub could not update the branch.'},
+        )
+
+    @patch('requests.post')
+    def test_rerun_plugin_reports_rerun_network_errors_as_toasts(self, mock_post):
+        mock_post.side_effect = requests.exceptions.Timeout
+        plugin = self._plugin(
+            'github_actions_rerun_failed_jobs',
+            'prdash_github_actions_rerun_failed_jobs',
+            'GitHubActionsRerunFailedJobsPlugin',
+        )
+        response = plugin.rerun(self._request_info(
+            'POST',
+            form_params={'owner': 'owner', 'repository': 'repo'},
+            form_lists={'run_id': ['42']},
+        ), {})
+
+        self.assertEqual(
+            json.loads(response.headers['HX-Trigger'])['githubActionsRerunFailedJobsToast'],
+            {
+                'message': 'GitHub could not re-run the failed jobs.',
                 'type': 'error',
             },
         )

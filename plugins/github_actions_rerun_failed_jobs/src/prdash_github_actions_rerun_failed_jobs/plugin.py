@@ -93,11 +93,14 @@ class GitHubActionsRerunFailedJobsPlugin:
     @staticmethod
     def _attempt_update_branch(owner, repository, pr_number, token):
         headers = GitHubActionsRerunFailedJobsPlugin._api_headers(token)
-        response = requests.put(
-            f'https://api.github.com/repos/{owner}/{repository}/pulls/{pr_number}/update-branch',
-            headers=headers,
-            timeout=10,
-        )
+        try:
+            response = requests.put(
+                f'https://api.github.com/repos/{owner}/{repository}/pulls/{pr_number}/update-branch',
+                headers=headers,
+                timeout=10,
+            )
+        except requests.exceptions.RequestException:
+            return 'error', 'GitHub could not update the branch.'
         if response.status_code != 202:
             message = GitHubActionsRerunFailedJobsPlugin._error_message(response)
             return GitHubActionsRerunFailedJobsPlugin._classify(response, message), message
@@ -144,11 +147,14 @@ class GitHubActionsRerunFailedJobsPlugin:
     def _attempt_rerun(owner, repository, run_ids, token):
         headers = GitHubActionsRerunFailedJobsPlugin._api_headers(token)
         for run_id in sorted(set(run_ids), key=int):
-            response = requests.post(
-                f'https://api.github.com/repos/{owner}/{repository}/actions/runs/{run_id}/rerun-failed-jobs',
-                headers=headers,
-                timeout=10,
-            )
+            try:
+                response = requests.post(
+                    f'https://api.github.com/repos/{owner}/{repository}/actions/runs/{run_id}/rerun-failed-jobs',
+                    headers=headers,
+                    timeout=10,
+                )
+            except requests.exceptions.RequestException:
+                return 'error', 'GitHub could not re-run the failed jobs.'
             if response.status_code != 201:
                 message = GitHubActionsRerunFailedJobsPlugin._error_message(response)
                 return GitHubActionsRerunFailedJobsPlugin._classify(response, message), message
