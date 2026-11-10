@@ -51,7 +51,7 @@
 
         <script type="application/json" id="velocityData">
         {
-            "labels": [{% for period in velocity_stats.period_data %}"{{ period.period_start|date:'M j' }}"{% if not forloop.last %}, {% endif %}{% endfor %}],
+            "labels": [{% for period in velocity_stats.period_data %}"{{ period.period_start|date:'M j' }}{% if days == -1 %}, {{ period.period_start|date:'Y' }}{% endif %}"{% if not forloop.last %}, {% endif %}{% endfor %}],
             "opened": [{% for period in velocity_stats.period_data %}{{ period.opened }}{% if not forloop.last %}, {% endif %}{% endfor %}],
             "merged": [{% for period in velocity_stats.period_data %}{{ period.merged }}{% if not forloop.last %}, {% endif %}{% endfor %}],
             "linesAdded": [{% for period in velocity_stats.period_data %}{{ period.lines_added }}{% if not forloop.last %}, {% endif %}{% endfor %}],

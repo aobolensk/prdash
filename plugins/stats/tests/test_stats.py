@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+import json
 from pathlib import Path
 import sys
 from unittest.mock import patch
@@ -11,6 +13,7 @@ sys.path.insert(0, str(SRC_DIR))
 
 from prdash_stats.stats_service import (  # noqa: E402
     HealthStats,
+    PeriodData,
     QuickStats,
     RepoStats,
     StatsService,
@@ -49,6 +52,30 @@ class StatsServiceTests(SimpleTestCase):
 
 
 class StatsTemplateTests(SimpleTestCase):
+    def test_velocity_labels_include_year_for_all_time(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / 'src'
+            / 'prdash_stats'
+            / 'templates'
+            / 'content.html'
+        ).read_text()
+        template = engines['django'].from_string(source)
+        velocity_stats = VelocityStats(period_data=[
+            PeriodData(period_start=datetime(2020, 1, 6, tzinfo=timezone.utc)),
+            PeriodData(period_start=datetime(2025, 1, 6, tzinfo=timezone.utc)),
+        ])
+
+        for days, labels in (
+            (-1, ['Jan 6, 2020', 'Jan 6, 2025']),
+            (30, ['Jan 6', 'Jan 6']),
+        ):
+            with self.subTest(days=days):
+                rendered = template.render({'days': days, 'velocity_stats': velocity_stats})
+                chart_json = rendered.split('<script type="application/json" id="velocityData">', 1)[1]
+                chart_data = json.loads(chart_json.split('</script>', 1)[0])
+                self.assertEqual(chart_data['labels'], labels)
+
     def test_failed_sections_are_rendered_without_zero_like_values(self):
         source = (
             Path(__file__).resolve().parents[1]
