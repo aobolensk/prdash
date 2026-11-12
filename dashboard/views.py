@@ -1,5 +1,6 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import Http404, HttpResponse, HttpResponseNotModified, JsonResponse, StreamingHttpResponse
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_http_methods, require_POST
 from django.core.cache import cache
@@ -19,7 +20,10 @@ import re
 import requests
 import threading
 
-from .models import TrackedRepository, PersonalAccessToken, UserPreferences, AUTO_REFRESH_CATEGORIES
+from .models import (
+    TrackedRepository, RepositoryProfile, PersonalAccessToken, UserPreferences, AUTO_REFRESH_CATEGORIES,
+)
+from .middleware import ACTIVE_PROFILE_SESSION_KEY
 from .github_client import GitHubClient
 from .plugin_manager import plugin_manager
 from prdash.plugin_api import (
@@ -82,14 +86,13 @@ def _invalidate_pr_results_cache(user):
     cache.incr(key)
 
 
-def _invalidate_repo_edit_caches(user):
+def _invalidate_repo_edit_caches(user, profile):
     """Invalidate PR results and tab counts after a tracked repository changes."""
     _invalidate_pr_results_cache(user)
-    cache.delete_many([
-        f"pr_count:{user.id}:my_prs",
-        f"pr_count:{user.id}:review_requests",
-        f"pr_count:{user.id}:assigned",
-    ])
+    tabs = ('my_prs', 'review_requests', 'assigned')
+    count_keys = [f"pr_count:{user.id}:{tab}" for tab in tabs]
+    count_keys.extend(f"pr_count:{user.id}:{profile.id}:{tab}" for tab in tabs)
+    cache.delete_many(count_keys)
 
 
 def _get_user_preferences(user):
@@ -163,11 +166,11 @@ def _query_cache_vary(query, author=None):
     return hashlib.sha256(json.dumps(cache_vary, sort_keys=True).encode()).hexdigest()
 
 
-def _cached_pr_counts(user):
+def _cached_pr_counts(user, profile):
     return {
-        'my_prs': cache.get(f"pr_count:{user.id}:my_prs"),
-        'review_requests': cache.get(f"pr_count:{user.id}:review_requests"),
-        'assigned': cache.get(f"pr_count:{user.id}:assigned"),
+        'my_prs': cache.get(f"pr_count:{user.id}:{profile.id}:my_prs"),
+        'review_requests': cache.get(f"pr_count:{user.id}:{profile.id}:review_requests"),
+        'assigned': cache.get(f"pr_count:{user.id}:{profile.id}:assigned"),
     }
 
 
@@ -193,12 +196,12 @@ def _render_pr_list_page(request, context):
     return response
 
 
-def _pr_list_shell(request, repos, active_tab, owner, repo, plugin_page, query, author):
+def _pr_list_shell(request, repos, active_tab, owner, repo, plugin_page, query, author, profile):
     """Serve everything except the PR list right away. The list loads via hx-trigger="load"."""
     current_repo = None
     if owner and repo:
         current_repo = get_object_or_404(
-            TrackedRepository, user=request.user, owner=owner, name=repo
+            TrackedRepository, user=request.user, profile=profile, owner=owner, name=repo
         )
     user_prefs = _get_user_preferences(request.user)
     context = {
@@ -211,7 +214,7 @@ def _pr_list_shell(request, repos, active_tab, owner, repo, plugin_page, query, 
         'auto_refresh_enabled': user_prefs.is_auto_refresh_enabled_for_tab(active_tab),
         'auto_refresh_interval': user_prefs.get_auto_refresh_interval_seconds_for_tab(active_tab),
         'auto_refresh_interval_mins': user_prefs.get_auto_refresh_interval_for_tab(active_tab),
-        'pr_counts': _cached_pr_counts(request.user),
+        'pr_counts': _cached_pr_counts(request.user, profile),
         'page_title': _pr_list_page_title(active_tab, plugin_page, current_repo),
         'plugin_page': plugin_page,
         'defer_content_url': request.get_full_path(),
@@ -235,7 +238,8 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         post_filter_factory: Optional callable(client) -> post_filter function
         plugin_page: The plugin PR list page being served, from plugin_manager.pr_list_page
     """
-    repos = TrackedRepository.objects.filter(user=request.user)
+    profile = request.repository_profile
+    repos = TrackedRepository.objects.filter(user=request.user, profile=profile)
     fetch_on_demand = bool(plugin_page and plugin_page['fetch_on_demand'])
 
     client = GitHubClient(request.user)
@@ -247,7 +251,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
     if author_required:
         author = request.GET.get('author', '').strip() or None
     if request.headers.get('HX-Request') != 'true' and not fetch_on_demand:
-        return _pr_list_shell(request, repos, active_tab, owner, repo, plugin_page, query, author)
+        return _pr_list_shell(request, repos, active_tab, owner, repo, plugin_page, query, author, profile)
 
     fetch_options = dict(base_fetch_options or {})
     fetch_options.update(query.fetch_options)
@@ -260,13 +264,13 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
 
     if owner and repo:
         current_repo = get_object_or_404(
-            TrackedRepository, user=request.user, owner=owner, name=repo
+            TrackedRepository, user=request.user, profile=profile, owner=owner, name=repo
         )
         prs = fetch_prs(client, owner, repo, fetch_options) if author or not author_required else []
         repo_changed = f'{owner}/{repo}'
     elif fetch_on_demand:
         current_repo = None
-        pr_fetch = _pr_fetch_context(request.user, plugin_page, query_cache_vary)
+        pr_fetch = _pr_fetch_context(request.user, profile, plugin_page, query_cache_vary)
         prs = list(pr_fetch['snapshot']['prs']) if pr_fetch['snapshot'] else []
         repo_changed = ''
     else:
@@ -277,7 +281,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         repo_changed = ''
 
     results_cache_key = (
-        f"pr_results:{request.user.id}:{cache_gen}:{request.path}:"
+        f"pr_results:{request.user.id}:{profile.id}:{cache_gen}:{request.path}:"
         f"{query_cache_vary}"
     )
     fetch_had_issues = bool(client.errors or client.warnings)
@@ -320,7 +324,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
     cache_key_suffix = tab_to_cache_key.get(active_tab)
     if cache_key_suffix and not current_repo and not query.affects_count:
         # Only cache when viewing all repos with no filters
-        count_cache_key = f"pr_count:{request.user.id}:{cache_key_suffix}"
+        count_cache_key = f"pr_count:{request.user.id}:{profile.id}:{cache_key_suffix}"
         cache.set(count_cache_key, len(prs), PR_COUNT_CACHE_TTL)
 
     page_obj = None
@@ -335,7 +339,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         page_obj = paginator.page(page_number)
         prs = page_obj.object_list
 
-    pr_counts = _cached_pr_counts(request.user)
+    pr_counts = _cached_pr_counts(request.user, profile)
     page_title = _pr_list_page_title(active_tab, plugin_page, current_repo)
 
     render_hash = _compute_pr_render_hash(
@@ -571,9 +575,9 @@ def plugin_pr_list(request, plugin_id, name):
     )
 
 
-def _pr_fetch_key(user, page, query_cache_vary):
+def _pr_fetch_key(user, profile, page, query_cache_vary):
     cache_gen = cache.get(f"pr_results_gen:{user.id}", 0)
-    return f"{user.id}:{cache_gen}:{page['tab']}:{query_cache_vary}"
+    return f"{user.id}:{profile.id}:{cache_gen}:{page['tab']}:{query_cache_vary}"
 
 
 def _pr_fetch_job(key):
@@ -588,8 +592,8 @@ def _pr_fetch_job(key):
     return state
 
 
-def _pr_fetch_context(user, page, query_cache_vary):
-    key = _pr_fetch_key(user, page, query_cache_vary)
+def _pr_fetch_context(user, profile, page, query_cache_vary):
+    key = _pr_fetch_key(user, profile, page, query_cache_vary)
     return {
         'url': reverse('dashboard:plugin_pr_list_fetch', args=[page['plugin_id'], page['name']]),
         'snapshot': cache.get(f'pr_snapshot:{key}'),
@@ -651,10 +655,14 @@ def plugin_pr_list_fetch(request, plugin_id, name):
     page = plugin_manager.pr_list_page(request.user, plugin_id, name, request)
     if page is None or not page['fetch_on_demand'] or page['source'] not in _PLUGIN_PAGE_FETCHERS:
         raise Http404
+    profile = request.repository_profile
     _, query = _run_pr_list_query(request, GitHubClient(request.user).get_username(), page['tab'])
-    key = _pr_fetch_key(request.user, page, _query_cache_vary(query))
+    key = _pr_fetch_key(request.user, profile, page, _query_cache_vary(query))
     if request.method == 'POST':
-        repo_tuples = [(r.owner, r.name) for r in TrackedRepository.objects.filter(user=request.user, enabled=True)]
+        repo_tuples = [
+            (r.owner, r.name)
+            for r in TrackedRepository.objects.filter(user=request.user, profile=profile, enabled=True)
+        ]
         _start_pr_fetch(request.user, key, _PLUGIN_PAGE_FETCHERS[page['source']], repo_tuples, query.fetch_options)
     response = JsonResponse(_pr_fetch_job(key) or {'state': 'idle'})
     add_never_cache_headers(response)
@@ -663,13 +671,64 @@ def plugin_pr_list_fetch(request, plugin_id, name):
 
 def _render_repo_list(request, trigger='repoToggled', errors=None):
     """Render the repo list partial with appropriate HX-Trigger."""
-    repos = TrackedRepository.objects.filter(user=request.user)
+    profile = request.repository_profile
+    repos = TrackedRepository.objects.filter(user=request.user, profile=profile)
     response = render(request, 'dashboard/partials/_repo_list.html', {'repos': repos})
     if errors:
         response['HX-Trigger'] = json.dumps({'showErrors': errors})
     else:
         response['HX-Trigger'] = trigger
     return response
+
+
+@login_required
+@require_POST
+def add_profile(request):
+    """Create and activate a repository profile."""
+    name = request.POST.get('name', '').strip()
+    if not name:
+        messages.error(request, 'Enter a profile name.')
+        return redirect('dashboard:pr_list')
+    if len(name) > 100:
+        messages.error(request, 'Profile names must be 100 characters or fewer.')
+        return redirect('dashboard:pr_list')
+    if RepositoryProfile.objects.filter(user=request.user, name__iexact=name).exists():
+        messages.error(request, 'A profile with that name already exists.')
+        return redirect('dashboard:pr_list')
+
+    profile = RepositoryProfile.objects.create(user=request.user, name=name)
+    request.session[ACTIVE_PROFILE_SESSION_KEY] = profile.id
+    messages.success(request, f'Profile {profile.name} created.')
+    return redirect('dashboard:pr_list')
+
+
+@login_required
+@require_POST
+def activate_profile(request):
+    """Make one of the current user's repository profiles active."""
+    profile = get_object_or_404(
+        RepositoryProfile, id=request.POST.get('profile_id'), user=request.user,
+    )
+    request.session[ACTIVE_PROFILE_SESSION_KEY] = profile.id
+    return redirect('dashboard:pr_list')
+
+
+@login_required
+@require_POST
+def delete_profile(request, profile_id):
+    """Delete one profile and its repository list, keeping at least one profile."""
+    profile = get_object_or_404(RepositoryProfile, id=profile_id, user=request.user)
+    profiles = RepositoryProfile.objects.filter(user=request.user)
+    next_profile = profiles.exclude(id=profile.id).first()
+    if next_profile is None:
+        messages.error(request, 'Keep at least one repository profile.')
+        return redirect('dashboard:pr_list')
+
+    profile.delete()
+    request.session[ACTIVE_PROFILE_SESSION_KEY] = next_profile.id
+    _invalidate_repo_edit_caches(request.user, profile)
+    messages.success(request, f'Profile {profile.name} deleted.')
+    return redirect('dashboard:pr_list')
 
 
 @login_required
@@ -689,13 +748,14 @@ def add_repo(request):
 
     repo, created = TrackedRepository.objects.get_or_create(
         user=request.user,
+        profile=request.repository_profile,
         owner=owner,
         name=name
     )
     if not created:
         return _render_repo_list(request, errors=['Repository already tracked'])
 
-    _invalidate_repo_edit_caches(request.user)
+    _invalidate_repo_edit_caches(request.user, repo.profile)
     return _render_repo_list(request)
 
 
@@ -703,9 +763,10 @@ def add_repo(request):
 @require_POST
 def remove_repo(request, repo_id):
     """Remove a tracked repository."""
-    repo = get_object_or_404(TrackedRepository, id=repo_id, user=request.user)
+    profile = request.repository_profile
+    repo = get_object_or_404(TrackedRepository, id=repo_id, user=request.user, profile=profile)
     repo.delete()
-    _invalidate_repo_edit_caches(request.user)
+    _invalidate_repo_edit_caches(request.user, profile)
     return _render_repo_list(request)
 
 
@@ -713,10 +774,11 @@ def remove_repo(request, repo_id):
 @require_POST
 def toggle_repo(request, repo_id):
     """Toggle a repository's enabled state."""
-    repo = get_object_or_404(TrackedRepository, id=repo_id, user=request.user)
+    profile = request.repository_profile
+    repo = get_object_or_404(TrackedRepository, id=repo_id, user=request.user, profile=profile)
     repo.enabled = not repo.enabled
     repo.save()
-    _invalidate_repo_edit_caches(request.user)
+    _invalidate_repo_edit_caches(request.user, profile)
     return _render_repo_list(request)
 
 

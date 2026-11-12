@@ -25,9 +25,31 @@ class PersonalAccessToken(models.Model):
         return "****"
 
 
+class RepositoryProfile(models.Model):
+    """A named repository list belonging to one user account."""
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='repository_profiles')
+    name = models.CharField(max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'name'], name='unique_user_repository_profile_name'),
+        ]
+        ordering = ['name', 'id']
+
+    def __str__(self):
+        return f"{self.name} for {self.user.username}"
+
+
 class TrackedRepository(models.Model):
     """A GitHub repository tracked by a user."""
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='tracked_repos')
+    profile = models.ForeignKey(
+        RepositoryProfile,
+        on_delete=models.CASCADE,
+        related_name='repositories',
+    )
     owner = models.CharField(max_length=255, help_text="GitHub username or organization")
     name = models.CharField(max_length=255, help_text="Repository name")
     enabled = models.BooleanField(default=True, help_text="Whether to include in PR fetching")
@@ -35,8 +57,26 @@ class TrackedRepository(models.Model):
 
     class Meta:
         verbose_name_plural = "Tracked repositories"
-        unique_together = ['user', 'owner', 'name']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['profile', 'owner', 'name'],
+                name='unique_profile_tracked_repository',
+            ),
+        ]
         ordering = ['owner', 'name']
+
+    def save(self, *args, **kwargs):
+        if self.profile_id is None and self.user_id is not None:
+            self.profile, _ = RepositoryProfile.objects.get_or_create(
+                user_id=self.user_id,
+                name='Default',
+            )
+        elif self.profile_id is not None:
+            profile_user_id = self.profile.user_id
+            if self.user_id is not None and self.user_id != profile_user_id:
+                raise ValueError('Tracked repository user must own its profile')
+            self.user_id = profile_user_id
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.owner}/{self.name}"

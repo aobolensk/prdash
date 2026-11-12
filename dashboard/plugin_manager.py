@@ -366,7 +366,7 @@ class PluginManager:
                 worker.popen.kill()
                 worker.popen.wait(timeout=SHUTDOWN_TIMEOUT)
 
-    def _call_loop(self, worker, call_id, timeout, callback_user_id=None):
+    def _call_loop(self, worker, call_id, timeout, callback_user_id=None, callback_profile_id=None):
         """Yield stream_chunks, result via StopIteration.value. Timeout resets per message: max-silence, not total."""
         while True:
             message = read_message(worker.popen.stdout, timeout=timeout)
@@ -378,14 +378,17 @@ class PluginManager:
                     raise PluginCallError(message.get('error') or 'Plugin call failed')
                 return message.get('result', {})
             if msg_type == 'callback':
-                self._service_callback(worker, message, callback_user_id)
+                self._service_callback(worker, message, callback_user_id, callback_profile_id)
                 continue
             if msg_type == 'stream_chunk':
                 yield message.get('chunk', {})
                 continue
             raise ProtocolError(f'Unexpected plugin worker message type: {msg_type!r}')
 
-    def _call(self, worker, op, params, timeout=DEFAULT_CALL_TIMEOUT, callback_user_id=None):
+    def _call(
+        self, worker, op, params, timeout=DEFAULT_CALL_TIMEOUT, callback_user_id=None,
+        callback_profile_id=None,
+    ):
         with worker.lock:
             if worker.dead:
                 raise PluginWorkerGone('Plugin worker is no longer running')
@@ -394,7 +397,7 @@ class PluginManager:
                 write_message(worker.popen.stdin, {
                     'type': 'call', 'id': call_id, 'op': op, 'params': params,
                 })
-                loop = self._call_loop(worker, call_id, timeout, callback_user_id)
+                loop = self._call_loop(worker, call_id, timeout, callback_user_id, callback_profile_id)
                 while True:
                     try:
                         next(loop)
@@ -406,6 +409,7 @@ class PluginManager:
 
     def _call_streaming(
         self, worker, op, params, timeout=DEFAULT_CALL_TIMEOUT, callback_user_id=None,
+        callback_profile_id=None,
     ):
         """Like _call, but yields ('chunk', dict) per chunk then ('result', dict); holds worker.lock until the
         caller fully consumes or closes it."""
@@ -417,7 +421,7 @@ class PluginManager:
                 write_message(worker.popen.stdin, {
                     'type': 'call', 'id': call_id, 'op': op, 'params': params,
                 })
-                loop = self._call_loop(worker, call_id, timeout, callback_user_id)
+                loop = self._call_loop(worker, call_id, timeout, callback_user_id, callback_profile_id)
                 while True:
                     try:
                         chunk = next(loop)
@@ -429,7 +433,7 @@ class PluginManager:
                 worker.dead = True
                 raise PluginCallError(str(error)) from error
 
-    def _service_callback(self, worker, message, callback_user_id=None):
+    def _service_callback(self, worker, message, callback_user_id=None, callback_profile_id=None):
         callback_id = message.get('id')
         try:
             result = self._handle_callback(
@@ -437,6 +441,7 @@ class PluginManager:
                 message.get('op'),
                 message.get('params') or {},
                 callback_user_id,
+                callback_profile_id,
             )
             write_message(worker.popen.stdin, {
                 'type': 'callback_result', 'id': callback_id, 'ok': True, 'result': result,
@@ -466,7 +471,7 @@ class PluginManager:
                 f'Plugin {plugin_id!r} may only call services of plugins it depends on'
             )
 
-    def _handle_callback(self, worker, op, params, callback_user_id=None):
+    def _handle_callback(self, worker, op, params, callback_user_id=None, callback_profile_id=None):
         """Execute one callback for the active host user and this worker's plugin_id."""
         plugin_id = worker.plugin_id
         if op not in _USER_SCOPED_CALLBACKS:
@@ -509,8 +514,11 @@ class PluginManager:
             from .github_client import GitHubClient
             return {'token': GitHubClient(user)._get_token()}
         if op == 'list_tracked_repositories':
-            from .models import TrackedRepository
-            repos = TrackedRepository.objects.filter(user=user)
+            from .models import RepositoryProfile, TrackedRepository
+            profile = RepositoryProfile.objects.filter(user=user, id=callback_profile_id).first()
+            if profile is None:
+                profile = RepositoryProfile.objects.filter(user=user).first()
+            repos = TrackedRepository.objects.filter(user=user, profile=profile)
             if params.get('enabled_only'):
                 repos = repos.filter(enabled=True)
             return {'repos': [
@@ -518,7 +526,10 @@ class PluginManager:
                 for repo in repos
             ]}
         if op == 'call_service':
-            result = self.get_service(user, params['plugin_id'], params['name'], params.get('args', {}))
+            result = self.get_service(
+                user, params['plugin_id'], params['name'], params.get('args', {}),
+                callback_profile_id=callback_profile_id,
+            )
             return {'result': result}
         if op == 'get_username':
             from .github_client import GitHubClient
@@ -544,6 +555,10 @@ class PluginManager:
         if user is None or not getattr(user, 'is_authenticated', False):
             return None
         return user.pk
+
+    @staticmethod
+    def _callback_profile_id(request):
+        return getattr(getattr(request, 'repository_profile', None), 'pk', None)
 
     @staticmethod
     def _get_user(user_id):
@@ -1127,6 +1142,7 @@ class PluginManager:
         current_value = value
         callback_user = getattr(request, 'user', None) if request is not None else user
         callback_user_id = self._callback_user_id(callback_user)
+        callback_profile_id = self._callback_profile_id(request)
         for _priority, plugin_id, config, worker in sorted(entries, key=lambda item: item[:2]):
             try:
                 result = self._call(worker, 'invoke_hook', {
@@ -1135,7 +1151,7 @@ class PluginManager:
                     'context': context_payload,
                     'config': config,
                     '_callback_user_id': callback_user_id,
-                }, callback_user_id=callback_user_id)
+                }, callback_user_id=callback_user_id, callback_profile_id=callback_profile_id)
                 new_value = result.get('value')
                 if new_value is not None:
                     if name == PR_LIST_PROCESS_HOOK:
@@ -1210,6 +1226,7 @@ class PluginManager:
         base_context.update(extra_context)
         request_info = self._request_info_dict(request)
         callback_user_id = self._callback_user_id(user)
+        callback_profile_id = self._callback_profile_id(request)
         rendered = []
         for _order, plugin_id, index, ui, worker in sorted(contributions, key=lambda item: item[:3]):
             config = dict(states[plugin_id].config)
@@ -1226,7 +1243,7 @@ class PluginManager:
                         'request': request_info,
                         'config': config,
                         '_callback_user_id': callback_user_id,
-                    }, callback_user_id=callback_user_id)
+                    }, callback_user_id=callback_user_id, callback_profile_id=callback_profile_id)
                     provided = result.get('context', {})
                     if not isinstance(provided, Mapping):
                         raise TypeError('Plugin UI context providers must return a mapping')
@@ -1253,6 +1270,7 @@ class PluginManager:
             return HttpResponseServerError('')
         config = dict(self._state_map(request.user, request)[plugin_id].config)
         callback_user_id = self._callback_user_id(getattr(request, 'user', None))
+        callback_profile_id = self._callback_profile_id(request)
         route_params = {
             'route': route,
             'request': self._request_info_dict(request),
@@ -1268,6 +1286,7 @@ class PluginManager:
                         route_params,
                         timeout=DEFAULT_ROUTE_TIMEOUT,
                         callback_user_id=callback_user_id,
+                        callback_profile_id=callback_profile_id,
                     )
                     break
                 except PluginWorkerGone:
@@ -1298,6 +1317,7 @@ class PluginManager:
             return
         config = dict(self._state_map(request.user, request)[plugin_id].config)
         callback_user_id = self._callback_user_id(getattr(request, 'user', None))
+        callback_profile_id = self._callback_profile_id(request)
         route_params = {
             'route': route,
             'request': self._request_info_dict(request),
@@ -1313,6 +1333,7 @@ class PluginManager:
                         route_params,
                         timeout=DEFAULT_ROUTE_TIMEOUT,
                         callback_user_id=callback_user_id,
+                        callback_profile_id=callback_profile_id,
                     ):
                         if kind == 'chunk':
                             yield {'chunk': payload}
@@ -1393,7 +1414,7 @@ class PluginManager:
                 http_response[key] = value
             return http_response
 
-    def get_service(self, user, plugin_id, name, args=None, request=None):
+    def get_service(self, user, plugin_id, name, args=None, request=None, callback_profile_id=None):
         """Call an enabled plugin service by its scoped name and return its result."""
         enabled_ids = self._enabled_ids(user, request)
         if plugin_id not in enabled_ids:
@@ -1414,6 +1435,7 @@ class PluginManager:
                     '_callback_user_id': self._callback_user_id(callback_user),
                 },
                 callback_user_id=self._callback_user_id(callback_user),
+                callback_profile_id=callback_profile_id or self._callback_profile_id(request),
             )
             return result.get('result')
         except PluginCallError:

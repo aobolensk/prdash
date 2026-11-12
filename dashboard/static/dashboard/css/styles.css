@@ -120,6 +120,57 @@ a:hover {
     border-radius: 50%;
 }
 
+.profile-menu {
+    position: relative;
+}
+
+.profile-menu-trigger {
+    display: flex;
+    align-items: center;
+    list-style: none;
+    cursor: pointer;
+    padding: 6px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--color-text-muted);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.profile-menu-trigger::-webkit-details-marker {
+    display: none;
+}
+
+.profile-menu-trigger::marker {
+    content: '';
+}
+
+.profile-menu-trigger:hover {
+    background-color: var(--color-bg-tertiary);
+    border-color: var(--color-border);
+    color: var(--color-text);
+}
+
+.profile-menu-panel {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 30;
+    width: 260px;
+    padding: 12px;
+    background-color: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px var(--color-shadow);
+}
+
+.profile-menu-label {
+    margin-bottom: 8px;
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+}
+
 /* Buttons */
 .btn {
     display: inline-flex;
@@ -420,6 +471,41 @@ a:hover {
 
 .add-repo-form .btn {
     flex-shrink: 0;
+}
+
+.profile-select-form,
+.profile-select-form .filter-select {
+    width: 100%;
+}
+
+.add-profile-form {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.add-profile-form .input {
+    flex: 1;
+    min-width: 0;
+}
+
+.add-profile-form .btn {
+    flex-shrink: 0;
+}
+
+.profile-delete-btn {
+    margin-top: 8px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--color-danger);
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+}
+
+.profile-delete-btn:hover {
+    text-decoration: underline;
 }
 
 /* Repo list */
