@@ -45,9 +45,9 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
+    'dashboard',
     'django.contrib.staticfiles',
     'django.contrib.sites',
-    'dashboard',
     # Third-party apps
     'allauth',
     'allauth.account',
