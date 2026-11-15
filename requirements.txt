@@ -1,6 +1,6 @@
 cryptography==50.0.0
 Django==6.0.8
-django-allauth==65.21.0
+django-allauth==65.21.1
 django-htmx==1.29.0
 packaging==26.3
 PyGithub==2.10.0
