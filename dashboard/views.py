@@ -10,9 +10,11 @@ from django.db import connections
 from django.urls import reverse
 from django.utils.cache import add_never_cache_headers, patch_vary_headers
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.utils.http import http_date
 from django.views.static import was_modified_since
 from dataclasses import asdict
+from datetime import timedelta
 import hashlib
 import json
 import logging
@@ -27,6 +29,7 @@ from .models import (
     TrackedRepository,
     RepositoryProfile,
     PersonalAccessToken,
+    PullRequestReadState,
     UserPreferences,
     AUTO_REFRESH_CATEGORIES,
 )
@@ -61,7 +64,7 @@ _pr_fetch_jobs_lock = threading.Lock()
 
 def _compute_pr_render_hash(
     prs, *, auto_refresh_enabled, auto_refresh_interval, current_username, page_number, stale_data, render_path,
-    pr_fetch=None,
+    unread_pr_keys, pr_fetch=None,
 ):
     """Hash the data that determines the rendered _pr_content.html output for a poll.
 
@@ -78,6 +81,7 @@ def _compute_pr_render_hash(
             'page_number': page_number,
             'stale_data': stale_data,
             'render_path': render_path,
+            'unread_pr_keys': sorted(unread_pr_keys),
             'pr_fetch': pr_fetch and {
                 'snapshot': pr_fetch['snapshot'] and {
                     'fetched_at': pr_fetch['snapshot']['fetched_at'],
@@ -371,6 +375,47 @@ def _cached_pr_counts(user, profile):
     }
 
 
+def _unread_pr_keys(user, prs):
+    updated_at_by_pr = {
+        (pr.repo_full_name.casefold(), pr.number): pr.updated_at
+        for pr in prs
+    }
+    repo_names = {repo_full_name for repo_full_name, _ in updated_at_by_pr}
+    states = {
+        (state.repo_full_name, state.pr_number): state
+        for state in PullRequestReadState.objects.filter(
+            user=user,
+            repo_full_name__in=repo_names,
+        )
+    }
+
+    missing_states = [
+        PullRequestReadState(
+            user=user,
+            repo_full_name=repo_full_name,
+            pr_number=number,
+            first_seen_updated_at=updated_at,
+        )
+        for (repo_full_name, number), updated_at in updated_at_by_pr.items()
+        if (repo_full_name, number) not in states
+    ]
+    if missing_states:
+        PullRequestReadState.objects.bulk_create(missing_states, ignore_conflicts=True)
+        states = {
+            (state.repo_full_name, state.pr_number): state
+            for state in PullRequestReadState.objects.filter(
+                user=user,
+                repo_full_name__in=repo_names,
+            )
+        }
+
+    return {
+        identity
+        for identity, updated_at in updated_at_by_pr.items()
+        if updated_at > (states[identity].read_updated_at or states[identity].first_seen_updated_at)
+    }
+
+
 def _pr_list_page_title(active_tab, plugin_page, current_repo):
     tab_titles = {
         'review_requests': 'Review Requests',
@@ -524,6 +569,8 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         count_cache_key = f"pr_count:{request.user.id}:{profile.id}:{cache_key_suffix}"
         cache.set(count_cache_key, len(prs), PR_COUNT_CACHE_TTL)
 
+    unread_pr_keys = _unread_pr_keys(request.user, prs)
+
     page_obj = None
     page_size = user_prefs.pr_list_page_size
     if page_size:
@@ -547,6 +594,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         page_number=page_obj.number if page_obj else None,
         stale_data=stale_data,
         render_path=request.get_full_path(),
+        unread_pr_keys=unread_pr_keys,
         pr_fetch=pr_fetch,
     )
 
@@ -559,6 +607,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         'current_username': current_username,
         'filters': query.parameters,
         'has_active_filters': query.affects_count,
+        'unread_pr_keys': unread_pr_keys,
         'errors': client.errors,
         'warnings': client.warnings,
         'auto_refresh_enabled': user_prefs.is_auto_refresh_enabled_for_tab(active_tab),
@@ -602,6 +651,36 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         return response
 
     return _render_pr_list_page(request, context)
+
+
+@login_required
+@require_POST
+def update_pr_read_state(request):
+    repo_full_name = request.POST.get('repo_full_name', '').strip()
+    parts = repo_full_name.split('/')
+    try:
+        pr_number = int(request.POST.get('pr_number', ''))
+    except (TypeError, ValueError):
+        return JsonResponse({'error': 'Invalid pull request number'}, status=400)
+    updated_at = parse_datetime(request.POST.get('updated_at', ''))
+
+    if len(parts) != 2 or not all(parts) or len(repo_full_name) > 511 or pr_number < 1:
+        return JsonResponse({'error': 'Invalid pull request'}, status=400)
+    action = request.POST.get('action')
+    if action not in {'read', 'unread'} or not updated_at:
+        return JsonResponse({'error': 'Invalid read state'}, status=400)
+    if timezone.is_naive(updated_at):
+        updated_at = timezone.make_aware(updated_at)
+
+    state, _ = PullRequestReadState.objects.get_or_create(
+        user=request.user,
+        repo_full_name=repo_full_name.casefold(),
+        pr_number=pr_number,
+        defaults={'first_seen_updated_at': updated_at},
+    )
+    state.read_updated_at = updated_at if action == 'read' else updated_at - timedelta(microseconds=1)
+    state.save(update_fields=['read_updated_at'])
+    return HttpResponse(status=204)
 
 
 @login_required

@@ -1,6 +1,18 @@
 {% load dashboard_tags plugin_tags %}
 
-<article class="pr-card" data-search="{{ pr|pr_search_haystack }}" data-repo="{{ pr.repo_full_name }}" data-labels="{% for label in pr.labels %}{{ label.name }}{% if not forloop.last %}|{% endif %}{% endfor %}" data-author="{{ pr.author }}" data-status="{{ pr|pr_status_filters }}">
+<article class="pr-card{% if pr|pr_read_key in unread_pr_keys %} pr-card-unread{% endif %}"
+         data-search="{{ pr|pr_search_haystack }}" data-repo="{{ pr.repo_full_name }}" data-labels="{% for label in pr.labels %}{{ label.name }}{% if not forloop.last %}|{% endif %}{% endfor %}" data-author="{{ pr.author }}" data-status="{{ pr|pr_status_filters }}">
+    {% if not guest_mode %}
+    <form action="{% url 'dashboard:update_pr_read_state' %}" method="post" class="pr-read-state-form" hidden>
+        {% csrf_token %}
+        <input type="hidden" name="repo_full_name" value="{{ pr.repo_full_name }}">
+        <input type="hidden" name="pr_number" value="{{ pr.number }}">
+        <input type="hidden" name="updated_at" value="{{ pr.updated_at|date:'c' }}">
+        <input type="hidden" name="action" value="read">
+    </form>
+    <button type="button" class="pr-unread-toggle" aria-label="Mark pull request unread"
+            title="Mark pull request unread"></button>
+    {% endif %}
     <div class="pr-card-header">
         {% if pr.ci_status.total_count > 0 %}<a href="{{ pr.url }}/checks" target="_blank" rel="noopener"{% else %}<div{% endif %}
             class="pr-ci-status pr-ci-{{ pr.ci_status.state }}"

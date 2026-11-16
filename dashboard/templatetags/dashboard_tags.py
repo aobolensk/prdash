@@ -132,3 +132,9 @@ def pr_search_haystack(pr):
 @register.filter
 def pr_status_filters(pr):
     return '|'.join(status_filters(pr))
+
+
+@register.filter
+def pr_read_key(pr):
+    """Return the normalized repository and number key used by PR read state."""
+    return pr.repo_full_name.casefold(), pr.number

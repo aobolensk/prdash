@@ -176,6 +176,27 @@ class PluginUserSecret(models.Model):
         return f"{self.plugin_id}:{self.key} for {self.user.username}"
 
 
+class PullRequestReadState(models.Model):
+    """Per-user read state for a pull request."""
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='pr_read_states')
+    repo_full_name = models.CharField(max_length=511)
+    pr_number = models.PositiveIntegerField()
+    first_seen_updated_at = models.DateTimeField()
+    read_updated_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'repo_full_name', 'pr_number'],
+                name='unique_user_pr_read_state',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.repo_full_name}#{self.pr_number} for {self.user.username}"
+
+
 AUTO_REFRESH_INTERVAL_CHOICES = [
     (1, '1 minute'), (2, '2 minutes'), (5, '5 minutes'), (10, '10 minutes'),
     (15, '15 minutes'), (30, '30 minutes'), (60, '1 hour'),

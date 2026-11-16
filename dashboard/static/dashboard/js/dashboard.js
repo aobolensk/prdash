@@ -20,6 +20,45 @@ function showToast(message, type = 'error') {
     });
 }
 
+function updatePrReadState(card, action) {
+    const form = card.querySelector('.pr-read-state-form');
+    if (card.dataset.readPending || !form) return;
+    card.dataset.readPending = 'true';
+    form.querySelector('[name=action]').value = action;
+
+    const csrfInput = form.querySelector('[name=csrfmiddlewaretoken]');
+    const headers = {};
+    if (csrfInput) headers['X-CSRFToken'] = csrfInput.value;
+    fetch(form.getAttribute('action'), {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: headers,
+        body: new URLSearchParams(new FormData(form)),
+        keepalive: true
+    }).then(function(response) {
+        if (!response.ok) throw new Error('Read state update failed');
+    }).then(function() {
+        card.classList.toggle('pr-card-unread', action === 'unread');
+    }).catch(function() {
+        showToast('Could not update pull request read state', 'error');
+    }).finally(function() {
+        delete card.dataset.readPending;
+    });
+}
+
+document.addEventListener('click', function(event) {
+    const toggle = event.target.closest('.pr-unread-toggle');
+    if (toggle) {
+        updatePrReadState(toggle.closest('.pr-card'), 'unread');
+        return;
+    }
+
+    const card = event.target.closest('.pr-card');
+    if (card && card.classList.contains('pr-card-unread')) {
+        updatePrReadState(card, 'read');
+    }
+});
+
 // ---- Instant client-side fuzzy search over PRs on the current page ----
 // Fields highlighted (and, per-field, where a matched window is drawn).
 const PR_HL_SELECTOR = '.pr-title, .pr-repo, .pr-number, .pr-author, .pr-branch-name, .pr-linked-issues, .pr-label';

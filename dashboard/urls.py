@@ -21,6 +21,7 @@ urlpatterns = [
         name='plugin_route_stream',
     ),
     path('prs/', views.pr_list, name='pr_list'),
+    path('prs/read-state/', views.update_pr_read_state, name='update_pr_read_state'),
     path('prs/merged/', views.merged_pr_list, name='merged_pr_list'),
     path('prs/by-author/', views.author_pr_list, name='author_pr_list'),
     path('prs/by-author/merged/', views.author_merged_pr_list, name='author_merged_pr_list'),
