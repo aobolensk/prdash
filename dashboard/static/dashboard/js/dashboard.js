@@ -23,12 +23,15 @@ function showToast(message, type = 'error') {
 // ---- Instant client-side fuzzy search over PRs on the current page ----
 // Fields highlighted (and, per-field, where a matched window is drawn).
 const PR_HL_SELECTOR = '.pr-title, .pr-repo, .pr-number, .pr-author, .pr-branch-name, .pr-linked-issues, .pr-label';
+const PR_STATUS_FILTERS = [
+    'approved', 'has conflicts', 'changes requested', 'not reviewed', 'ci failing',
+    'ci pending', 'draft', 'auto-merge enabled', 'queued to merge'
+];
 
 // Pill-field controllers for the include/exclude search inputs, set up in
 // DOMContentLoaded. A PR is shown when any group matches. Tokens are
-// {kind: 'text'|'repo'|'label'|'author', value} objects; repo/label/author
-// tokens come from committed suggestion pills and match exactly, while text
-// tokens are the free-typed words and match fuzzily as before.
+// {kind: 'text'|'repo'|'label'|'author'|'status', value} objects. Committed
+// field pills match exactly, while text tokens match fuzzily as before.
 const prSearchGroups = [];
 const PR_MAX_SEARCH_ALTERNATIVES = 10;
 
@@ -124,8 +127,8 @@ function prTokenMatches(token, haystack) {
     return maxD > 0 && prFuzzyBestDistance(haystack, token) <= maxD;
 }
 
-// A pill token (kind 'repo'/'label') must match its dedicated field exactly;
-// a free-typed 'text' token keeps the original fuzzy substring match. Exact
+// A pill token must match its dedicated field exactly; a free-typed 'text'
+// token keeps the original fuzzy substring match. Exact
 // matching for pills avoids a multi-word label like "good first issue" being
 // split into unrelated words by the fuzzy matcher.
 function prTokenMatchesCard(token, card, haystack) {
@@ -138,6 +141,9 @@ function prTokenMatchesCard(token, card, haystack) {
     }
     if (token.kind === 'author') {
         return (card.dataset.author || '').toLowerCase() === token.value;
+    }
+    if (token.kind === 'status') {
+        return (card.dataset.status || '').split('|').includes(token.value);
     }
     return prTokenMatches(token.value, haystack);
 }
@@ -264,7 +270,7 @@ function prHighlightCard(card, tokenValues) {
     });
 }
 
-// ---- Autosuggest pills (repo / label) for the search inputs ----
+// ---- Autosuggest pills for the search inputs ----
 // A suggestion only appears once the word being typed has reached this
 // length; below it, there's not enough signal to guess what the user means.
 const PR_SUGGEST_MIN_CHARS = 3;
@@ -293,7 +299,9 @@ function prCollectUniqueCandidates(elements, kind, getName, candidates) {
 // PR cards currently rendered.
 function prSuggestCandidates() {
     const content = document.getElementById('pr-content');
-    const candidates = [];
+    const candidates = PR_STATUS_FILTERS.map(function(value) {
+        return { kind: 'status', value: value };
+    });
     prCollectUniqueCandidates(document.querySelectorAll('.repo-link[data-repo]'), 'repo', function(el) {
         return el.dataset.repo;
     }, candidates);
@@ -409,8 +417,9 @@ function prSetSearchFieldState(field, state) {
     field.inputEl.value = typeof state.text === 'string' ? state.text : '';
     if (Array.isArray(state.pills)) {
         state.pills.forEach(function(pill) {
-            if (!pill || (pill.kind !== 'repo' && pill.kind !== 'label' && pill.kind !== 'author') ||
-                    typeof pill.value !== 'string' || !pill.value.trim()) {
+            if (!pill || !['repo', 'label', 'author', 'status'].includes(pill.kind) ||
+                    typeof pill.value !== 'string' || !pill.value.trim() ||
+                    (pill.kind === 'status' && !PR_STATUS_FILTERS.includes(pill.value.toLowerCase()))) {
                 return;
             }
             const value = pill.value.trim();
@@ -621,7 +630,15 @@ function prUpdateSuggestions(field) {
 
 function prCommitSuggestion(field, candidate) {
     // Drop the word currently being typed; it's replaced by the pill.
-    field.inputEl.value = field.inputEl.value.replace(/\S+$/, '').replace(/\s+$/, '');
+    let text = field.inputEl.value.replace(/\S+$/, '');
+    const candidatePrefix = candidate.value.slice(0, candidate.value.lastIndexOf(' ')).toLowerCase();
+    const trimmedText = text.trimEnd();
+    const normalizedText = trimmedText.toLowerCase();
+    if (candidate.kind === 'status' && candidatePrefix &&
+            (normalizedText === candidatePrefix || normalizedText.endsWith(' ' + candidatePrefix))) {
+        text = trimmedText.slice(0, -candidatePrefix.length);
+    }
+    field.inputEl.value = text.replace(/\s+$/, '');
     prAddPill(field, candidate.kind, candidate.value);
     prHideSuggestions(field);
     field.inputEl.focus();
@@ -737,7 +754,8 @@ function applyPrSearch() {
         card.hidden = !matched.length;
         if (matched.length) {
             matches++;
-            prHighlightCard(card, matched.flatMap(group => group.include.tokens.map(t => t.value)));
+            prHighlightCard(card, matched.flatMap(group => group.include.tokens
+                .filter(token => token.kind !== 'status').map(token => token.value)));
         }
     });
 

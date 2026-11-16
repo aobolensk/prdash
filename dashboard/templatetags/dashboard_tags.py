@@ -4,7 +4,7 @@ from django.core.cache import cache
 from django.utils import timezone
 
 from dashboard.github_client import GITHUB_PROVIDER, USERNAME_CACHE_TTL_SECONDS
-from prdash.pr_search import search_haystack
+from prdash.pr_search import search_haystack, status_filters
 
 register = template.Library()
 
@@ -127,3 +127,8 @@ def hours_display(hours):
 def pr_search_haystack(pr):
     """The text the PR search bar matches a card against, shared with prdash.pr_search."""
     return search_haystack(pr)
+
+
+@register.filter
+def pr_status_filters(pr):
+    return '|'.join(status_filters(pr))

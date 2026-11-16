@@ -1,6 +1,6 @@
 {% load dashboard_tags plugin_tags %}
 
-<article class="pr-card" data-search="{{ pr|pr_search_haystack }}" data-repo="{{ pr.repo_full_name }}" data-labels="{% for label in pr.labels %}{{ label.name }}{% if not forloop.last %}|{% endif %}{% endfor %}" data-author="{{ pr.author }}">
+<article class="pr-card" data-search="{{ pr|pr_search_haystack }}" data-repo="{{ pr.repo_full_name }}" data-labels="{% for label in pr.labels %}{{ label.name }}{% if not forloop.last %}|{% endif %}{% endfor %}" data-author="{{ pr.author }}" data-status="{{ pr|pr_status_filters }}">
     <div class="pr-card-header">
         {% if pr.ci_status.total_count > 0 %}
         <a href="{{ pr.url }}/checks" target="_blank" rel="noopener" class="pr-ci-status pr-ci-{{ pr.ci_status.state }}" title="CI Status: {{ pr.ci_status.state }}{% if pr.ci_status.pending_approval %}, approval required{% endif %}" aria-label="CI Status: {{ pr.ci_status.state }}{% if pr.ci_status.pending_approval %}, approval required{% endif %}">

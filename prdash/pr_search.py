@@ -8,7 +8,11 @@ PRs may be PullRequestInfo objects or the PullRequestInfo-shaped dicts plugin ho
 import json
 import math
 
-PILL_KINDS = ('repo', 'label', 'author')
+PILL_KINDS = ('repo', 'label', 'author', 'status')
+STATUS_FILTERS = (
+    'approved', 'has conflicts', 'changes requested', 'not reviewed', 'ci failing',
+    'ci pending', 'draft', 'auto-merge enabled', 'queued to merge',
+)
 
 
 def _get(item, name, default=None):
@@ -68,6 +72,32 @@ def token_matches(token, haystack):
     return budget > 0 and fuzzy_best_distance(haystack, token) <= budget
 
 
+def status_filters(pr):
+    """Status pills that match a PR, shared with the card search data."""
+    review_state = _get(_get(pr, 'review_status', {}), 'state')
+    ci_state = _get(_get(pr, 'ci_status', {}), 'state')
+    statuses = []
+    if review_state == 'approved':
+        statuses.append('approved')
+    if _get(pr, 'mergeable') == 'CONFLICTING':
+        statuses.append('has conflicts')
+    if review_state == 'changes_requested':
+        statuses.append('changes requested')
+    if review_state == 'not_reviewed':
+        statuses.append('not reviewed')
+    if ci_state in ('failure', 'error'):
+        statuses.append('ci failing')
+    if ci_state == 'pending':
+        statuses.append('ci pending')
+    if _get(pr, 'draft'):
+        statuses.append('draft')
+    if _get(pr, 'auto_merge_enabled') and not _get(pr, 'merged_at'):
+        statuses.append('auto-merge enabled')
+    if _get(pr, 'is_queued') and not _get(pr, 'merged_at'):
+        statuses.append('queued to merge')
+    return statuses
+
+
 def _token_matches_pr(token, pr, haystack):
     kind, value = token
     if kind == 'repo':
@@ -76,6 +106,8 @@ def _token_matches_pr(token, pr, haystack):
         return value in [(_get(label, 'name') or '').lower() for label in _get(pr, 'labels', None) or ()]
     if kind == 'author':
         return (_get(pr, 'author') or '').lower() == value
+    if kind == 'status':
+        return value in status_filters(pr)
     return token_matches(value, haystack)
 
 
@@ -87,6 +119,7 @@ def _field_tokens(field):
         for pill in field.get('pills') or ()
         if isinstance(pill, dict) and pill.get('kind') in PILL_KINDS
         and isinstance(pill.get('value'), str) and pill['value'].strip()
+        and (pill['kind'] != 'status' or pill['value'].strip().lower() in STATUS_FILTERS)
     ]
     text = field.get('text')
     if isinstance(text, str):
