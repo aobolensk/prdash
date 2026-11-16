@@ -1,4 +1,5 @@
 """GitHub API client for fetching PR information."""
+import json
 import logging
 import random
 import threading
@@ -44,6 +45,8 @@ PR_GRAPHQL_FIELDS = '''
     }
     createdAt
     updatedAt
+    editor { login }
+    lastEditedAt
     mergedAt
     isDraft
     additions
@@ -143,6 +146,65 @@ PR_GRAPHQL_FIELDS = '''
     }
 '''
 
+PR_ACTIVITY_FIELDS = '''
+    pageInfo { hasNextPage endCursor }
+    nodes {
+        __typename
+        ... on Comment {
+            author { login }
+            editor { login }
+            createdAt
+            updatedAt
+        }
+        ... on PullRequestReviewThread {
+            comments(last: 100) {
+                pageInfo { hasPreviousPage }
+                nodes {
+                    author { login }
+                    editor { login }
+                    createdAt
+                    updatedAt
+                }
+            }
+        }
+        ... on PullRequestCommitCommentThread {
+            comments(last: 100) {
+                pageInfo { hasPreviousPage }
+                nodes {
+                    author { login }
+                    editor { login }
+                    createdAt
+                    updatedAt
+                }
+            }
+        }
+        ... on Commit { author { user { login } } }
+        ... on AssignedEvent { actor { login } }
+        ... on BaseRefChangedEvent { actor { login } }
+        ... on BaseRefForcePushedEvent { actor { login } }
+        ... on BaseRefDeletedEvent { actor { login } }
+        ... on ClosedEvent { actor { login } }
+        ... on ConvertToDraftEvent { actor { login } }
+        ... on ConvertedFromDraftEvent { actor { login } }
+        ... on HeadRefForcePushedEvent { actor { login } }
+        ... on HeadRefDeletedEvent { actor { login } }
+        ... on HeadRefRestoredEvent { actor { login } }
+        ... on LabeledEvent { actor { login } }
+        ... on LockedEvent { actor { login } }
+        ... on MergedEvent { actor { login } }
+        ... on MilestonedEvent { actor { login } }
+        ... on RenamedTitleEvent { actor { login } }
+        ... on ReopenedEvent { actor { login } }
+        ... on ReadyForReviewEvent { actor { login } }
+        ... on ReviewDismissedEvent { actor { login } }
+        ... on ReviewRequestRemovedEvent { actor { login } }
+        ... on ReviewRequestedEvent { actor { login } }
+        ... on UnassignedEvent { actor { login } }
+        ... on UnlabeledEvent { actor { login } }
+        ... on UnlockedEvent { actor { login } }
+    }
+'''
+
 
 @dataclass(slots=True)
 class CIStatus:
@@ -201,6 +263,8 @@ class PullRequestInfo:
     is_queued: bool = False
     linked_issues: list[LinkedIssue] = None
     last_commit_at: Optional[datetime] = None
+    last_edited_by: Optional[str] = None
+    last_edited_at: Optional[datetime] = None
     # plugin_id -> JSON data from the pr_list.process hook of that plugin
     plugin_annotations: dict[str, Any] = field(default_factory=dict)
 
@@ -968,6 +1032,216 @@ class GitHubClient:
             return page_info.get('endCursor')
         return None
 
+    @staticmethod
+    def _pr_activity_query(entries: list[dict]) -> tuple[str, dict]:
+        repositories = {}
+        aliases = {}
+        for index, entry in enumerate(entries):
+            pr = entry['pr']
+            repository = (pr.repo_owner, pr.repo_name)
+            if repository not in repositories:
+                repositories[repository] = (f'repo{len(repositories)}', [])
+            repo_alias, fields = repositories[repository]
+            pr_alias = f'pr{index}'
+            queries = []
+            if not entry.get('timeline_done'):
+                since = json.dumps(entry['since'].isoformat())
+                after = f", after: {json.dumps(entry['cursor'])}" if entry.get('cursor') else ''
+                queries.append(f'''
+                    timelineItems(since: {since}, first: 100{after}) {{
+                        {PR_ACTIVITY_FIELDS}
+                    }}
+                ''')
+            if not entry.get('edits_done'):
+                after = f", after: {json.dumps(entry['edits_cursor'])}" if entry.get('edits_cursor') else ''
+                queries.append(f'''
+                    userContentEdits(first: 100{after}) {{
+                        pageInfo {{ hasNextPage endCursor }}
+                        nodes {{ editedAt editor {{ login }} deletedAt deletedBy {{ login }} }}
+                    }}
+                ''')
+            fields.append(f'''
+                {pr_alias}: pullRequest(number: {pr.number}) {{
+                    {' '.join(queries)}
+                }}
+            ''')
+            aliases[entry['key']] = (repo_alias, pr_alias)
+
+        repo_queries = [
+            f'''{repo_alias}: repository(owner: {json.dumps(owner)}, name: {json.dumps(name)}) {{
+                {' '.join(fields)}
+            }}'''
+            for (owner, name), (repo_alias, fields) in repositories.items()
+        ]
+        return f"query {{ {' '.join(repo_queries)} }}", aliases
+
+    @staticmethod
+    def _activity_has_other_author(
+        connection: dict,
+        since: datetime,
+        username: str,
+        last_edited_by: Optional[str],
+        last_edited_at: Optional[datetime],
+    ) -> bool:
+        if last_edited_at and last_edited_at > since and GitHubClient._activity_actor_is_other(
+            {'login': last_edited_by}, username
+        ):
+            return True
+
+        def comment_has_other_author(comment):
+            created_at = GitHubClient._graphql_timestamp(comment.get('createdAt'))
+            updated_at = GitHubClient._graphql_timestamp(comment.get('updatedAt'))
+            author = comment.get('author')
+            editor = comment.get('editor')
+            if (
+                created_at and created_at > since
+                and GitHubClient._activity_actor_is_other(author, username)
+            ):
+                return True
+            if (
+                updated_at and updated_at > since and updated_at != created_at
+                and GitHubClient._activity_actor_is_other(editor, username)
+            ):
+                return True
+            return not created_at and not updated_at
+
+        nodes = connection.get('nodes', [])
+        if not nodes:
+            return not (last_edited_at and last_edited_at > since and last_edited_by)
+
+        for item in nodes:
+            item_type = item.get('__typename')
+            if item_type == 'PullRequestRevisionMarker':
+                continue
+
+            if item_type in {'IssueComment', 'PullRequestReview', 'PullRequestReviewComment'}:
+                if comment_has_other_author(item):
+                    return True
+                continue
+
+            if item_type in {'PullRequestReviewThread', 'PullRequestCommitCommentThread'}:
+                comments = item.get('comments', {})
+                nodes = comments.get('nodes', [])
+                for comment in nodes:
+                    if comment_has_other_author(comment):
+                        return True
+
+                if comments.get('pageInfo', {}).get('hasPreviousPage'):
+                    return True
+                continue
+
+            if item_type == 'Commit':
+                actor = (item.get('author') or {}).get('user')
+            else:
+                actor = item.get('editor') or item.get('author') or item.get('actor')
+            if GitHubClient._activity_actor_is_other(actor, username):
+                return True
+
+        return False
+
+    @staticmethod
+    def _activity_actor_is_other(actor: Optional[dict], username: str) -> bool:
+        return not actor or (actor.get('login') or '').casefold() != username
+
+    @staticmethod
+    def _activity_edit_is_other(edit: dict, since: datetime, username: str) -> bool:
+        edited_at = GitHubClient._graphql_timestamp(edit.get('editedAt'))
+        deleted_at = GitHubClient._graphql_timestamp(edit.get('deletedAt'))
+        return bool(
+            (edited_at and edited_at > since and GitHubClient._activity_actor_is_other(edit.get('editor'), username))
+            or (
+                deleted_at and deleted_at > since
+                and GitHubClient._activity_actor_is_other(edit.get('deletedBy'), username)
+            )
+        )
+
+    @staticmethod
+    def _advance_activity_page(entry: dict, connection: Optional[dict], done_key: str, cursor_key: str) -> bool:
+        if entry.get(done_key):
+            return True
+        if not connection:
+            return False
+
+        page_info = connection.get('pageInfo') or {}
+        has_next_page = page_info.get('hasNextPage', False)
+        entry[done_key] = not has_next_page
+        if not has_next_page:
+            return True
+
+        cursor = page_info.get('endCursor')
+        if not cursor:
+            return False
+        entry[cursor_key] = cursor
+        return True
+
+    @staticmethod
+    def _graphql_timestamp(value: Optional[str]) -> Optional[datetime]:
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value.replace('Z', '+00:00'))
+        except ValueError:
+            return None
+
+    def pull_requests_with_other_activity(self, entries: list[dict], username: str) -> set[tuple[str, int]]:
+        """Find PRs with any non-user activity since their read timestamp."""
+        username = (username or '').casefold()
+        pending = entries
+        unread = set()
+
+        while pending:
+            next_page = []
+            for batch in self._iter_chunks(pending, GRAPHQL_PR_BATCH_SIZE):
+                query, aliases = self._pr_activity_query(batch)
+                data = self._post_graphql(query, operation='PR activity GraphQL query')
+                if data is None or data.get('errors'):
+                    unread.update(entry['key'] for entry in batch)
+                    continue
+
+                response_data = data.get('data') or {}
+                for entry in batch:
+                    key = entry['key']
+                    repo_alias, pr_alias = aliases[key]
+                    pr_data = (response_data.get(repo_alias) or {}).get(pr_alias) or {}
+                    connection = pr_data.get('timelineItems')
+                    if connection and self._activity_has_other_author(
+                        connection,
+                        entry['since'],
+                        username,
+                        entry['pr'].last_edited_by,
+                        entry['pr'].last_edited_at,
+                    ):
+                        unread.add(key)
+                        continue
+
+                    next_entry = dict(entry)
+                    edits = pr_data.get('userContentEdits')
+                    if not entry.get('edits_done'):
+                        if not edits:
+                            unread.add(key)
+                            continue
+                        if any(
+                            self._activity_edit_is_other(edit, entry['since'], username)
+                            for edit in edits.get('nodes', [])
+                        ):
+                            unread.add(key)
+                            continue
+
+                    if not self._advance_activity_page(
+                        next_entry, connection, 'timeline_done', 'cursor'
+                    ) or not self._advance_activity_page(
+                        next_entry, edits, 'edits_done', 'edits_cursor'
+                    ):
+                        unread.add(key)
+                        continue
+
+                    if not next_entry.get('timeline_done') or not next_entry.get('edits_done'):
+                        next_page.append(next_entry)
+
+            pending = next_page
+
+        return unread
+
     def _parse_pr_from_graphql(
         self, pr_data: dict, owner: str, name: str
     ) -> Optional[PullRequestInfo]:
@@ -1020,6 +1294,7 @@ class GitHubClient:
                 for issue in pr_data.get('closingIssuesReferences', {}).get('nodes', [])
                 if issue
             ]
+            last_editor = pr_data.get('editor') or {}
 
             return PullRequestInfo(
                 number=pr_data['number'],
@@ -1047,6 +1322,8 @@ class GitHubClient:
                 is_queued=is_queued,
                 linked_issues=linked_issues,
                 last_commit_at=last_commit_at,
+                last_edited_by=last_editor.get('login'),
+                last_edited_at=self._graphql_timestamp(pr_data.get('lastEditedAt')),
             )
         except Exception:
             return None

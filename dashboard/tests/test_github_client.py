@@ -1069,3 +1069,119 @@ class GitHubClientOpenPrsTests(TestCase):
 
         self.assertEqual(pr.last_commit_at, datetime(2024, 1, 2, 12, tzinfo=dt_timezone.utc))
         self.assertEqual(pr.plugin_annotations, {})
+
+
+class GitHubClientPRUnreadTests(TestCase):
+    def _entry(self):
+        key = ('owner/repo', 1)
+        return key, {
+            'key': key,
+            'pr': self._pr(),
+            'since': datetime(2024, 1, 1, tzinfo=dt_timezone.utc),
+        }
+
+    def _pr(self):
+        now = datetime(2024, 1, 3, tzinfo=dt_timezone.utc)
+        return PullRequestInfo(
+            number=1,
+            title='Change',
+            url='https://github.com/owner/repo/pull/1',
+            repo_owner='owner',
+            repo_name='repo',
+            author='me',
+            author_avatar='',
+            created_at=datetime(2024, 1, 1, tzinfo=dt_timezone.utc),
+            updated_at=now,
+            labels=[],
+            ci_status=CIStatus(state='success'),
+            review_status=ReviewStatus(state='approved'),
+            draft=False,
+            additions=1,
+            deletions=1,
+            last_edited_by='me',
+            last_edited_at=now,
+        )
+
+    def _response(self, timeline_nodes, edits):
+        return {
+            'data': {
+                'repo0': {
+                    'pr0': {
+                        'timelineItems': {
+                            'nodes': timeline_nodes,
+                            'pageInfo': {'hasNextPage': False},
+                        },
+                        'userContentEdits': {
+                            'nodes': edits,
+                            'pageInfo': {'hasNextPage': False},
+                        },
+                    }
+                }
+            }
+        }
+
+    def test_mixed_timeline_activity_is_unread_in_either_order(self):
+        key, entry = self._entry()
+        own_event = {'__typename': 'AssignedEvent', 'actor': {'login': 'me'}}
+        other_event = {'__typename': 'AssignedEvent', 'actor': {'login': 'someone-else'}}
+        client = GitHubClient(user=None)
+
+        for events in ([other_event, own_event], [own_event, other_event]):
+            with self.subTest(events=events), patch.object(
+                client,
+                '_post_graphql',
+                return_value=self._response(events, []),
+            ):
+                unread = client.pull_requests_with_other_activity([entry], 'ME')
+
+            self.assertEqual(unread, {key})
+
+    @patch.object(GitHubClient, '_post_graphql')
+    def test_external_activity_on_later_timeline_page_is_unread(self, mock_post_graphql):
+        key, entry = self._entry()
+        first_page = self._response(
+            [{'__typename': 'AssignedEvent', 'actor': {'login': 'me'}}],
+            [],
+        )
+        first_page['data']['repo0']['pr0']['timelineItems']['pageInfo'] = {
+            'hasNextPage': True,
+            'endCursor': 'timeline-cursor',
+        }
+        mock_post_graphql.side_effect = [
+            first_page,
+            self._response(
+                [{'__typename': 'AssignedEvent', 'actor': {'login': 'someone-else'}}],
+                [],
+            ),
+        ]
+
+        unread = GitHubClient(user=None).pull_requests_with_other_activity([entry], 'me')
+
+        self.assertEqual(unread, {key})
+        self.assertEqual(mock_post_graphql.call_count, 2)
+        self.assertIn('after: "timeline-cursor"', mock_post_graphql.call_args.args[0])
+
+    @patch.object(GitHubClient, '_post_graphql')
+    def test_other_pr_description_edit_stays_unread_after_user_edit(self, mock_post_graphql):
+        key, entry = self._entry()
+        mock_post_graphql.return_value = self._response([], [
+            {'editedAt': '2024-01-02T00:00:00Z', 'editor': {'login': 'someone-else'}},
+            {'editedAt': '2024-01-03T00:00:00Z', 'editor': {'login': 'me'}},
+        ])
+
+        unread = GitHubClient(user=None).pull_requests_with_other_activity([entry], 'me')
+
+        self.assertEqual(unread, {key})
+        self.assertIn('userContentEdits', mock_post_graphql.call_args.args[0])
+
+    @patch.object(GitHubClient, '_post_graphql')
+    def test_activity_caused_only_by_user_stays_read(self, mock_post_graphql):
+        key, entry = self._entry()
+        mock_post_graphql.return_value = self._response(
+            [{'__typename': 'AssignedEvent', 'actor': {'login': 'me'}}],
+            [{'editedAt': '2024-01-02T00:00:00Z', 'editor': {'login': 'me'}}],
+        )
+
+        unread = GitHubClient(user=None).pull_requests_with_other_activity([entry], 'me')
+
+        self.assertEqual(unread, set())

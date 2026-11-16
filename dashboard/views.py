@@ -375,12 +375,12 @@ def _cached_pr_counts(user, profile):
     }
 
 
-def _unread_pr_keys(user, prs):
-    updated_at_by_pr = {
-        (pr.repo_full_name.casefold(), pr.number): pr.updated_at
+def _unread_pr_keys(user, prs, username, client):
+    prs_by_key = {
+        (pr.repo_full_name.casefold(), pr.number): pr
         for pr in prs
     }
-    repo_names = {repo_full_name for repo_full_name, _ in updated_at_by_pr}
+    repo_names = {repo_full_name for repo_full_name, _ in prs_by_key}
     states = {
         (state.repo_full_name, state.pr_number): state
         for state in PullRequestReadState.objects.filter(
@@ -394,9 +394,9 @@ def _unread_pr_keys(user, prs):
             user=user,
             repo_full_name=repo_full_name,
             pr_number=number,
-            first_seen_updated_at=updated_at,
+            first_seen_updated_at=pr.updated_at,
         )
-        for (repo_full_name, number), updated_at in updated_at_by_pr.items()
+        for (repo_full_name, number), pr in prs_by_key.items()
         if (repo_full_name, number) not in states
     ]
     if missing_states:
@@ -409,11 +409,23 @@ def _unread_pr_keys(user, prs):
             )
         }
 
-    return {
-        identity
-        for identity, updated_at in updated_at_by_pr.items()
-        if updated_at > (states[identity].read_updated_at or states[identity].first_seen_updated_at)
-    }
+    activity_entries = []
+    unread = set()
+    for identity, pr in prs_by_key.items():
+        state = states[identity]
+        read_at = state.read_updated_at or state.first_seen_updated_at
+        if pr.updated_at <= read_at:
+            continue
+        if state.read_updated_at and pr.updated_at - state.read_updated_at == timedelta(microseconds=1):
+            unread.add(identity)
+            continue
+        activity_entries.append({'key': identity, 'pr': pr, 'since': read_at})
+
+    if not username:
+        unread.update(entry['key'] for entry in activity_entries)
+    else:
+        unread.update(client.pull_requests_with_other_activity(activity_entries, username))
+    return unread
 
 
 def _pr_list_page_title(active_tab, plugin_page, current_repo):
@@ -569,7 +581,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         count_cache_key = f"pr_count:{request.user.id}:{profile.id}:{cache_key_suffix}"
         cache.set(count_cache_key, len(prs), PR_COUNT_CACHE_TTL)
 
-    unread_pr_keys = _unread_pr_keys(request.user, prs)
+    unread_pr_keys = _unread_pr_keys(request.user, prs, current_username, client)
 
     page_obj = None
     page_size = user_prefs.pr_list_page_size
