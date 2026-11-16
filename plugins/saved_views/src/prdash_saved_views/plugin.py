@@ -19,7 +19,7 @@ MAX_TEXT_LENGTH = 500
 MAX_PILLS_PER_FIELD = 40
 MAX_ALTERNATIVES = 10
 MAX_PILL_VALUE_LENGTH = 200
-PILL_KINDS = {'repo', 'label', 'author'}
+PILL_KINDS = {'repo', 'label', 'author', 'status'}
 
 
 class SavedViewsPlugin:
