@@ -1,0 +1,93 @@
+{% load socialaccount dashboard_tags %}
+<div class="account-menu-section">
+    <div class="profile-menu-label">Accounts</div>
+    <div class="account-switcher-list">
+        {% for browser_account in request.browser_accounts %}
+        {% github_account_info browser_account.user as browser_gh_account %}
+        <div class="account-switch-row">
+            {% if user.is_authenticated and browser_account.user_id == user.id %}
+                <div class="account-option account-option-active">
+                    <span class="account-avatar">
+                        {% if browser_gh_account.avatar_url %}
+                            <img src="{{ browser_gh_account.avatar_url }}" alt="" loading="lazy">
+                        {% else %}
+                            <span class="account-avatar-initial">{{ browser_account.user.username|slice:':1'|upper }}</span>
+                        {% endif %}
+                    </span>
+                    <span class="account-option-copy">
+                        <strong class="account-option-name">@{{ browser_account.user.username }}</strong>
+                        <small class="account-option-detail">
+                            <span class="account-provider-icon" aria-hidden="true">{% include 'dashboard/partials/_github_icon.html' with icon_class='github-icon' size='11' %}</span>
+                            GitHub account
+                        </small>
+                    </span>
+                    <span class="account-option-status">Current</span>
+                </div>
+            {% else %}
+                <form method="post" action="{% url 'dashboard:switch_browser_account' %}" class="account-switch-form">
+                    {% csrf_token %}
+                    <input type="hidden" name="user_id" value="{{ browser_account.user_id }}">
+                    <button type="submit" class="account-option account-option-button">
+                        <span class="account-avatar">
+                            {% if browser_gh_account.avatar_url %}
+                                <img src="{{ browser_gh_account.avatar_url }}" alt="" loading="lazy">
+                            {% else %}
+                                <span class="account-avatar-initial">{{ browser_account.user.username|slice:':1'|upper }}</span>
+                            {% endif %}
+                        </span>
+                        <span class="account-option-copy">
+                            <strong class="account-option-name">@{{ browser_account.user.username }}</strong>
+                            <small class="account-option-detail">
+                                <span class="account-provider-icon" aria-hidden="true">{% include 'dashboard/partials/_github_icon.html' with icon_class='github-icon' size='11' %}</span>
+                                GitHub account
+                            </small>
+                        </span>
+                        <span class="account-option-arrow" aria-hidden="true">&rsaquo;</span>
+                    </button>
+                </form>
+                <form method="post" action="{% url 'dashboard:remove_browser_account' %}" class="account-remove-form">
+                    {% csrf_token %}
+                    <input type="hidden" name="user_id" value="{{ browser_account.user_id }}">
+                    <button type="submit" class="account-remove-button" title="Remove {{ browser_account.user.username }} from this browser" aria-label="Remove {{ browser_account.user.username }} from this browser">
+                        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+                    </button>
+                </form>
+            {% endif %}
+        </div>
+        {% empty %}
+        <p class="account-menu-empty">No saved GitHub accounts.</p>
+        {% endfor %}
+
+        {% if request.session.guest_mode %}
+        <div class="account-option account-option-active">
+            <span class="account-avatar account-avatar-guest" aria-hidden="true">
+                <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"></circle><path d="M5 21a7 7 0 0 1 14 0"></path></svg>
+            </span>
+            <span class="account-option-copy">
+                <strong class="account-option-name">Guest</strong>
+                <small class="account-option-detail">Public repositories only</small>
+            </span>
+            <span class="account-option-status">Current</span>
+        </div>
+        {% else %}
+        <form method="post" action="{% url 'dashboard:use_guest_mode' %}" class="account-guest-form">
+            {% csrf_token %}
+            <button type="submit" class="account-option account-option-button">
+                <span class="account-avatar account-avatar-guest" aria-hidden="true">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"></circle><path d="M5 21a7 7 0 0 1 14 0"></path></svg>
+                </span>
+                <span class="account-option-copy">
+                    <strong class="account-option-name">Guest</strong>
+                    <small class="account-option-detail">Public repositories only</small>
+                </span>
+                <span class="account-option-arrow" aria-hidden="true">&rsaquo;</span>
+            </button>
+        </form>
+        {% endif %}
+    </div>
+
+    <a href="{% provider_login_url 'github' process='login' auth_params='prompt=select_account' %}" class="account-menu-action">
+        {% include 'dashboard/partials/_github_icon.html' with icon_class='github-icon' size='16' %}
+        Add or switch GitHub account
+    </a>
+</div>

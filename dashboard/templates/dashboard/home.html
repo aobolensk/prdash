@@ -25,8 +25,14 @@
         </a>
 
         <p class="login-note">
-            Add repositories you want to track after logging in
+            Sign in with GitHub to manage repositories and view your personal pull requests.
         </p>
+        <div class="login-divider"><span>or</span></div>
+        <form method="post" action="{% url 'dashboard:use_guest_mode' %}">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-secondary guest-start-button">Explore as guest</button>
+        </form>
+        <p class="login-note">Guest mode can view open pull requests from public repositories.</p>
     </div>
 </div>
 {% endblock %}

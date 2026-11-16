@@ -156,7 +156,7 @@ a:hover {
     top: calc(100% + 8px);
     right: 0;
     z-index: 30;
-    width: 260px;
+    width: 300px;
     padding: 12px;
     background-color: var(--color-bg);
     border: 1px solid var(--color-border);
@@ -169,6 +169,193 @@ a:hover {
     color: var(--color-text-secondary);
     font-size: 12px;
     font-weight: 600;
+}
+
+.account-menu-section {
+    padding-bottom: 10px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.account-switcher-list {
+    display: grid;
+    gap: 5px;
+}
+
+.account-switch-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.account-guest-form {
+    width: 100%;
+}
+
+.account-switch-form {
+    flex: 1;
+    min-width: 0;
+}
+
+.account-option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 54px;
+    padding: 7px 9px;
+    border: 1px solid var(--color-border-light);
+    border-radius: 9px;
+    background: var(--color-bg);
+    color: var(--color-text);
+    font: inherit;
+    text-align: left;
+}
+
+.account-option-button {
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.account-option-button:hover {
+    background-color: var(--color-bg-tertiary);
+    border-color: var(--color-primary);
+    transform: translateY(-1px);
+}
+
+.account-option-button:focus-visible,
+.account-remove-button:focus-visible,
+.account-menu-action:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+}
+
+.account-option-active {
+    border-color: var(--color-primary);
+    background: var(--color-bg-secondary);
+}
+
+.account-avatar {
+    display: flex;
+    flex: 0 0 36px;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+    border-radius: 50%;
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
+}
+
+.account-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.account-avatar-initial {
+    font-size: 15px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.account-avatar-guest {
+    border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-border));
+    background: color-mix(in srgb, var(--color-primary) 12%, var(--color-bg));
+    color: var(--color-primary);
+}
+
+.account-option-copy {
+    display: grid;
+    flex: 1;
+    min-width: 0;
+    gap: 1px;
+}
+
+.account-option-name {
+    overflow: hidden;
+    font-size: 13px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.account-option-detail {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--color-text-muted);
+    font-size: 11px;
+    line-height: 1.3;
+}
+
+.account-provider-icon {
+    display: inline-flex;
+    align-items: center;
+}
+
+.account-option-status {
+    padding: 3px 7px;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--color-primary) 13%, var(--color-bg));
+    color: var(--color-primary);
+    font-size: 10px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.account-option-arrow {
+    color: var(--color-text-muted);
+    font-size: 22px;
+    line-height: 1;
+}
+
+.account-remove-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-danger);
+    cursor: pointer;
+}
+
+.account-remove-button:hover {
+    background: color-mix(in srgb, var(--color-danger) 12%, var(--color-bg));
+}
+
+.account-menu-action {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 9px 10px;
+    margin-top: 8px;
+    border: 1px dashed var(--color-border);
+    border-radius: 8px;
+    background: var(--color-bg-secondary);
+    color: var(--color-link);
+    font-size: 12px;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.account-menu-action:hover {
+    border-color: var(--color-primary);
+    background: var(--color-bg-tertiary);
+    text-decoration: none;
+}
+
+.account-menu-empty {
+    margin: 4px 8px 8px;
+    color: var(--color-text-muted);
+    font-size: 11px;
 }
 
 /* Buttons */
@@ -334,6 +521,28 @@ a:hover {
     color: var(--color-text-muted);
     margin: 20px 0 0 0;
     line-height: 1.5;
+}
+
+.login-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 20px;
+    color: var(--color-text-muted);
+    font-size: 12px;
+}
+
+.login-divider::before,
+.login-divider::after {
+    flex: 1;
+    height: 1px;
+    background: var(--color-border);
+    content: "";
+}
+
+.guest-start-button {
+    width: 100%;
+    margin-top: 12px;
 }
 
 /* Dashboard layout */

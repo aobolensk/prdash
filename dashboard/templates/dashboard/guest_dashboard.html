@@ -1,0 +1,101 @@
+{% extends 'dashboard/base.html' %}
+
+{% block title %}{% if selected_repo %}{{ selected_repo.owner }}/{{ selected_repo.name }}{% else %}Open Pull Requests{% endif %} - PR Dashboard{% endblock %}
+
+{% block header_left %}
+    <button type="button" id="sidebar-toggle" class="btn btn-icon" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+    </button>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-layout"
+     id="dashboard-layout"
+     data-current-tab="my_prs"
+     data-current-repo="{% if selected_repo %}{{ selected_repo.owner }}/{{ selected_repo.name }}{% endif %}">
+    <aside class="sidebar">
+        <div class="sidebar-section">
+            <h2 class="sidebar-title">Views</h2>
+            <a href="{% url 'dashboard:guest_dashboard' %}"
+               class="sidebar-link {% if not selected_repo %}active{% endif %}">
+                <svg class="sidebar-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M13 6h3a2 2 0 0 1 2 2v7"></path><line x1="6" y1="9" x2="6" y2="21"></line></svg>
+                <span class="sidebar-label">Open Pull Requests</span>
+            </a>
+        </div>
+
+        <div class="sidebar-section sidebar-repos-section">
+            <h2 class="sidebar-title">Public repositories</h2>
+            <form method="post" action="{% url 'dashboard:add_guest_repository' %}" class="add-repo-form">
+                {% csrf_token %}
+                <input type="text" name="repo" placeholder="owner/repo" class="input" autocomplete="off" required aria-label="Public GitHub repository">
+                <button type="submit" class="btn btn-primary">Add</button>
+            </form>
+
+            <ul class="repo-list">
+                {% for repository in guest_repositories %}
+                <li class="repo-item">
+                    <div class="repo-toggle">
+                        <a href="{% url 'dashboard:guest_dashboard' %}?repo={{ repository.owner|urlencode }}/{{ repository.name|urlencode }}"
+                           class="repo-link {% if selected_repo.owner == repository.owner and selected_repo.name == repository.name %}active{% endif %}">
+                            {{ repository.owner }}/{{ repository.name }}
+                        </a>
+                    </div>
+                    <form method="post" action="{% url 'dashboard:remove_guest_repository' %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="repo" value="{{ repository.owner }}/{{ repository.name }}">
+                        <button type="submit" class="btn-icon repo-remove-btn" aria-label="Remove {{ repository.owner }}/{{ repository.name }}">
+                            &#10005;
+                        </button>
+                    </form>
+                </li>
+                {% empty %}
+                <li class="repo-empty">No repositories tracked yet.</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </aside>
+
+    <section class="main-content" aria-live="polite">
+        <div class="content-header">
+            <h1>{% if selected_repo %}{{ selected_repo.owner }}/{{ selected_repo.name }}{% else %}Open Pull Requests{% endif %}</h1>
+        </div>
+
+        {% if guest_error %}
+        <div class="error" role="status">{{ guest_error }}</div>
+        {% endif %}
+
+        {% if guest_pull_requests %}
+            <div class="pr-list">
+                {% for pr in guest_pull_requests %}
+                    {% include 'dashboard/partials/_pr_card.html' with pr=pr guest_mode=True active_tab='open' %}
+                {% endfor %}
+            </div>
+            {% if guest_page > 1 or guest_has_next %}
+            <nav class="pagination" aria-label="Pull request pages">
+                {% if guest_page_obj.has_previous %}
+                <a href="{{ guest_previous_url }}" class="btn btn-secondary btn-small">Previous</a>
+                {% else %}
+                <span class="btn btn-secondary btn-small btn-disabled">Previous</span>
+                {% endif %}
+                <span class="pagination-status">Page {{ guest_page }}</span>
+                {% if guest_has_next %}
+                <a href="{{ guest_next_url }}" class="btn btn-secondary btn-small">Next</a>
+                {% else %}
+                <span class="btn btn-secondary btn-small btn-disabled">Next</span>
+                {% endif %}
+            </nav>
+            {% endif %}
+        {% elif not guest_error %}
+            <div class="empty-state">
+                {% if selected_repo %}
+                    <p>No open pull requests found.</p>
+                {% elif guest_repositories %}
+                    <p>No open pull requests found in these repositories.</p>
+                {% else %}
+                    <p>Add a public repository to start tracking its open pull requests.</p>
+                {% endif %}
+            </div>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}

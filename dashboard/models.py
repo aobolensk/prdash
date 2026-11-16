@@ -42,6 +42,27 @@ class RepositoryProfile(models.Model):
         return f"{self.name} for {self.user.username}"
 
 
+class BrowserAccount(models.Model):
+    """A GitHub identity available to switch to from one trusted browser."""
+
+    browser_key_hash = models.CharField(max_length=64)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='browser_accounts')
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['browser_key_hash', 'user'],
+                name='unique_browser_account_user',
+            ),
+        ]
+        ordering = ['-last_used_at', 'id']
+
+    def __str__(self):
+        return f"{self.user.username} on browser {self.browser_key_hash[:8]}"
+
+
 class TrackedRepository(models.Model):
     """A GitHub repository tracked by a user."""
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='tracked_repos')

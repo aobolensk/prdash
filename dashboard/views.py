@@ -1,6 +1,7 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import Http404, HttpResponse, HttpResponseNotModified, JsonResponse, StreamingHttpResponse
 from django.contrib import messages
+from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_http_methods, require_POST
 from django.core.cache import cache
@@ -19,12 +20,24 @@ from mimetypes import guess_type
 import re
 import requests
 import threading
+from urllib.parse import quote
 
 from .models import (
-    TrackedRepository, RepositoryProfile, PersonalAccessToken, UserPreferences, AUTO_REFRESH_CATEGORIES,
+    BrowserAccount,
+    TrackedRepository,
+    RepositoryProfile,
+    PersonalAccessToken,
+    UserPreferences,
+    AUTO_REFRESH_CATEGORIES,
 )
-from .middleware import ACTIVE_PROFILE_SESSION_KEY
+from .middleware import (
+    ACTIVE_PROFILE_SESSION_KEY,
+    GUEST_MODE_SESSION_KEY,
+    GUEST_REPOSITORIES_SESSION_KEY,
+    browser_key_hash,
+)
 from .github_client import GitHubClient
+from .guest_service import enrich_guest_pull_requests, fetch_guest_dashboard_pull_requests
 from .plugin_manager import plugin_manager
 from prdash.plugin_api import (
     PR_LIST_PROCESS_HOOK,
@@ -137,7 +150,191 @@ def home(request):
     """Landing page - redirect to PRs if logged in."""
     if request.user.is_authenticated:
         return redirect('dashboard:pr_list')
+    if request.session.get(GUEST_MODE_SESSION_KEY):
+        return redirect('dashboard:guest_dashboard')
     return render(request, 'dashboard/home.html')
+
+
+def _set_active_profile(request, profile):
+    selections = request.session.get(ACTIVE_PROFILE_SESSION_KEY)
+    if not isinstance(selections, dict):
+        selections = {}
+    selections[str(request.user.pk)] = profile.pk
+    request.session[ACTIVE_PROFILE_SESSION_KEY] = selections
+
+
+def _guest_repositories(request):
+    repositories = request.session.get(GUEST_REPOSITORIES_SESSION_KEY, [])
+    if not isinstance(repositories, list):
+        return []
+    return [
+        item for item in repositories
+        if isinstance(item, dict)
+        and isinstance(item.get('owner'), str)
+        and isinstance(item.get('name'), str)
+        and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9-]{0,38}', item['owner'])
+        and re.fullmatch(r'[A-Za-z0-9_.-]{1,100}', item['name'])
+        and item['name'] not in {'.', '..'}
+    ]
+
+
+def _guest_dashboard_url(repository=None, page=1):
+    query = []
+    if repository:
+        query.append(f'repo={quote(repository, safe="/")}')
+    if page > 1:
+        query.append(f'page={page}')
+    return reverse('dashboard:guest_dashboard') + (f"?{'&'.join(query)}" if query else '')
+
+
+def _browser_state(request):
+    return {
+        key: request.session[key]
+        for key in (ACTIVE_PROFILE_SESSION_KEY, GUEST_REPOSITORIES_SESSION_KEY)
+        if key in request.session
+    }
+
+
+def _restore_browser_state(request, state):
+    for key, value in state.items():
+        request.session[key] = value
+
+
+def _account_menu_redirect(request):
+    if request.user.is_authenticated:
+        return redirect('dashboard:pr_list')
+    if request.session.get(GUEST_MODE_SESSION_KEY):
+        return redirect('dashboard:guest_dashboard')
+    return redirect('dashboard:home')
+
+
+@require_POST
+def use_guest_mode(request):
+    """Start a public-only guest session, preserving browser account access."""
+    state = _browser_state(request)
+    if request.user.is_authenticated:
+        logout(request)
+    _restore_browser_state(request, state)
+    request.session[GUEST_MODE_SESSION_KEY] = True
+    return redirect('dashboard:guest_dashboard')
+
+
+@require_POST
+def switch_browser_account(request):
+    """Switch to an account previously authenticated in this browser."""
+    account = get_object_or_404(
+        BrowserAccount.objects.select_related('user').filter(user__is_active=True),
+        browser_key_hash=browser_key_hash(request.account_browser_key),
+        user_id=request.POST.get('user_id'),
+    )
+    state = _browser_state(request)
+    login(request, account.user, backend='django.contrib.auth.backends.ModelBackend')
+    _restore_browser_state(request, state)
+    request.session.pop(GUEST_MODE_SESSION_KEY, None)
+    account.save(update_fields=['last_used_at'])
+    messages.success(request, f'Switched to {account.user.username}.')
+    return redirect('dashboard:pr_list')
+
+
+@require_POST
+def remove_browser_account(request):
+    """Remove another saved identity from this browser without deleting its data."""
+    user_id = request.POST.get('user_id')
+    if request.user.is_authenticated and str(request.user.pk) == user_id:
+        messages.error(request, 'The active account cannot be removed from the switcher.')
+        return _account_menu_redirect(request)
+    account = get_object_or_404(
+        BrowserAccount,
+        browser_key_hash=browser_key_hash(request.account_browser_key),
+        user_id=user_id,
+    )
+    username = account.user.username
+    account.delete()
+    messages.success(request, f'{username} was removed from this browser.')
+    return _account_menu_redirect(request)
+
+
+@require_http_methods(['GET'])
+def guest_dashboard(request):
+    """Show a limited, public-only pull request dashboard for this browser."""
+    if request.user.is_authenticated:
+        return redirect('dashboard:pr_list')
+    request.session[GUEST_MODE_SESSION_KEY] = True
+
+    repositories = _guest_repositories(request)
+    selected_name = request.GET.get('repo', '')
+    selected_repo = next(
+        (repo for repo in repositories if f"{repo['owner']}/{repo['name']}" == selected_name),
+        None,
+    )
+    active_repositories = [selected_repo] if selected_repo else repositories
+    page_size = 25
+    try:
+        requested_page = max(int(request.GET.get('page', 1)), 1)
+    except (TypeError, ValueError):
+        requested_page = 1
+    pull_requests, remote_has_next, error = fetch_guest_dashboard_pull_requests(
+        active_repositories, requested_page, page_size,
+    )
+    paginator = Paginator(pull_requests, page_size)
+    page_obj = paginator.get_page(requested_page)
+    enrich_guest_pull_requests(page_obj.object_list)
+    page = page_obj.number
+    page_has_next = page_obj.has_next() or remote_has_next
+
+    return render(request, 'dashboard/guest_dashboard.html', {
+        'guest_repositories': repositories,
+        'selected_repo': selected_repo,
+        'guest_pull_requests': page_obj.object_list,
+        'guest_has_next': page_has_next,
+        'guest_page': page,
+        'guest_error': error,
+        'guest_page_obj': page_obj,
+        'guest_previous_url': _guest_dashboard_url(
+            f"{selected_repo['owner']}/{selected_repo['name']}" if selected_repo else None,
+            page - 1,
+        ),
+        'guest_next_url': _guest_dashboard_url(
+            f"{selected_repo['owner']}/{selected_repo['name']}" if selected_repo else None,
+            page + 1,
+        ),
+    })
+
+
+@require_POST
+def add_guest_repository(request):
+    """Add a public repository to the temporary guest list for this browser."""
+    if request.user.is_authenticated:
+        return redirect('dashboard:pr_list')
+    owner, name = _parse_repo_input(request.POST.get('repo', ''))
+    valid_owner = owner and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9-]{0,38}', owner)
+    valid_name = name and re.fullmatch(r'[A-Za-z0-9_.-]{1,100}', name) and name not in {'.', '..'}
+    if not valid_owner or not valid_name:
+        messages.error(request, 'Enter a public GitHub repository as owner/repo.')
+        return redirect('dashboard:guest_dashboard')
+
+    repositories = _guest_repositories(request)
+    repository = {'owner': owner, 'name': name}
+    full_name = f'{owner}/{name}'
+    if any(f"{item['owner']}/{item['name']}".casefold() == full_name.casefold() for item in repositories):
+        return redirect('dashboard:guest_dashboard')
+    repositories.append(repository)
+    request.session[GUEST_REPOSITORIES_SESSION_KEY] = repositories
+    return redirect('dashboard:guest_dashboard')
+
+
+@require_POST
+def remove_guest_repository(request):
+    """Remove a repository from the session-only guest list."""
+    if request.user.is_authenticated:
+        return redirect('dashboard:pr_list')
+    full_name = request.POST.get('repo', '')
+    repositories = [
+        item for item in _guest_repositories(request)
+        if f"{item['owner']}/{item['name']}".casefold() != full_name.casefold()
+    ]
+    request.session[GUEST_REPOSITORIES_SESSION_KEY] = repositories
+    return redirect('dashboard:guest_dashboard')
 
 
 def _run_pr_list_query(request, current_username, active_tab, owner=None, repo=None, query_defaults=None):
@@ -697,7 +894,7 @@ def add_profile(request):
         return redirect('dashboard:pr_list')
 
     profile = RepositoryProfile.objects.create(user=request.user, name=name)
-    request.session[ACTIVE_PROFILE_SESSION_KEY] = profile.id
+    _set_active_profile(request, profile)
     messages.success(request, f'Profile {profile.name} created.')
     return redirect('dashboard:pr_list')
 
@@ -709,7 +906,7 @@ def activate_profile(request):
     profile = get_object_or_404(
         RepositoryProfile, id=request.POST.get('profile_id'), user=request.user,
     )
-    request.session[ACTIVE_PROFILE_SESSION_KEY] = profile.id
+    _set_active_profile(request, profile)
     return redirect('dashboard:pr_list')
 
 
@@ -725,7 +922,7 @@ def delete_profile(request, profile_id):
         return redirect('dashboard:pr_list')
 
     profile.delete()
-    request.session[ACTIVE_PROFILE_SESSION_KEY] = next_profile.id
+    _set_active_profile(request, next_profile)
     _invalidate_repo_edit_caches(request.user, profile)
     messages.success(request, f'Profile {profile.name} deleted.')
     return redirect('dashboard:pr_list')

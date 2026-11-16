@@ -1020,6 +1020,24 @@ function sameOriginReferrer() {
 document.addEventListener('DOMContentLoaded', function() {
     formatTimestampTitles();
 
+    document.addEventListener('click', function(event) {
+        document.querySelectorAll('.profile-menu[open]').forEach(function(menu) {
+            if (!menu.contains(event.target)) menu.open = false;
+        });
+    });
+
+    document.addEventListener('keydown', function(event) {
+        if (event.key !== 'Escape') return;
+        const openMenus = document.querySelectorAll('.profile-menu[open]');
+        if (!openMenus.length) return;
+        openMenus.forEach(function(menu) {
+            menu.open = false;
+            const trigger = menu.querySelector('summary');
+            if (trigger) trigger.focus();
+        });
+        event.preventDefault();
+    });
+
     // replaceState avoids polluting the back-stack that "Back to Dashboard" walks with history.back().
     const settingsNav = document.querySelector('.settings-nav');
     if (settingsNav) {

@@ -2,8 +2,10 @@
 
 <article class="pr-card" data-search="{{ pr|pr_search_haystack }}" data-repo="{{ pr.repo_full_name }}" data-labels="{% for label in pr.labels %}{{ label.name }}{% if not forloop.last %}|{% endif %}{% endfor %}" data-author="{{ pr.author }}" data-status="{{ pr|pr_status_filters }}">
     <div class="pr-card-header">
-        {% if pr.ci_status.total_count > 0 %}
-        <a href="{{ pr.url }}/checks" target="_blank" rel="noopener" class="pr-ci-status pr-ci-{{ pr.ci_status.state }}" title="CI Status: {{ pr.ci_status.state }}{% if pr.ci_status.pending_approval %}, approval required{% endif %}" aria-label="CI Status: {{ pr.ci_status.state }}{% if pr.ci_status.pending_approval %}, approval required{% endif %}">
+        {% if pr.ci_status.total_count > 0 %}<a href="{{ pr.url }}/checks" target="_blank" rel="noopener"{% else %}<div{% endif %}
+            class="pr-ci-status pr-ci-{{ pr.ci_status.state }}"
+            title="CI Status: {{ pr.ci_status.state }}{% if pr.ci_status.pending_approval %}, approval required{% endif %}"
+            aria-label="CI Status: {{ pr.ci_status.state }}{% if pr.ci_status.pending_approval %}, approval required{% endif %}">
             {% if pr.ci_status.state == 'success' %}
                 &#10003;
             {% elif pr.ci_status.state == 'failure' or pr.ci_status.state == 'error' %}
@@ -16,23 +18,7 @@
             {% if pr.ci_status.pending_approval %}
                 <span class="pr-ci-approval" aria-hidden="true">&#128274;</span>
             {% endif %}
-        </a>
-        {% else %}
-        <div class="pr-ci-status pr-ci-{{ pr.ci_status.state }}" title="CI Status: {{ pr.ci_status.state }}{% if pr.ci_status.pending_approval %}, approval required{% endif %}" aria-label="CI Status: {{ pr.ci_status.state }}{% if pr.ci_status.pending_approval %}, approval required{% endif %}">
-            {% if pr.ci_status.state == 'success' %}
-                &#10003;
-            {% elif pr.ci_status.state == 'failure' or pr.ci_status.state == 'error' %}
-                &#10007;
-            {% elif pr.ci_status.state == 'pending' %}
-                &#8987;
-            {% else %}
-                &#8211;
-            {% endif %}
-            {% if pr.ci_status.pending_approval %}
-                <span class="pr-ci-approval" aria-hidden="true">&#128274;</span>
-            {% endif %}
-        </div>
-        {% endif %}
+        {% if pr.ci_status.total_count > 0 %}</a>{% else %}</div>{% endif %}
         <div class="pr-info">
             <div class="pr-title-row">
                 <div class="pr-title-section">
@@ -49,11 +35,13 @@
                         </div>
                     {% endif %}
                 </div>
+                {% if not guest_mode or pr.has_diff_stats %}
                 <div class="pr-stats">
                     <span class="pr-additions">+{{ pr.additions }}</span>
                     <span class="pr-deletions">-{{ pr.deletions }}</span>
-                    {% plugin_slot 'pr_card.actions' pr=pr %}
+                    {% if not guest_mode %}{% plugin_slot 'pr_card.actions' pr=pr %}{% endif %}
                 </div>
+                {% endif %}
             </div>
             <div class="pr-meta">
                 <a href="https://github.com/{{ pr.repo_full_name }}" target="_blank" rel="noopener" class="pr-repo">{{ pr.repo_full_name }}</a>
@@ -72,7 +60,7 @@
                 {% endif %}
                 {% if pr.ci_status.total_count > 0 %}
                     <span class="pr-ci-count">CI: {{ pr.ci_status.passed_count }}/{{ pr.ci_status.total_count }}</span>
-                    {% plugin_slot 'pr_card.meta' pr=pr %}
+                    {% if not guest_mode %}{% plugin_slot 'pr_card.meta' pr=pr %}{% endif %}
                 {% endif %}
                 {% if pr.review_status.comment_count > 0 %}
                     <span class="pr-comments">&#128172; {{ pr.review_status.comment_count }}</span>
@@ -108,7 +96,7 @@
                 {% if pr.mergeable == 'CONFLICTING' %}
                     <span class="pr-conflicts">&#9888; Conflicts</span>
                 {% endif %}
-                {% plugin_slot 'pr_card.badges' pr=pr %}
+                {% if not guest_mode %}{% plugin_slot 'pr_card.badges' pr=pr %}{% endif %}
                 {% if pr.linked_issues or pr.branch_name %}
                     <span class="pr-branch-group">
                         {% if pr.linked_issues %}
