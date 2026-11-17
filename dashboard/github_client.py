@@ -176,7 +176,7 @@ PR_ACTIVITY_FIELDS = '''
                 }
             }
         }
-        ... on Commit { author { user { login } } }
+        ... on PullRequestCommit { commit { author { user { login } } } }
         ... on AssignedEvent { actor { login } }
         ... on BaseRefChangedEvent { actor { login } }
         ... on BaseRefForcePushedEvent { actor { login } }
@@ -1129,8 +1129,8 @@ class GitHubClient:
                     return True
                 continue
 
-            if item_type == 'Commit':
-                actor = (item.get('author') or {}).get('user')
+            if item_type == 'PullRequestCommit':
+                actor = ((item.get('commit') or {}).get('author') or {}).get('user')
             else:
                 actor = item.get('editor') or item.get('author') or item.get('actor')
             if GitHubClient._activity_actor_is_other(actor, username):
