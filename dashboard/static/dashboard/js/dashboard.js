@@ -46,6 +46,12 @@ function updatePrReadState(card, action) {
     });
 }
 
+function markPrCardRead(card) {
+    if (card && card.classList.contains('pr-card-unread')) {
+        updatePrReadState(card, 'read');
+    }
+}
+
 document.addEventListener('click', function(event) {
     const toggle = event.target.closest('.pr-unread-toggle');
     if (toggle) {
@@ -53,9 +59,13 @@ document.addEventListener('click', function(event) {
         return;
     }
 
-    const card = event.target.closest('.pr-card');
-    if (card && card.classList.contains('pr-card-unread')) {
-        updatePrReadState(card, 'read');
+    markPrCardRead(event.target.closest('.pr-card'));
+});
+
+// Middle-clicking a link fires auxclick instead of click.
+document.addEventListener('auxclick', function(event) {
+    if (event.button === 1 && event.target.closest('.pr-card a')) {
+        markPrCardRead(event.target.closest('.pr-card'));
     }
 });
 
