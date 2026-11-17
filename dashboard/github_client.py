@@ -520,7 +520,8 @@ class GitHubClient:
         elif status_code:
             self._add_warning(f"GitHub returned HTTP {status_code}", repo_name)
         else:
-            self._add_error("Failed to fetch PRs", repo_name)
+            detail = ': '.join(part for part in (error_type, message[:200]) if part)
+            self._add_error(f"{operation} failed", repo_name if "/" in repo_name else "", detail)
 
     def _rate_limit_cooldown_key(self) -> str:
         return f"github_graphql_rate_limit_cooldown:{self.user.id}"
