@@ -236,6 +236,7 @@ class UserPreferences(models.Model):
     pr_list_page_size = models.PositiveIntegerField(
         default=25, choices=PR_LIST_PAGE_SIZE_CHOICES
     )
+    highlight_unread_prs = models.BooleanField(default=True)
     # Plugin PR list page tab id -> {'enabled': bool, 'interval': minutes}
     plugin_auto_refresh = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

@@ -45,8 +45,6 @@ PR_GRAPHQL_FIELDS = '''
     }
     createdAt
     updatedAt
-    editor { login }
-    lastEditedAt
     mergedAt
     isDraft
     additions
@@ -263,8 +261,6 @@ class PullRequestInfo:
     is_queued: bool = False
     linked_issues: list[LinkedIssue] = None
     last_commit_at: Optional[datetime] = None
-    last_edited_by: Optional[str] = None
-    last_edited_at: Optional[datetime] = None
     # plugin_id -> JSON data from the pr_list.process hook of that plugin
     plugin_annotations: dict[str, Any] = field(default_factory=dict)
 
@@ -1062,6 +1058,8 @@ class GitHubClient:
                 ''')
             fields.append(f'''
                 {pr_alias}: pullRequest(number: {pr.number}) {{
+                    editor {{ login }}
+                    lastEditedAt
                     {' '.join(queries)}
                 }}
             ''')
@@ -1204,12 +1202,13 @@ class GitHubClient:
                     repo_alias, pr_alias = aliases[key]
                     pr_data = (response_data.get(repo_alias) or {}).get(pr_alias) or {}
                     connection = pr_data.get('timelineItems')
+                    editor = pr_data.get('editor') or {}
                     if connection and self._activity_has_other_author(
                         connection,
                         entry['since'],
                         username,
-                        entry['pr'].last_edited_by,
-                        entry['pr'].last_edited_at,
+                        editor.get('login'),
+                        self._graphql_timestamp(pr_data.get('lastEditedAt')),
                     ):
                         unread.add(key)
                         continue
@@ -1294,8 +1293,6 @@ class GitHubClient:
                 for issue in pr_data.get('closingIssuesReferences', {}).get('nodes', [])
                 if issue
             ]
-            last_editor = pr_data.get('editor') or {}
-
             return PullRequestInfo(
                 number=pr_data['number'],
                 title=pr_data['title'],
@@ -1322,8 +1319,6 @@ class GitHubClient:
                 is_queued=is_queued,
                 linked_issues=linked_issues,
                 last_commit_at=last_commit_at,
-                last_edited_by=last_editor.get('login'),
-                last_edited_at=self._graphql_timestamp(pr_data.get('lastEditedAt')),
             )
         except Exception:
             return None

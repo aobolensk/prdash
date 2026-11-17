@@ -64,7 +64,7 @@ _pr_fetch_jobs_lock = threading.Lock()
 
 def _compute_pr_render_hash(
     prs, *, auto_refresh_enabled, auto_refresh_interval, current_username, page_number, stale_data, render_path,
-    unread_pr_keys, pr_fetch=None,
+    unread_tracking_enabled, unread_pr_keys, pr_fetch=None,
 ):
     """Hash the data that determines the rendered _pr_content.html output for a poll.
 
@@ -81,6 +81,7 @@ def _compute_pr_render_hash(
             'page_number': page_number,
             'stale_data': stale_data,
             'render_path': render_path,
+            'unread_tracking_enabled': unread_tracking_enabled,
             'unread_pr_keys': sorted(unread_pr_keys),
             'pr_fetch': pr_fetch and {
                 'snapshot': pr_fetch['snapshot'] and {
@@ -581,7 +582,11 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         count_cache_key = f"pr_count:{request.user.id}:{profile.id}:{cache_key_suffix}"
         cache.set(count_cache_key, len(prs), PR_COUNT_CACHE_TTL)
 
-    unread_pr_keys = _unread_pr_keys(request.user, prs, current_username, client)
+    unread_tracking_enabled = user_prefs.highlight_unread_prs
+    unread_pr_keys = (
+        _unread_pr_keys(request.user, prs, current_username, client)
+        if unread_tracking_enabled else set()
+    )
 
     page_obj = None
     page_size = user_prefs.pr_list_page_size
@@ -606,6 +611,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         page_number=page_obj.number if page_obj else None,
         stale_data=stale_data,
         render_path=request.get_full_path(),
+        unread_tracking_enabled=unread_tracking_enabled,
         unread_pr_keys=unread_pr_keys,
         pr_fetch=pr_fetch,
     )
@@ -619,6 +625,7 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
         'current_username': current_username,
         'filters': query.parameters,
         'has_active_filters': query.affects_count,
+        'unread_tracking_enabled': unread_tracking_enabled,
         'unread_pr_keys': unread_pr_keys,
         'errors': client.errors,
         'warnings': client.warnings,
@@ -668,6 +675,9 @@ def _pr_list_view(request, *, fetch_prs, active_tab, tab_changed,
 @login_required
 @require_POST
 def update_pr_read_state(request):
+    if not _get_user_preferences(request.user).highlight_unread_prs:
+        return HttpResponse(status=204)
+
     repo_full_name = request.POST.get('repo_full_name', '').strip()
     parts = repo_full_name.split('/')
     try:
@@ -1165,6 +1175,7 @@ def save_preferences(request):
 
     defaults = {
         'pr_list_page_size': parse_page_size(),
+        'highlight_unread_prs': request.POST.get('highlight_unread_prs') == 'on',
     }
     for category, _ in AUTO_REFRESH_CATEGORIES:
         defaults[f'auto_refresh_{category}'] = request.POST.get(f'auto_refresh_{category}') == 'on'

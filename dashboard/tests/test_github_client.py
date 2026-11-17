@@ -1098,8 +1098,6 @@ class GitHubClientPRUnreadTests(TestCase):
             draft=False,
             additions=1,
             deletions=1,
-            last_edited_by='me',
-            last_edited_at=now,
         )
 
     def _response(self, timeline_nodes, edits):

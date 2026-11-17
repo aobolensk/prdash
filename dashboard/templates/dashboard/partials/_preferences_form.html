@@ -31,6 +31,14 @@
             </select>
         </div>
 
+        <div class="form-group">
+            <label class="checkbox-label">
+                <input type="checkbox" name="highlight_unread_prs" {% if prefs.highlight_unread_prs %}checked{% endif %}>
+                <span>Highlight unread pull requests</span>
+            </label>
+            <p class="form-help">Disable this to skip the extra GitHub activity queries.</p>
+        </div>
+
         <button type="submit" class="btn btn-primary">Save Preferences</button>
     </form>
 </div>

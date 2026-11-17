@@ -2,7 +2,7 @@
 
 <article class="pr-card{% if pr|pr_read_key in unread_pr_keys %} pr-card-unread{% endif %}"
          data-search="{{ pr|pr_search_haystack }}" data-repo="{{ pr.repo_full_name }}" data-labels="{% for label in pr.labels %}{{ label.name }}{% if not forloop.last %}|{% endif %}{% endfor %}" data-author="{{ pr.author }}" data-status="{{ pr|pr_status_filters }}">
-    {% if not guest_mode %}
+    {% if not guest_mode and unread_tracking_enabled %}
     <form action="{% url 'dashboard:update_pr_read_state' %}" method="post" class="pr-read-state-form" hidden>
         {% csrf_token %}
         <input type="hidden" name="repo_full_name" value="{{ pr.repo_full_name }}">
