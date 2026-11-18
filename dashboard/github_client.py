@@ -1109,6 +1109,8 @@ class GitHubClient:
             return not (last_edited_at and last_edited_at > since and last_edited_by)
 
         for item in nodes:
+            if not item:
+                return True
             item_type = item.get('__typename')
             if item_type == 'PullRequestRevisionMarker':
                 continue
@@ -1122,7 +1124,7 @@ class GitHubClient:
                 comments = item.get('comments', {})
                 nodes = comments.get('nodes', [])
                 for comment in nodes:
-                    if comment_has_other_author(comment):
+                    if not comment or comment_has_other_author(comment):
                         return True
 
                 if comments.get('pageInfo', {}).get('hasPreviousPage'):
@@ -1221,7 +1223,7 @@ class GitHubClient:
                             unread.add(key)
                             continue
                         if any(
-                            self._activity_edit_is_other(edit, entry['since'], username)
+                            edit and self._activity_edit_is_other(edit, entry['since'], username)
                             for edit in edits.get('nodes', [])
                         ):
                             unread.add(key)

@@ -1173,6 +1173,18 @@ class GitHubClientPRUnreadTests(TestCase):
         self.assertIn('userContentEdits', mock_post_graphql.call_args.args[0])
 
     @patch.object(GitHubClient, '_post_graphql')
+    def test_inaccessible_activity_node_is_unread(self, mock_post_graphql):
+        key, entry = self._entry()
+        mock_post_graphql.return_value = self._response(
+            [{'__typename': 'AssignedEvent', 'actor': {'login': 'me'}}, None],
+            [],
+        )
+
+        unread = GitHubClient(user=None).pull_requests_with_other_activity([entry], 'me')
+
+        self.assertEqual(unread, {key})
+
+    @patch.object(GitHubClient, '_post_graphql')
     def test_activity_caused_only_by_user_stays_read(self, mock_post_graphql):
         key, entry = self._entry()
         mock_post_graphql.return_value = self._response(
