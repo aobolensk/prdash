@@ -14,23 +14,15 @@
             title="Mark pull request unread"></button>
     {% endif %}
     <div class="pr-card-header">
-        {% if pr.ci_status.total_count > 0 %}<a href="{{ pr.url }}/checks" target="_blank" rel="noopener"{% else %}<div{% endif %}
-            class="pr-ci-status pr-ci-{{ pr.ci_status.state }}"
-            title="CI Status: {{ pr.ci_status.state }}{% if pr.ci_status.pending_approval %}, approval required{% endif %}"
-            aria-label="CI Status: {{ pr.ci_status.state }}{% if pr.ci_status.pending_approval %}, approval required{% endif %}">
-            {% if pr.ci_status.state == 'success' %}
-                &#10003;
-            {% elif pr.ci_status.state == 'failure' or pr.ci_status.state == 'error' %}
-                &#10007;
-            {% elif pr.ci_status.state == 'pending' %}
-                &#8987;
-            {% else %}
-                &#8211;
-            {% endif %}
-            {% if pr.ci_status.pending_approval %}
-                <span class="pr-ci-approval" aria-hidden="true">&#128274;</span>
-            {% endif %}
-        {% if pr.ci_status.total_count > 0 %}</a>{% else %}</div>{% endif %}
+        {% if pr.ci_status.total_count > 0 %}
+        <a href="{{ pr.url }}/checks" target="_blank" rel="noopener" class="pr-ci-status pr-ci-{{ pr.ci_status.state }}" title="CI Status: {{ pr.ci_status.state }}{% if pr.ci_status.pending_approval %}, approval required{% endif %}" aria-label="CI Status: {{ pr.ci_status.state }}{% if pr.ci_status.pending_approval %}, approval required{% endif %}">
+            {% include 'dashboard/partials/_ci_status_icon.html' %}
+        </a>
+        {% else %}
+        <div class="pr-ci-status pr-ci-{{ pr.ci_status.state }}" title="CI Status: {{ pr.ci_status.state }}{% if pr.ci_status.pending_approval %}, approval required{% endif %}" aria-label="CI Status: {{ pr.ci_status.state }}{% if pr.ci_status.pending_approval %}, approval required{% endif %}">
+            {% include 'dashboard/partials/_ci_status_icon.html' %}
+        </div>
+        {% endif %}
         <div class="pr-info">
             <div class="pr-title-row">
                 <div class="pr-title-section">
@@ -77,14 +69,11 @@
                 {% if pr.review_status.comment_count > 0 %}
                     <span class="pr-comments">&#128172; {{ pr.review_status.comment_count }}</span>
                 {% endif %}
-                {% if pr.review_status.state == 'approved' %}
-                    {% if pr.review_status.review_decision == 'REVIEW_REQUIRED' %}
-                        <span class="pr-review pr-review-approved-partial" title="Approved by {{ pr.review_status.approvers|join:', ' }}">&#10003; Approved{% if pr.review_status.approval_count > 1 %} ({{ pr.review_status.approval_count }}){% endif %}</span>
-                    {% else %}
-                        <span class="pr-review pr-review-approved" title="Approved by {{ pr.review_status.approvers|join:', ' }}">&#10003; Approved{% if pr.review_status.approval_count > 1 %} ({{ pr.review_status.approval_count }}){% endif %}</span>
-                    {% endif %}
-                {% elif pr.review_status.state == 'changes_requested' %}
+                {% if pr.review_status.state == 'changes_requested' %}
                     <span class="pr-review pr-review-changes_requested">&#10007; Changes requested</span>
+                {% endif %}
+                {% if pr.review_status.approval_count > 0 %}
+                    <span class="pr-review {% if pr.review_status.state == 'approved' and pr.review_status.review_decision != 'REVIEW_REQUIRED' %}pr-review-approved{% else %}pr-review-approved-partial{% endif %}" title="Approved by {{ pr.review_status.approvers|join:', ' }}">&#10003; Approved{% if pr.review_status.approval_count > 1 %} ({{ pr.review_status.approval_count }}){% endif %}</span>
                 {% endif %}
                 {% if pr.draft %}
                     <span class="pr-draft">Draft</span>

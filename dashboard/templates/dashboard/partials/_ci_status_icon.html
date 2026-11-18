@@ -1,0 +1,12 @@
+{% if pr.ci_status.state == 'success' %}
+    &#10003;
+{% elif pr.ci_status.state == 'failure' or pr.ci_status.state == 'error' %}
+    &#10007;
+{% elif pr.ci_status.state == 'pending' %}
+    &#8987;
+{% else %}
+    &#8211;
+{% endif %}
+{% if pr.ci_status.pending_approval %}
+    <span class="pr-ci-approval" aria-hidden="true">&#128274;</span>
+{% endif %}
