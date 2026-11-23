@@ -213,9 +213,10 @@ function prCardMatches(tokens, card, haystack, excludeTokens) {
 // matching (lowercased) and display parts for the "no results" message.
 function prFieldTokens(field) {
     if (!field) return { tokens: [], displayParts: [] };
-    const tokens = field.pills.map(p => ({ kind: p.kind, value: p.value.toLowerCase() }));
-    const displayParts = field.pills.map(p => p.value);
-    const freeText = field.inputEl.value.trim();
+    const pills = prFieldPills(field);
+    const tokens = pills.map(p => ({ kind: p.kind, value: p.value.toLowerCase() }));
+    const displayParts = pills.map(p => p.value);
+    const freeText = prFieldText(field).trim();
     if (freeText) {
         displayParts.push(freeText);
         freeText.toLowerCase().split(/\s+/).filter(Boolean).forEach(word => {
@@ -368,6 +369,8 @@ function prSuggestCandidates() {
 function prCreatePillElement(field, pill) {
     const el = document.createElement('span');
     el.className = 'pr-search-pill' + (field.isExclude ? ' pr-search-pill-exclude' : '');
+    el.contentEditable = 'false';
+    el.prPill = pill;
     const typeEl = document.createElement('span');
     typeEl.className = 'pr-search-pill-type';
     typeEl.textContent = pill.kind;
@@ -380,8 +383,9 @@ function prCreatePillElement(field, pill) {
     removeBtn.textContent = '×';
     removeBtn.addEventListener('click', function(evt) {
         evt.stopPropagation();
-        prRemovePill(field, pill);
+        const caret = prRemovePill(field, pill);
         field.inputEl.focus();
+        if (caret) prSetCaret(caret.node, caret.offset);
     });
     el.appendChild(typeEl);
     el.appendChild(valueEl);
@@ -389,24 +393,141 @@ function prCreatePillElement(field, pill) {
     return el;
 }
 
-function prAddPill(field, kind, value) {
+function prCreatePill(field, kind, value) {
     const pill = { kind: kind, value: value };
     pill.el = prCreatePillElement(field, pill);
-    field.pills.push(pill);
-    field.fieldEl.insertBefore(pill.el, field.inputEl);
-    prCommitUndoSnapshot(field);
-    applyPrSearch();
+    return pill;
+}
+
+// The search field is a contenteditable box: pills are atomic inline
+// elements and the free text lives in the text nodes around them. A
+// zero-width space keeps a caret position between and after pills.
+const PR_ZWSP = '\u200b';
+
+const PR_ZWSP_RE = new RegExp(PR_ZWSP, 'g');
+
+function prStripZwsp(text) {
+    return text.replace(PR_ZWSP_RE, '');
+}
+
+function prFieldPills(field) {
+    const pills = [];
+    field.inputEl.childNodes.forEach(function(node) {
+        if (node.prPill) pills.push(node.prPill);
+    });
+    return pills;
+}
+
+// Free text of the field, with pills acting as word separators.
+function prFieldText(field) {
+    let text = '';
+    field.inputEl.childNodes.forEach(function(node) {
+        text += node.prPill ? ' ' : (node.nodeType === Node.TEXT_NODE ? prStripZwsp(node.textContent) : '');
+    });
+    return text;
+}
+
+// Ordered sequence of text runs and pills, for exact undo and restore.
+function prFieldItems(field) {
+    const items = [];
+    field.inputEl.childNodes.forEach(function(node) {
+        if (node.prPill) {
+            items.push({ kind: node.prPill.kind, value: node.prPill.value });
+        } else if (node.nodeType === Node.TEXT_NODE) {
+            const text = prStripZwsp(node.textContent);
+            if (!text) return;
+            const last = items[items.length - 1];
+            if (last && typeof last.text === 'string') last.text += text; else items.push({ text: text });
+        }
+    });
+    return items;
+}
+
+function prNormalizeEditor(field) {
+    const editor = field.inputEl;
+    if (!prFieldPills(field).length && !prStripZwsp(editor.textContent)) editor.replaceChildren();
+    Array.from(editor.childNodes).forEach(function(node) {
+        if (node.nodeType !== Node.TEXT_NODE && !node.prPill) node.remove();
+    });
+    Array.from(editor.childNodes).forEach(function(node) {
+        const prev = node.previousSibling;
+        if (node.prPill && (!prev || prev.nodeType !== Node.TEXT_NODE)) {
+            editor.insertBefore(document.createTextNode(PR_ZWSP), node);
+        }
+    });
+    if (editor.lastChild && editor.lastChild.prPill) {
+        editor.appendChild(document.createTextNode(PR_ZWSP));
+    }
+    editor.classList.toggle('is-empty', !editor.firstChild);
+}
+
+function prSelectRange(range) {
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+}
+
+function prSetCaret(node, offset) {
+    const range = document.createRange();
+    range.setStart(node, offset);
+    range.collapse(true);
+    prSelectRange(range);
+}
+
+// Collapsed caret inside one of the field text nodes, or null.
+function prCaret(field) {
+    const sel = window.getSelection();
+    if (!sel.rangeCount || !sel.isCollapsed || !field.inputEl.contains(sel.anchorNode)) return null;
+    let node = sel.anchorNode;
+    let offset = sel.anchorOffset;
+    if (node === field.inputEl) {
+        const next = node.childNodes[offset];
+        const prev = node.childNodes[offset - 1];
+        if (next && next.nodeType === Node.TEXT_NODE) return { node: next, offset: 0 };
+        if (prev && prev.nodeType === Node.TEXT_NODE) return { node: prev, offset: prev.length };
+        return null;
+    }
+    return node.nodeType === Node.TEXT_NODE ? { node: node, offset: offset } : null;
+}
+
+// The pill directly before (dir < 0) or after (dir > 0) the caret, if no
+// visible text sits between them.
+function prAdjacentPill(caret, dir) {
+    const text = caret.node.textContent;
+    const between = dir < 0 ? text.slice(0, caret.offset) : text.slice(caret.offset);
+    if (prStripZwsp(between)) return null;
+    const sibling = dir < 0 ? caret.node.previousSibling : caret.node.nextSibling;
+    return sibling && sibling.prPill ? sibling : null;
+}
+
+function prLeadingZwsp(text) {
+    let n = 0;
+    while (text[n] === PR_ZWSP) n++;
+    return n;
 }
 
 // Removes the whole pill as one unit rather than character by character,
-// whether triggered by its "x" button or by Backspace at an empty input.
+// merges the text around it, and returns the caret position at the join.
 function prRemovePill(field, pill) {
-    const idx = field.pills.indexOf(pill);
-    if (idx === -1) return;
-    field.pills.splice(idx, 1);
-    pill.el.remove();
+    const el = pill.el;
+    if (!el.parentNode) return null;
+    const prev = el.previousSibling;
+    const next = el.nextSibling;
+    el.remove();
+    let caret = null;
+    if (prev && next && prev.nodeType === Node.TEXT_NODE && next.nodeType === Node.TEXT_NODE) {
+        caret = { node: prev, offset: prev.length };
+        prev.appendData(next.data);
+        next.remove();
+    } else if (prev && prev.nodeType === Node.TEXT_NODE) {
+        caret = { node: prev, offset: prev.length };
+    } else if (next && next.nodeType === Node.TEXT_NODE) {
+        caret = { node: next, offset: 0 };
+    }
+    prNormalizeEditor(field);
     prCommitUndoSnapshot(field);
     applyPrSearch();
+    return caret;
 }
 
 // Owned undo/redo: native undo only tracks the input's text, not the pills.
@@ -452,37 +573,51 @@ function prRedoField(field) {
 
 function prSearchFieldState(field) {
     return {
-        text: field ? field.inputEl.value : '',
-        pills: field ? field.pills.map(function(pill) {
+        text: field ? prFieldText(field).trim() : '',
+        pills: field ? prFieldPills(field).map(function(pill) {
             return { kind: pill.kind, value: pill.value };
-        }) : []
+        }) : [],
+        items: field ? prFieldItems(field) : []
     };
+}
+
+function prValidPillItem(field, item) {
+    if (!item || !['repo', 'label', 'author', 'status'].includes(item.kind) ||
+            typeof item.value !== 'string' || !item.value.trim() ||
+            (item.kind === 'status' && !PR_STATUS_FILTERS.includes(item.value.toLowerCase()))) {
+        return null;
+    }
+    const value = item.value.trim();
+    const duplicate = prFieldPills(field).some(function(existing) {
+        return existing.kind === item.kind && existing.value.toLowerCase() === value.toLowerCase();
+    });
+    return duplicate ? null : { kind: item.kind, value: value };
 }
 
 function prSetSearchFieldState(field, state) {
     if (!field || !state || typeof state !== 'object') return;
-    field.pills.slice().forEach(function(pill) { pill.el.remove(); });
-    field.pills = [];
-    field.inputEl.value = typeof state.text === 'string' ? state.text : '';
-    if (Array.isArray(state.pills)) {
-        state.pills.forEach(function(pill) {
-            if (!pill || !['repo', 'label', 'author', 'status'].includes(pill.kind) ||
-                    typeof pill.value !== 'string' || !pill.value.trim() ||
-                    (pill.kind === 'status' && !PR_STATUS_FILTERS.includes(pill.value.toLowerCase()))) {
-                return;
-            }
-            const value = pill.value.trim();
-            const duplicate = field.pills.some(function(existing) {
-                return existing.kind === pill.kind && existing.value.toLowerCase() === value.toLowerCase();
-            });
-            if (duplicate) return;
-            const savedPill = { kind: pill.kind, value: value };
-            savedPill.el = prCreatePillElement(field, savedPill);
-            field.pills.push(savedPill);
-            field.fieldEl.insertBefore(savedPill.el, field.inputEl);
-        });
+    const editor = field.inputEl;
+    editor.replaceChildren();
+    // Older states hold just the pills followed by free text.
+    let items = Array.isArray(state.items) ? state.items : null;
+    if (!items) {
+        items = (Array.isArray(state.pills) ? state.pills : []).slice();
+        if (typeof state.text === 'string' && state.text) items.push({ text: state.text });
     }
+    items.forEach(function(item) {
+        if (item && typeof item.text === 'string') {
+            if (item.text) editor.appendChild(document.createTextNode(item.text));
+            return;
+        }
+        const valid = prValidPillItem(field, item);
+        if (!valid) return;
+        editor.appendChild(prCreatePill(field, valid.kind, valid.value).el);
+    });
+    prNormalizeEditor(field);
     prHideSuggestions(field);
+    if (document.activeElement === editor && editor.lastChild) {
+        prSetCaret(editor.lastChild, editor.lastChild.length);
+    }
 }
 
 function prSearchGroupState(group) {
@@ -643,17 +778,19 @@ function prSuggestMatchDistance(wordLower, maxD, candidateLower) {
 }
 
 function prUpdateSuggestions(field) {
-    const word = prTrailingWord(field.inputEl.value);
+    const caret = prCaret(field);
+    const word = caret ? prTrailingWord(caret.node.textContent.slice(0, caret.offset)) : '';
     if (word.length < PR_SUGGEST_MIN_CHARS) {
         prHideSuggestions(field);
         return;
     }
     const wordLower = word.toLowerCase();
     const maxD = prMaxTypos(wordLower.length);
-    const taken = new Set(field.pills.map(p => p.kind + ':' + p.value.toLowerCase()));
+    const pills = prFieldPills(field);
+    const taken = new Set(pills.map(p => p.kind + ':' + p.value.toLowerCase()));
     const blockedKinds = field.isExclude ? new Set() : new Set(
         PR_SINGLETON_PILL_KINDS.filter(function(kind) {
-            return field.pills.some(function(p) { return p.kind === kind; });
+            return pills.some(function(p) { return p.kind === kind; });
         })
     );
     const matches = prSuggestCandidates()
@@ -678,8 +815,16 @@ function prUpdateSuggestions(field) {
 }
 
 function prCommitSuggestion(field, candidate) {
+    let caret = prCaret(field);
+    if (!caret) {
+        const last = field.inputEl.lastChild;
+        const node = last && last.nodeType === Node.TEXT_NODE ? last : field.inputEl.appendChild(document.createTextNode(''));
+        caret = { node: node, offset: node.length };
+    }
+    const node = caret.node;
+    const after = node.textContent.slice(caret.offset);
     // Drop the word currently being typed; it's replaced by the pill.
-    let text = field.inputEl.value.replace(/\S+$/, '');
+    let text = node.textContent.slice(0, caret.offset).replace(/\S+$/, '');
     const candidatePrefix = candidate.value.slice(0, candidate.value.lastIndexOf(' ')).toLowerCase();
     const trimmedText = text.trimEnd();
     const normalizedText = trimmedText.toLowerCase();
@@ -687,11 +832,19 @@ function prCommitSuggestion(field, candidate) {
             (normalizedText === candidatePrefix || normalizedText.endsWith(' ' + candidatePrefix))) {
         text = trimmedText.slice(0, -candidatePrefix.length);
     }
-    field.inputEl.value = text.replace(/\s+$/, '');
-    prAddPill(field, candidate.kind, candidate.value);
+    node.textContent = text.replace(/\s+$/, '');
+    const pill = prCreatePill(field, candidate.kind, candidate.value);
+    const afterNode = document.createTextNode(after || PR_ZWSP);
+    node.after(pill.el, afterNode);
+    prNormalizeEditor(field);
     prHideSuggestions(field);
     field.inputEl.focus();
+    prSetCaret(afterNode, prLeadingZwsp(afterNode.data));
+    prCommitUndoSnapshot(field);
+    applyPrSearch();
 }
+
+const PR_PILL_KEY_DIRECTION = { Backspace: -1, ArrowLeft: -1, Delete: 1, ArrowRight: 1 };
 
 function prHandleFieldKeydown(field, evt) {
     const suggestOpen = field.suggestions.length > 0 && !field.suggestEl.hidden;
@@ -733,35 +886,87 @@ function prHandleFieldKeydown(field, evt) {
             return;
         }
     }
-    // Backspace on an empty input removes the trailing pill as a whole,
-    // rather than requiring the pill to be broken apart first.
-    if (evt.key === 'Backspace' && field.inputEl.value === '' && field.pills.length) {
+    if (evt.key === 'Enter') {
         evt.preventDefault();
-        prRemovePill(field, field.pills[field.pills.length - 1]);
+        return;
     }
+    // Pills are atomic: Backspace/Delete remove the adjacent one and arrows
+    // step over it, so the caret can sit anywhere between pills and text.
+    if (evt.shiftKey || evt.ctrlKey || evt.metaKey || evt.altKey) return;
+    const dir = PR_PILL_KEY_DIRECTION[evt.key];
+    const caret = dir ? prCaret(field) : null;
+    const pillEl = caret ? prAdjacentPill(caret, dir) : null;
+    if (!pillEl) return;
+    evt.preventDefault();
+    if (evt.key === 'Backspace' || evt.key === 'Delete') {
+        const joined = prRemovePill(field, pillEl.prPill);
+        if (joined) prSetCaret(joined.node, joined.offset);
+        return;
+    }
+    prHideSuggestions(field);
+    if (dir < 0) {
+        prSetCaret(pillEl.previousSibling, pillEl.previousSibling.length);
+    } else {
+        prSetCaret(pillEl.nextSibling, prLeadingZwsp(pillEl.nextSibling.data));
+    }
+}
+
+// Turns the plain <input> into the contenteditable box used for the field.
+function prCreateEditor(inputEl) {
+    const editor = document.createElement('div');
+    editor.id = inputEl.id;
+    editor.className = inputEl.className + ' pr-search-editor is-empty';
+    editor.contentEditable = 'true';
+    editor.setAttribute('role', 'textbox');
+    editor.setAttribute('aria-label', inputEl.getAttribute('aria-label') || '');
+    editor.dataset.placeholder = inputEl.placeholder;
+    editor.spellcheck = false;
+    inputEl.replaceWith(editor);
+    return editor;
+}
+
+function prFocusEditor(field, selectAll) {
+    const editor = field.inputEl;
+    editor.focus();
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    if (!selectAll || prFieldPills(field).length) range.collapse(false);
+    prSelectRange(range);
 }
 
 function initPillField(fieldEl, inputEl, suggestEl, isExclude) {
     if (!fieldEl || !inputEl || !suggestEl) return null;
     const field = {
         fieldEl: fieldEl,
-        inputEl: inputEl,
+        inputEl: prCreateEditor(inputEl),
         suggestEl: suggestEl,
         isExclude: !!isExclude,
-        pills: [],
         suggestions: [],
         activeIndex: -1,
         undoStack: [],
         redoStack: [],
         undoTimer: null
     };
+    const editor = field.inputEl;
     prCommitUndoSnapshot(field);
-    inputEl.addEventListener('input', function() {
+    editor.addEventListener('input', function() {
+        prNormalizeEditor(field);
         prUpdateSuggestions(field);
         prScheduleUndoSnapshot(field);
         applyPrSearch();
     });
-    inputEl.addEventListener('keydown', function(evt) {
+    editor.addEventListener('beforeinput', function(evt) {
+        if (evt.inputType.startsWith('format') || evt.inputType === 'insertParagraph' ||
+                evt.inputType === 'insertLineBreak') {
+            evt.preventDefault();
+        }
+    });
+    editor.addEventListener('paste', function(evt) {
+        evt.preventDefault();
+        const text = (evt.clipboardData.getData('text/plain') || '').replace(/\s+/g, ' ');
+        if (text) document.execCommand('insertText', false, text);
+    });
+    editor.addEventListener('keydown', function(evt) {
         prHandleFieldKeydown(field, evt);
     });
     return field;
@@ -853,8 +1058,8 @@ function togglePrSearch(forceOpen) {
         toggle.setAttribute('aria-expanded', String(open));
     }
     if (open) {
-        input.focus();
-        input.select();
+        const field = prSearchGroups.length ? prSearchGroups[0].include : null;
+        if (field) prFocusEditor(field, true); else input.focus();
     } else {
         prSearchGroups.forEach(function(group) {
             prHideSuggestions(group.include);
@@ -1283,7 +1488,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (addOrBtn) {
         addOrBtn.addEventListener('click', function() {
             const group = prAddSearchGroup();
-            if (group) group.include.inputEl.focus();
+            if (group) prFocusEditor(group.include, false);
         });
     }
     window.prdash = window.prdash || {};
