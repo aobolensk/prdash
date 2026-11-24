@@ -1271,8 +1271,97 @@ function sameOriginReferrer() {
     return referrer.origin === window.location.origin ? referrer : null;
 }
 
+function pluginDependenciesAreResolved(pluginInputs, pluginId, seen = new Set()) {
+    if (seen.has(pluginId)) return false;
+    seen.add(pluginId);
+
+    const pluginInput = pluginInputs.get(pluginId);
+    if (!pluginInput) return false;
+    const pluginGroup = pluginInput.closest('.form-group');
+    return Array.from(pluginGroup.querySelectorAll('.plugin-requirement')).every(function(requirement) {
+        const dependencyId = requirement.dataset.requirementId;
+        const dependencyInput = pluginInputs.get(dependencyId);
+        if (!dependencyInput || !dependencyInput.checked || requirement.dataset.versionProblem) return false;
+
+        if (['disabled', 'permissions not approved'].includes(requirement.dataset.problem)) return true;
+        if (!requirement.dataset.problem) return true;
+        if (requirement.dataset.problem !== 'failed to load' || requirement.dataset.dependencyFailure !== 'true') {
+            return false;
+        }
+
+        return pluginDependenciesAreResolved(
+            pluginInputs,
+            dependencyId,
+            new Set(seen)
+        );
+    });
+}
+
+function updatePluginDependencyWarnings(form) {
+    if (!form) return;
+
+    const pluginInputs = new Map(Array.from(form.querySelectorAll('.plugin-enable-checkbox'))
+        .map(input => [input.value, input]));
+    form.querySelectorAll('.plugin-requirement').forEach(function(warning) {
+        const pluginInput = warning.closest('.form-group').querySelector('.plugin-enable-checkbox');
+        const dependencyInput = pluginInputs.get(warning.dataset.requirementId);
+        const pluginName = warning.dataset.pluginName;
+        const name = warning.dataset.requirementName;
+        const problemDetail = warning.dataset.problemDetail;
+        const dependencyFailure = warning.dataset.dependencyFailure === 'true';
+        const requiredVersion = warning.dataset.requiredVersion;
+        const installedVersion = warning.dataset.installedVersion;
+        const blockers = [];
+        const dependencyFailureResolved = warning.dataset.problem === 'failed to load'
+            && dependencyFailure
+            && pluginDependenciesAreResolved(pluginInputs, warning.dataset.requirementId);
+
+        if (!dependencyInput) {
+            blockers.push(`Install ${name} to enable ${pluginName}.`);
+        } else if (
+            warning.dataset.problem === 'permissions not approved'
+            && !dependencyInput.checked
+        ) {
+            blockers.push(`Select ${name} to approve its permissions and enable ${pluginName}.`);
+        } else if (!dependencyInput.checked) {
+            blockers.push(`Select ${name} to enable ${pluginName}.`);
+        } else if (warning.dataset.problem === 'failed to load' && !dependencyFailureResolved) {
+            blockers.push(
+                `Required plugin ${name} failed to load`
+                + (problemDetail ? `: ${problemDetail}` : '.')
+            );
+        } else if (
+            warning.dataset.problem
+            && !['disabled', 'permissions not approved', 'failed to load'].includes(warning.dataset.problem)
+        ) {
+            blockers.push(`Required plugin ${name} is unavailable.`);
+        }
+
+        if (warning.dataset.versionProblem === 'version mismatch') {
+            blockers.push(
+                `Installed version ${installedVersion} does not meet required version ${requiredVersion}.`
+            );
+        } else if (warning.dataset.versionProblem) {
+            blockers.push(`The required version for ${name} is invalid.`);
+        }
+
+        warning.querySelector('.plugin-requirement-message').textContent = blockers.join(' ');
+        warning.querySelector('.plugin-requirement-version').textContent =
+            `Required version: ${requiredVersion || 'any version'}. `
+            + `Installed version: ${installedVersion || 'not installed'}.`;
+        warning.hidden = !pluginInput.checked || blockers.length === 0;
+    });
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     formatTimestampTitles();
+
+    document.querySelectorAll('.plugin-settings-form').forEach(updatePluginDependencyWarnings);
+    document.addEventListener('change', function(event) {
+        if (event.target.matches('.plugin-enable-checkbox')) {
+            updatePluginDependencyWarnings(event.target.form);
+        }
+    });
 
     document.addEventListener('click', function(event) {
         document.querySelectorAll('.profile-menu[open]').forEach(function(menu) {
@@ -1403,6 +1492,13 @@ document.addEventListener('DOMContentLoaded', function() {
             evt.detail.target.innerHTML = evt.detail.xhr.responseText;
         }
         formatTimestampTitles(evt.detail.target);
+        const pluginSettingsForm = evt.detail.target.matches
+            && evt.detail.target.matches('.plugin-settings-form')
+            ? evt.detail.target
+            : evt.detail.target.querySelector
+                ? evt.detail.target.querySelector('.plugin-settings-form')
+                : null;
+        updatePluginDependencyWarnings(pluginSettingsForm);
         const swappedLastUpdated = evt.detail.target.querySelector
             ? evt.detail.target.querySelector('.last-updated[data-updated]')
             : null;

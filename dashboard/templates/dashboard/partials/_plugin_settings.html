@@ -16,7 +16,7 @@
     <form hx-post="{% url 'dashboard:save_plugins' %}"
           hx-target="#plugin-settings-container"
           hx-swap="innerHTML"
-          class="preferences-form">
+          class="preferences-form plugin-settings-form">
         {% csrf_token %}
 
         {% if plugins %}
@@ -27,6 +27,7 @@
                     <input type="checkbox"
                            name="enabled_plugins"
                            value="{{ plugin.id }}"
+                           class="plugin-enable-checkbox"
                            {% if plugin.enabled and not plugin.needs_approval %}checked{% endif %}>
                     <span>{{ plugin.name }} <span class="settings-optional">v{{ plugin.version }}</span></span>
                 </label>
@@ -69,8 +70,36 @@
                 {% if plugin.needs_approval %}
                 <div class="alert alert-error">Disabled: its permissions changed or were not approved. Tick it and save to approve.</div>
                 {% endif %}
-                {% for requirement in plugin.unmet_requires %}
-                <div class="alert alert-error">Disabled: requires {{ requirement.name }} ({{ requirement.problem }}).</div>
+                {% for requirement in plugin.requires %}
+                <div class="plugin-requirement"
+                     data-plugin-name="{{ plugin.name }}"
+                     data-requirement-id="{{ requirement.id }}"
+                     data-requirement-name="{{ requirement.name }}"
+                     data-required-version="{{ requirement.version }}"
+                     data-installed-version="{{ requirement.installed_version }}"
+                     data-problem="{{ requirement.problem }}"
+                     data-problem-detail="{{ requirement.problem_detail }}"
+                     data-dependency-failure="{{ requirement.dependency_failure|yesno:'true,false' }}"
+                     data-version-problem="{{ requirement.version_problem }}"
+                     role="alert"
+                     {% if not plugin.enabled or not requirement.problem and not requirement.version_problem %}hidden{% endif %}>
+                    <svg class="plugin-requirement-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                    <span class="plugin-requirement-title">Cannot enable {{ plugin.name }}</span>
+                    <span class="plugin-requirement-message">
+                        {% if requirement.problem == 'not installed' %}Install {{ requirement.name }} to enable {{ plugin.name }}.
+                        {% elif requirement.problem == 'disabled' %}Select {{ requirement.name }} to enable {{ plugin.name }}.
+                        {% elif requirement.problem == 'permissions not approved' %}Select {{ requirement.name }} to approve its permissions and enable {{ plugin.name }}.
+                        {% elif requirement.problem == 'failed to load' %}Required plugin {{ requirement.name }} failed to load{% if requirement.problem_detail %}: {{ requirement.problem_detail }}{% else %}.{% endif %}
+                        {% endif %}
+                        {% if requirement.version_problem == 'version mismatch' %}Installed version {{ requirement.installed_version }} does not meet required version {{ requirement.version }}.
+                        {% elif requirement.version_problem %}The required version for {{ requirement.name }} is invalid.
+                        {% endif %}
+                    </span>
+                    <span class="plugin-requirement-version">
+                        Required version: {% if requirement.version %}{{ requirement.version }}{% else %}any version{% endif %}.
+                        Installed version: {% if requirement.installed_version %}{{ requirement.installed_version }}{% else %}not installed{% endif %}.
+                    </span>
+                </div>
                 {% endfor %}
                 {% if plugin.error %}
                 <div class="alert alert-error">Could not load: {{ plugin.error }}</div>

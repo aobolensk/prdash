@@ -97,9 +97,15 @@ my-plugin/
   "permissions": ["github.token"],
   "description": "Small example plugin.",
   "entrypoint": "my_prdash_plugin.plugin:plugin",
-  "python_path": "src"
+  "python_path": "src",
+  "dependencies": ["other-plugin"],
+  "dependency_versions": {"other-plugin": ">=1.2,<2"}
 }
 ```
+
+`dependency_versions` is optional. When present, keep each version specifier in
+sync with the matching `PluginDependency` in plugin metadata. Settings can then
+show the required and installed versions before the plugin is enabled.
 
 Add the directory containing `my-plugin/` to `PRDASH_PLUGIN_PATHS`. Restart Django,
 then enable Example under **Settings > Plugins**. Discovery reads only the JSON

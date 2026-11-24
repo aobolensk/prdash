@@ -113,7 +113,7 @@ class PluginDescriptor:
     def __init__(
         self, plugin_id, name, version, description, entrypoint, source,
         *, api_version=None, python_path=None, asset_root=None, load_error=None,
-        dependency_ids=(), permissions=None,
+        dependency_ids=(), dependency_versions=None, permissions=None,
     ):
         self.plugin_id = plugin_id
         self.name = name
@@ -127,6 +127,7 @@ class PluginDescriptor:
         self.load_error = load_error
         # From the manifest, so import paths exist before plugin code runs.
         self.dependency_ids = tuple(dependency_ids)
+        self.dependency_versions = dict(dependency_versions or {})
         # None until known: entry point plugins declare permissions only once loaded.
         self.permissions = None if permissions is None else tuple(permissions)
 
@@ -197,6 +198,7 @@ class PluginManager:
                             data['entrypoint'],
                         ),
                         dependency_ids=self._manifest_dependency_ids(data),
+                        dependency_versions=self._manifest_dependency_versions(data),
                         permissions=self._manifest_permissions(data),
                     )
                     self._add_descriptor(descriptor)
@@ -213,6 +215,26 @@ class PluginManager:
         ):
             raise ValueError('"dependencies" must be a list of plugin ids')
         return tuple(dependency_ids)
+
+    @staticmethod
+    def _manifest_dependency_versions(data):
+        dependency_versions = data.get('dependency_versions', {})
+        dependency_ids = data.get('dependencies', [])
+        if (
+            not isinstance(dependency_versions, dict)
+            or not all(
+                dependency_id in dependency_ids
+                and isinstance(version, str)
+                for dependency_id, version in dependency_versions.items()
+            )
+        ):
+            raise ValueError('"dependency_versions" must map dependency ids to version specifiers')
+        try:
+            for version in dependency_versions.values():
+                SpecifierSet(version)
+        except InvalidSpecifier as error:
+            raise ValueError(f'Invalid dependency version specifier: {error}') from error
+        return dependency_versions
 
     @staticmethod
     def _manifest_permissions(data):
@@ -655,6 +677,11 @@ class PluginManager:
                 descriptor.dependency_ids = tuple(
                     dependency.plugin_id for dependency in plugin_metadata.dependencies
                 )
+                descriptor.dependency_versions.update({
+                    dependency.plugin_id: dependency.version
+                    for dependency in plugin_metadata.dependencies
+                    if dependency.version
+                })
                 self._validate_dependencies(plugin_metadata, enabled_plugin_ids)
 
                 for dependency in plugin_metadata.dependencies:
@@ -699,6 +726,13 @@ class PluginManager:
                 f'Discovered version {descriptor.version!r} does not match '
                 f'plugin version {plugin_metadata.version!r}'
             )
+        for dependency in plugin_metadata.dependencies:
+            manifest_version = descriptor.dependency_versions.get(dependency.plugin_id)
+            if manifest_version is not None and manifest_version != dependency.version:
+                raise ValueError(
+                    f'Manifest dependency version for {dependency.plugin_id!r} does not match '
+                    'plugin metadata'
+                )
         if not self._api_compatible(plugin_metadata.api_version):
             raise RuntimeError(
                 f'Requires plugin API {plugin_metadata.api_version}, '
@@ -872,10 +906,15 @@ class PluginManager:
             )
             missing = self._missing_permissions(state, descriptor.plugin_id)
             requires = [
-                self._requirement_status(dependency_id, states, enabled_ids)
+                self._requirement_status(
+                    dependency_id,
+                    descriptor.dependency_versions.get(dependency_id, ''),
+                    states,
+                    enabled_ids,
+                )
                 for dependency_id in descriptor.dependency_ids
             ]
-            unmet = [item for item in requires if item['problem']]
+            unmet = [item for item in requires if item['problem'] or item['version_problem']]
             error = descriptor.load_error or activation_error
             if unmet and error == activation_error:
                 error = None
@@ -900,9 +939,21 @@ class PluginManager:
             })
         return statuses
 
-    def _requirement_status(self, dependency_id, states, enabled_ids):
+    def _requirement_status(self, dependency_id, version_specifier, states, enabled_ids):
         descriptor = self.descriptors.get(dependency_id)
         state = states.get(dependency_id)
+        installed_version = descriptor.version if descriptor else ''
+        version_problem = ''
+        problem_detail = ''
+        dependency_failure = False
+        if descriptor and version_specifier:
+            try:
+                matches = Version(installed_version) in SpecifierSet(version_specifier)
+            except (InvalidSpecifier, InvalidVersion):
+                version_problem = 'invalid version requirement'
+            else:
+                if not matches:
+                    version_problem = 'version mismatch'
         if descriptor is None:
             problem = 'not installed'
         elif not (state and state.enabled):
@@ -911,13 +962,71 @@ class PluginManager:
             problem = 'permissions not approved'
         elif descriptor.load_error or dependency_id not in self._workers:
             problem = 'failed to load'
+            problem_detail, dependency_failure = self._activation_problem_detail(
+                dependency_id, states, enabled_ids
+            )
         else:
             problem = ''
         return {
             'id': dependency_id,
             'name': descriptor.name if descriptor else dependency_id,
+            'version': version_specifier,
+            'installed_version': installed_version,
             'problem': problem,
+            'problem_detail': problem_detail,
+            'dependency_failure': dependency_failure,
+            'version_problem': version_problem,
         }
+
+    def _activation_problem_detail(self, plugin_id, states, enabled_ids, seen=None):
+        seen = set(seen or ())
+        if plugin_id in seen:
+            return 'A dependency cycle prevents it from loading.', False
+        seen.add(plugin_id)
+
+        descriptor = self.descriptors.get(plugin_id)
+        if descriptor and descriptor.load_error:
+            match = re.fullmatch(
+                r"Dependency '([^']+)' (.+) is required, but (.+) is installed",
+                descriptor.load_error,
+            )
+            if match:
+                dependency_id, required_version, installed_version = match.groups()
+                dependency = self.descriptors.get(dependency_id)
+                dependency_name = dependency.name if dependency else dependency_id
+                return (
+                    f'{dependency_name} version {installed_version} does not meet '
+                    f'required version {required_version}.',
+                    True,
+                )
+            return descriptor.load_error, False
+
+        error = self._activation_errors.get((frozenset(enabled_ids), plugin_id), '')
+        match = re.fullmatch(r"Dependency '([^']+)' must be enabled first", error)
+        if match:
+            dependency_id = match.group(1)
+            dependency = self.descriptors.get(dependency_id)
+            dependency_name = dependency.name if dependency else dependency_id
+            state = states.get(dependency_id)
+            if dependency is None:
+                return f'Install {dependency_name} first.', True
+            if state and state.enabled and dependency_id not in enabled_ids:
+                return f'Approve permissions for {dependency_name} first.', True
+            return f'Enable {dependency_name} first.', True
+
+        match = re.fullmatch(r"Dependency '([^']+)' could not be loaded", error)
+        if match:
+            dependency_id = match.group(1)
+            dependency = self.descriptors.get(dependency_id)
+            dependency_name = dependency.name if dependency else dependency_id
+            detail, dependency_failure = self._activation_problem_detail(
+                dependency_id, states, enabled_ids, seen
+            )
+            if detail:
+                return f'{dependency_name} could not load: {detail}', dependency_failure
+            return f'{dependency_name} could not load.', True
+
+        return error, False
 
     def get_user_config(self, user, plugin_id):
         try:
