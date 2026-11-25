@@ -21,8 +21,8 @@
         </div>
 
         <div class="form-group">
-            <label for="pr_list_page_size">PR list page size</label>
-            <p class="form-help">Number of pull requests to show per page.</p>
+            <label for="pr_list_page_size">List page size</label>
+            <p class="form-help">Number of pull requests or issues to show per page.</p>
             <select name="pr_list_page_size" id="pr_list_page_size" class="filter-select">
                 <option value="25" {% if prefs.pr_list_page_size == 25 %}selected{% endif %}>25</option>
                 <option value="50" {% if prefs.pr_list_page_size == 50 %}selected{% endif %}>50</option>

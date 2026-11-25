@@ -207,6 +207,7 @@ AUTO_REFRESH_CATEGORIES = [
     ('merged', 'Merged'),
     ('review_requests', 'Review Requests'),
     ('assigned', 'Assigned'),
+    ('issues', 'Assigned Issues'),
 ]
 
 PR_LIST_PAGE_SIZE_CHOICES = [
@@ -221,6 +222,7 @@ class UserPreferences(models.Model):
     auto_refresh_merged = models.BooleanField(default=False)
     auto_refresh_review_requests = models.BooleanField(default=False)
     auto_refresh_assigned = models.BooleanField(default=False)
+    auto_refresh_issues = models.BooleanField(default=False)
     auto_refresh_interval_open = models.PositiveIntegerField(
         default=5, choices=AUTO_REFRESH_INTERVAL_CHOICES
     )
@@ -231,6 +233,9 @@ class UserPreferences(models.Model):
         default=5, choices=AUTO_REFRESH_INTERVAL_CHOICES
     )
     auto_refresh_interval_assigned = models.PositiveIntegerField(
+        default=5, choices=AUTO_REFRESH_INTERVAL_CHOICES
+    )
+    auto_refresh_interval_issues = models.PositiveIntegerField(
         default=5, choices=AUTO_REFRESH_INTERVAL_CHOICES
     )
     pr_list_page_size = models.PositiveIntegerField(
@@ -253,6 +258,7 @@ class UserPreferences(models.Model):
         'merged': 'merged',
         'review_requests': 'review_requests',
         'assigned': 'assigned',
+        'issues': 'issues',
     }
 
     def _plugin_auto_refresh_for_tab(self, tab):

@@ -1,6 +1,6 @@
 # prdash
 
-A personal dashboard for tracking GitHub pull requests.
+A personal dashboard for tracking GitHub pull requests and assigned issues.
 
 ## Setup
 

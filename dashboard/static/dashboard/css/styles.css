@@ -1006,6 +1006,36 @@ a:hover {
     padding: 10px 16px;
 }
 
+.issue-card {
+    position: relative;
+    background-color: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 10px 16px;
+}
+
+.issue-state {
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.issue-state-open {
+    color: var(--color-success);
+}
+
+.issue-state-closed {
+    color: var(--color-primary);
+}
+
+.issue-milestone,
+.issue-assignees {
+    color: var(--color-text-secondary);
+}
+
 .pr-unread-toggle {
     position: absolute;
     top: 0;

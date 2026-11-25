@@ -1,0 +1,134 @@
+{% load dashboard_tags %}
+
+<div id="auto-refresh-container"
+     data-render-hash="{{ issue_render_hash }}"
+     hx-get="{{ current_url }}"
+     hx-include="#issue-page-input"
+     hx-trigger="{% if auto_refresh_enabled %}every {{ auto_refresh_interval }}s, {% endif %}manualRefresh from:body"
+     hx-target="#pr-content"
+     hx-swap="innerHTML"
+     hx-indicator="#refresh-spinner"
+     hx-sync="this:replace">
+
+<div class="content-header">
+    <h1>
+        {% if current_repo %}{{ current_repo.full_name }} - {% endif %}
+        {% if issue_state == 'closed' %}Closed Assigned Issues{% else %}Assigned Issues{% endif %}
+    </h1>
+    <div class="refresh-wrapper">
+        {% if not defer_content_url %}
+        <span class="last-updated" data-updated="{% now 'c' %}" title="Last updated {% now 'N j, Y, H:i:s' %}">just now</span>
+        {% endif %}
+        {% if auto_refresh_enabled %}
+        <span class="auto-refresh-indicator" title="Auto-refresh every {{ auto_refresh_interval_mins }} min">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+        </span>
+        {% endif %}
+        <span class="refresh-spinner htmx-indicator" id="refresh-spinner"></span>
+        <button type="button" class="btn btn-secondary btn-icon-square" id="pr-refresh-btn"
+                title="Refresh" aria-label="Refresh">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+        </button>
+    </div>
+</div>
+
+<div class="filter-toolbar">
+    <div class="tab-navigation">
+        <a href="{{ issue_open_url }}"
+           class="tab {% if issue_state == 'open' %}active{% endif %}"
+           hx-get="{{ issue_open_url }}"
+           hx-target="#pr-content"
+           hx-swap="innerHTML"
+           hx-push-url="true">
+            Open
+        </a>
+        <a href="{{ issue_closed_url }}"
+           class="tab {% if issue_state == 'closed' %}active{% endif %}"
+           hx-get="{{ issue_closed_url }}"
+           hx-target="#pr-content"
+           hx-swap="innerHTML"
+           hx-push-url="true">
+            Closed
+        </a>
+    </div>
+</div>
+
+{% if defer_content_url %}
+<div hx-get="{{ defer_content_url }}" hx-trigger="load" hx-target="#pr-content" hx-swap="innerHTML">
+    <div class="pr-loading" role="status">
+        <div class="loading-spinner"></div>
+        <span>Loading issues...</span>
+    </div>
+</div>
+{% elif issues %}
+    <div class="pr-list">
+        {% for issue in issues %}
+            {% include 'dashboard/partials/_issue_card.html' with issue=issue %}
+        {% endfor %}
+    </div>
+    {% if page_obj %}
+        {% if page_obj.paginator.num_pages > 1 %}
+        <form action="{{ current_url }}"
+              method="get"
+              class="pagination"
+              hx-get="{{ current_url }}"
+              hx-include="#issue-page-input"
+              hx-target="#pr-content"
+              hx-swap="innerHTML"
+              hx-push-url="true"
+              hx-indicator="#refresh-spinner">
+            {% if page_obj.has_previous %}
+            <a href="{{ current_url }}?page={{ page_obj.previous_page_number }}"
+               class="btn btn-secondary btn-small"
+               hx-get="{{ current_url }}?page={{ page_obj.previous_page_number }}"
+               hx-target="#pr-content"
+               hx-swap="innerHTML"
+               hx-push-url="true"
+               hx-indicator="#refresh-spinner">Previous</a>
+            {% else %}
+            <span class="btn btn-secondary btn-small btn-disabled">Previous</span>
+            {% endif %}
+
+            <span class="pagination-status">
+                <label for="issue-page-input">Page</label>
+                <input type="number"
+                       id="issue-page-input"
+                       name="page"
+                       value="{{ page_obj.number }}"
+                       min="1"
+                       max="{{ page_obj.paginator.num_pages }}"
+                       class="input pagination-page-input"
+                       aria-label="Issue page number"
+                       autocomplete="off"
+                       enterkeyhint="go"
+                       required>
+                <span>of {{ page_obj.paginator.num_pages }}</span>
+            </span>
+
+            {% if page_obj.has_next %}
+            <a href="{{ current_url }}?page={{ page_obj.next_page_number }}"
+               class="btn btn-secondary btn-small"
+               hx-get="{{ current_url }}?page={{ page_obj.next_page_number }}"
+               hx-target="#pr-content"
+               hx-swap="innerHTML"
+               hx-push-url="true"
+               hx-indicator="#refresh-spinner">Next</a>
+            {% else %}
+            <span class="btn btn-secondary btn-small btn-disabled">Next</span>
+            {% endif %}
+        </form>
+        {% else %}
+        <input type="hidden" id="issue-page-input" name="page" value="{{ page_obj.number }}">
+        {% endif %}
+    {% endif %}
+{% else %}
+    <div class="empty-state">
+        {% if has_issue_repositories %}
+            <p>No {% if issue_state == 'closed' %}closed{% else %}open{% endif %} assigned issues found.</p>
+        {% else %}
+            <p>Add a repository to start tracking assigned issues.</p>
+        {% endif %}
+    </div>
+{% endif %}
+
+</div>

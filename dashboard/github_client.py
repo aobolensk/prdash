@@ -234,6 +234,30 @@ class LinkedIssue:
 
 
 @dataclass(slots=True)
+class IssueInfo:
+    """Represents a GitHub issue assigned to the current user."""
+    number: int
+    title: str
+    url: str
+    repo_owner: str
+    repo_name: str
+    author: str
+    author_avatar: str
+    state: str
+    created_at: datetime
+    updated_at: datetime
+    labels: list[dict] = field(default_factory=list)
+    assignees: list[str] = field(default_factory=list)
+    comment_count: int = 0
+    milestone: str = ''
+    closed_at: Optional[datetime] = None
+
+    @property
+    def repo_full_name(self) -> str:
+        return f"{self.repo_owner}/{self.repo_name}"
+
+
+@dataclass(slots=True)
 class PullRequestInfo:
     """Represents a pull request with relevant information."""
     number: int
@@ -1638,6 +1662,134 @@ class GitHubClient:
             pass
 
         return pr_numbers
+
+    def _search_assigned_issues_for_repo(
+        self, owner: str, name: str, username: str, state: str
+    ) -> list[IssueInfo]:
+        """Search and parse assigned issues for one tracked repository."""
+        token = self._get_token()
+        if not token:
+            return []
+
+        repo_name = f'{owner}/{name}'
+        query = f'repo:{repo_name} is:issue is:{state} assignee:{username}'
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Accept': 'application/vnd.github+json',
+            'X-GitHub-Api-Version': GITHUB_API_VERSION,
+        }
+        issues = []
+        page = 1
+
+        try:
+            while True:
+                response = requests.get(
+                    'https://api.github.com/search/issues',
+                    params={
+                        'q': query,
+                        'sort': 'updated',
+                        'order': 'desc',
+                        'per_page': 100,
+                        'page': page,
+                    },
+                    headers=headers,
+                    timeout=30,
+                )
+
+                if response.status_code == 403 and 'rate limit' in response.text.lower():
+                    self._add_warning('Rate limit hit. Some issues may not be loaded.', repo_name)
+                    break
+                if response.status_code != 200:
+                    self._handle_api_error_from_response(response, owner, name)
+                    break
+
+                data = response.json()
+                items = data.get('items', []) if isinstance(data, dict) else []
+                if not isinstance(items, list):
+                    self._add_warning('GitHub returned an unreadable issue response.', repo_name)
+                    break
+
+                for item in items:
+                    if not isinstance(item, dict) or item.get('pull_request'):
+                        continue
+                    number = item.get('number')
+                    created_at = self._graphql_timestamp(item.get('created_at'))
+                    updated_at = self._graphql_timestamp(item.get('updated_at'))
+                    if not isinstance(number, int) or not created_at or not updated_at:
+                        continue
+
+                    user = item.get('user') if isinstance(item.get('user'), dict) else {}
+                    labels = item.get('labels') if isinstance(item.get('labels'), list) else []
+                    assignees = item.get('assignees') if isinstance(item.get('assignees'), list) else []
+                    milestone = item.get('milestone') if isinstance(item.get('milestone'), dict) else {}
+                    issues.append(IssueInfo(
+                        number=number,
+                        title=str(item.get('title') or ''),
+                        url=str(item.get('html_url') or f'https://github.com/{repo_name}/issues/{number}'),
+                        repo_owner=owner,
+                        repo_name=name,
+                        author=str(user.get('login') or 'Unknown'),
+                        author_avatar=str(user.get('avatar_url') or ''),
+                        state=str(item.get('state') or state),
+                        created_at=created_at,
+                        updated_at=updated_at,
+                        labels=[
+                            {
+                                'name': str(label.get('name') or ''),
+                                'color': label.get('color')
+                                if isinstance(label.get('color'), str)
+                                and len(label['color']) == 6
+                                and all(char in '0123456789abcdefABCDEF' for char in label['color'])
+                                else 'd0d7de',
+                            }
+                            for label in labels if isinstance(label, dict)
+                        ],
+                        assignees=[
+                            str(assignee.get('login'))
+                            for assignee in assignees
+                            if isinstance(assignee, dict) and assignee.get('login')
+                        ],
+                        comment_count=item.get('comments') if isinstance(item.get('comments'), int) else 0,
+                        milestone=str(milestone.get('title') or ''),
+                        closed_at=self._graphql_timestamp(item.get('closed_at')),
+                    ))
+
+                if len(items) < 100 or page >= 10:
+                    break
+                page += 1
+        except requests.exceptions.RequestException as error:
+            logger.warning('Issue search failed for %s: %s', repo_name, error)
+            self._add_warning('GitHub request failed. Some issues may not be loaded.', repo_name)
+        except (TypeError, ValueError) as error:
+            logger.warning('Issue response could not be parsed for %s: %s', repo_name, error)
+            self._add_warning('GitHub returned an unreadable issue response.', repo_name)
+
+        return issues
+
+    def get_assigned_issues(
+        self, repos: list[tuple[str, str]], state: str = 'open'
+    ) -> list[IssueInfo]:
+        """Get assigned issues in the requested state across tracked repositories."""
+        if state not in {'open', 'closed'}:
+            raise ValueError('Issue state must be open or closed')
+        if not repos or not self._get_token():
+            return []
+
+        username = self.get_username()
+        if not username:
+            return []
+
+        issues = []
+        with ThreadPoolExecutor(max_workers=min(10, len(repos))) as executor:
+            futures = [
+                executor.submit(self._search_assigned_issues_for_repo, owner, name, username, state)
+                for owner, name in repos
+            ]
+            for future in as_completed(futures):
+                issues.extend(future.result())
+
+        issues.sort(key=lambda issue: (issue.updated_at, issue.number), reverse=True)
+        return issues
 
     def _handle_api_error_from_response(
         self, response: requests.Response, owner: str, name: str

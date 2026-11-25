@@ -97,6 +97,21 @@ def _compute_pr_render_hash(
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
+def _compute_issue_render_hash(issues, *, auto_refresh_enabled, auto_refresh_interval, page_number, render_path):
+    payload = json.dumps(
+        {
+            'issues': [asdict(issue) for issue in issues],
+            'auto_refresh_enabled': auto_refresh_enabled,
+            'auto_refresh_interval': auto_refresh_interval,
+            'page_number': page_number,
+            'render_path': render_path,
+        },
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
 def _invalidate_pr_results_cache(user):
     """Bump the PR results cache generation so stale fallback data is no longer served."""
     key = f"pr_results_gen:{user.id}"
@@ -803,6 +818,140 @@ def assigned_list(request):
         active_tab='assigned',
         tab_changed='assigned',
     )
+
+
+def _issue_list_view(request, *, state, owner=None, repo=None):
+    """Render assigned GitHub issues for the active repository profile."""
+    profile = request.repository_profile
+    repos = TrackedRepository.objects.filter(user=request.user, profile=profile)
+    current_repo = None
+    if owner and repo:
+        current_repo = get_object_or_404(
+            repos, owner=owner, name=repo
+        )
+
+    state = state if state in {'open', 'closed'} else 'open'
+    state_label = 'Assigned Issues' if state == 'open' else 'Closed Assigned Issues'
+    page_title = f'{state_label} - {current_repo.full_name}' if current_repo else state_label
+    page_title = f'{page_title} - PR Dashboard'
+    user_prefs = _get_user_preferences(request.user)
+    open_url = reverse('dashboard:assigned_issues_list')
+    closed_url = reverse('dashboard:closed_assigned_issues_list')
+    if current_repo:
+        route_args = {'owner': current_repo.owner, 'repo': current_repo.name}
+        open_url = reverse('dashboard:repo_assigned_issues_list', kwargs=route_args)
+        closed_url = reverse('dashboard:repo_closed_assigned_issues_list', kwargs=route_args)
+
+    if request.headers.get('HX-Request') != 'true':
+        context = {
+            'repos': repos,
+            'current_repo': current_repo,
+            'active_tab': 'issues',
+            'issue_page': True,
+            'issue_state': state,
+            'issue_open_url': open_url,
+            'issue_closed_url': closed_url,
+            'has_issue_repositories': bool(current_repo or repos.filter(enabled=True).exists()),
+            'page_title': page_title,
+            'auto_refresh_enabled': user_prefs.is_auto_refresh_enabled_for_tab('issues'),
+            'auto_refresh_interval': user_prefs.get_auto_refresh_interval_seconds_for_tab('issues'),
+            'auto_refresh_interval_mins': user_prefs.get_auto_refresh_interval_for_tab('issues'),
+            'pr_counts': _cached_pr_counts(request.user, profile),
+            'plugin_pages': plugin_manager.pr_list_pages(request.user, request),
+            'current_url': request.path,
+            'defer_content_url': request.get_full_path(),
+        }
+        response = render(request, 'dashboard/pr_list.html', context)
+        add_never_cache_headers(response)
+        patch_vary_headers(response, ['HX-Request'])
+        return response
+
+    client = GitHubClient(request.user)
+    repo_tuples = (
+        [(current_repo.owner, current_repo.name)]
+        if current_repo else list(repos.filter(enabled=True).values_list('owner', 'name'))
+    )
+    issues = client.get_assigned_issues(repo_tuples, state=state)
+    page_size = user_prefs.pr_list_page_size
+    page_obj = None
+    if page_size:
+        paginator = Paginator(issues, page_size)
+        try:
+            page_number = int(request.GET.get('page', 1))
+        except (ValueError, TypeError):
+            page_number = 1
+        page_number = max(1, min(page_number, paginator.num_pages))
+        page_obj = paginator.page(page_number)
+        issues = page_obj.object_list
+
+    render_hash = _compute_issue_render_hash(
+        issues,
+        auto_refresh_enabled=user_prefs.is_auto_refresh_enabled_for_tab('issues'),
+        auto_refresh_interval=user_prefs.get_auto_refresh_interval_seconds_for_tab('issues'),
+        page_number=page_obj.number if page_obj else None,
+        render_path=request.get_full_path(),
+    )
+    context = {
+        'issues': issues,
+        'repos': repos,
+        'current_repo': current_repo,
+        'active_tab': 'issues',
+        'issue_page': True,
+        'issue_state': state,
+        'issue_open_url': open_url,
+        'issue_closed_url': closed_url,
+        'has_issue_repositories': bool(repo_tuples),
+        'current_url': request.path,
+        'errors': client.errors,
+        'warnings': client.warnings,
+        'auto_refresh_enabled': user_prefs.is_auto_refresh_enabled_for_tab('issues'),
+        'auto_refresh_interval': user_prefs.get_auto_refresh_interval_seconds_for_tab('issues'),
+        'auto_refresh_interval_mins': user_prefs.get_auto_refresh_interval_for_tab('issues'),
+        'page_obj': page_obj,
+        'page_title': page_title,
+        'issue_render_hash': render_hash,
+        'defer_content_url': '',
+    }
+
+    triggers = {
+        'tabChanged': 'issues',
+        'issueStateChanged': state,
+        'pageTitle': page_title,
+        'repoChanged': current_repo.full_name if current_repo else '',
+        'refreshedAt': timezone.now().isoformat(),
+    }
+    triggers.update(client.get_notification_triggers())
+    is_auto_refresh_poll = request.headers.get('HX-Trigger') == 'auto-refresh-container'
+    if is_auto_refresh_poll and request.headers.get('X-PR-Render-Hash') == render_hash:
+        response = HttpResponse(status=204)
+        response['HX-Reswap'] = 'none'
+        response['HX-Trigger'] = json.dumps(triggers)
+        return response
+
+    response = render(request, 'dashboard/partials/_issue_content.html', context)
+    patch_vary_headers(response, ['HX-Request'])
+    response['HX-Trigger'] = json.dumps(triggers)
+    return response
+
+
+@login_required
+def assigned_issues_list(request):
+    return _issue_list_view(request, state='open')
+
+
+@login_required
+def closed_assigned_issues_list(request):
+    return _issue_list_view(request, state='closed')
+
+
+@login_required
+def repo_assigned_issues_list(request, owner, repo):
+    return _issue_list_view(request, state='open', owner=owner, repo=repo)
+
+
+@login_required
+def repo_closed_assigned_issues_list(request, owner, repo):
+    return _issue_list_view(request, state='closed', owner=owner, repo=repo)
 
 
 @login_required

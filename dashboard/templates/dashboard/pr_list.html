@@ -12,7 +12,8 @@
 {% block content %}
 <div class="dashboard-layout"
      id="dashboard-layout"
-     data-current-tab="{% if active_tab == 'review_requests' %}review_requests{% elif active_tab == 'assigned' %}assigned{% elif active_tab == 'merged' %}merged{% elif active_tab == 'author' %}author_prs{% elif active_tab == 'author_merged' %}author_merged{% elif plugin_page %}{{ active_tab }}{% else %}my_prs{% endif %}"
+     data-current-tab="{% if active_tab == 'issues' %}issues{% elif active_tab == 'review_requests' %}review_requests{% elif active_tab == 'assigned' %}assigned{% elif active_tab == 'merged' %}merged{% elif active_tab == 'author' %}author_prs{% elif active_tab == 'author_merged' %}author_merged{% elif plugin_page %}{{ active_tab }}{% else %}my_prs{% endif %}"
+     data-current-issue-state="{{ issue_state|default:'open' }}"
      data-current-repo="{% if current_repo %}{{ current_repo.owner }}/{{ current_repo.name }}{% endif %}">
     <aside class="sidebar">
         <div class="sidebar-section">
@@ -60,6 +61,17 @@
                hx-push-url="true">
                 <svg class="sidebar-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
                 <span class="sidebar-label">Assigned <span class="sidebar-count" data-count="assigned"{% if pr_counts.assigned is None %} hidden{% endif %}>{{ pr_counts.assigned }}</span></span>
+            </a>
+            <a href="{% if current_repo %}{% url 'dashboard:repo_assigned_issues_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:assigned_issues_list' %}{% endif %}"
+               class="sidebar-link {% if active_tab == 'issues' %}active{% endif %}"
+               data-tab="issues"
+               data-url-all="{% url 'dashboard:assigned_issues_list' %}"
+               hx-get="{% if current_repo %}{% url 'dashboard:repo_assigned_issues_list' current_repo.owner current_repo.name %}{% else %}{% url 'dashboard:assigned_issues_list' %}{% endif %}"
+               hx-target="#pr-content"
+               hx-swap="innerHTML"
+               hx-push-url="true">
+                <svg class="sidebar-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="1"></circle><path d="M12 7v2"></path></svg>
+                <span class="sidebar-label">Assigned Issues</span>
             </a>
             {% for page in plugin_pages %}
             {% url 'dashboard:plugin_pr_list' page.plugin_id page.name as page_url %}
@@ -134,7 +146,11 @@
             </button>
         </div>
         <div id="pr-content">
-            {% include 'dashboard/partials/_pr_content.html' %}
+            {% if issue_page %}
+                {% include 'dashboard/partials/_issue_content.html' %}
+            {% else %}
+                {% include 'dashboard/partials/_pr_content.html' %}
+            {% endif %}
         </div>
     </section>
 </div>

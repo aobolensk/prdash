@@ -52,6 +52,13 @@ function markPrCardRead(card) {
     }
 }
 
+function repoTabUrl(repoLink, tab, dashboard) {
+    const key = tab === 'issues' && dashboard.dataset.currentIssueState === 'closed'
+        ? 'issues-closed'
+        : tab;
+    return repoLink.getAttribute('data-url-' + key);
+}
+
 document.addEventListener('click', function(event) {
     const toggle = event.target.closest('.pr-unread-toggle');
     if (toggle) {
@@ -1634,6 +1641,12 @@ document.addEventListener('DOMContentLoaded', function() {
         if (dashboard) {
             dashboard.dataset.currentTab = activeTab;
         }
+        if (activeTab === 'issues') {
+            const searchBar = document.getElementById('pr-search-bar');
+            const searchToggle = document.getElementById('pr-search-toggle');
+            if (searchBar) searchBar.hidden = true;
+            if (searchToggle) searchToggle.setAttribute('aria-expanded', 'false');
+        }
         // Map sub-tabs to their parent sidebar tabs
         let sidebarTab = activeTab;
         if (activeTab === 'merged') {
@@ -1670,6 +1683,13 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
+    document.body.addEventListener('issueStateChanged', function(evt) {
+        const dashboard = document.getElementById('dashboard-layout');
+        if (dashboard) {
+            dashboard.dataset.currentIssueState = evt.detail.value || evt.detail;
+        }
+    });
+
     document.body.addEventListener('repoToggled', function() {
         if (document.getElementById('pr-fetch-bar')) {
             // Only re-render a fetch-on-demand page, fetching stays an explicit request.
@@ -1699,7 +1719,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // Handle repo link clicks - use current tab's URL
         if (elt.classList.contains('repo-link') && elt.dataset.repo) {
             let currentTab = dashboard.dataset.currentTab || 'my_prs';
-            const url = elt.getAttribute('data-url-' + currentTab);
+            const url = repoTabUrl(elt, currentTab, dashboard);
             if (url) {
                 evt.detail.path = url;
             }
@@ -1727,7 +1747,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Different tab, keep repo filter
                 const repoLink = document.querySelector('.repo-link[data-repo="' + currentRepo + '"]');
                 if (repoLink) {
-                    const url = repoLink.getAttribute('data-url-' + clickedTab);
+                    const url = repoTabUrl(repoLink, clickedTab, dashboard);
                     if (url) {
                         evt.detail.path = url;
                     }
@@ -1744,7 +1764,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (elt.classList.contains('repo-link') && elt.dataset.repo) {
             let currentTab = dashboard.dataset.currentTab || 'my_prs';
-            const url = elt.getAttribute('data-url-' + currentTab);
+            const url = repoTabUrl(elt, currentTab, dashboard);
             if (url) {
                 elt.href = url;
             }
@@ -1770,7 +1790,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Different tab, keep repo filter
                 const repoLink = document.querySelector('.repo-link[data-repo="' + currentRepo + '"]');
                 if (repoLink) {
-                    const url = repoLink.getAttribute('data-url-' + clickedTab);
+                    const url = repoTabUrl(repoLink, clickedTab, dashboard);
                     if (url) {
                         elt.href = url;
                     }

@@ -29,6 +29,14 @@ urlpatterns = [
     path('prs/review-requests/reviewed/', views.review_reviewed_list, name='review_reviewed_list'),
     path('prs/review-requests/approved/', views.review_approved_list, name='review_approved_list'),
     path('prs/assigned/', views.assigned_list, name='assigned_list'),
+    path('issues/', views.assigned_issues_list, name='assigned_issues_list'),
+    path('issues/closed/', views.closed_assigned_issues_list, name='closed_assigned_issues_list'),
+    path('issues/<str:owner>/<str:repo>/', views.repo_assigned_issues_list, name='repo_assigned_issues_list'),
+    path(
+        'issues/<str:owner>/<str:repo>/closed/',
+        views.repo_closed_assigned_issues_list,
+        name='repo_closed_assigned_issues_list',
+    ),
     # GitHub owner names cannot contain underscores, so this never shadows a repo URL.
     path('prs/_plugins/<slug:plugin_id>/<slug:name>/', views.plugin_pr_list, name='plugin_pr_list'),
     path('prs/_plugins/<slug:plugin_id>/<slug:name>/fetch/', views.plugin_pr_list_fetch,

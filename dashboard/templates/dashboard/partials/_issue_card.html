@@ -1,0 +1,54 @@
+{% load dashboard_tags %}
+
+<article class="issue-card">
+    <div class="pr-card-header">
+        <div class="issue-state issue-state-{{ issue.state }}" title="{{ issue.state|capfirst }} issue">
+            {% if issue.state == 'closed' %}
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm3.28 5.78-4 4a.75.75 0 0 1-1.06 0l-1.5-1.5a.75.75 0 1 1 1.06-1.06l.97.97 3.47-3.47a.75.75 0 1 1 1.06 1.06Z"></path></svg>
+            {% else %}
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm0 1.5a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13Zm.75 2a.75.75 0 0 0-1.5 0V7.5H4.5a.75.75 0 0 0 0 1.5h3.25a1 1 0 0 0 1-1Z"></path></svg>
+            {% endif %}
+        </div>
+        <div class="pr-info">
+            <div class="pr-title-row">
+                <div class="pr-title-section">
+                    <a href="{{ issue.url }}" target="_blank" rel="noopener" class="pr-title">
+                        {{ issue.title }}
+                    </a>
+                    {% if issue.labels %}
+                        <div class="pr-labels-inline">
+                            {% for label in issue.labels %}
+                                <span class="pr-label" style="background-color: #{{ label.color }}; color: {% if label.color|is_light_color %}#000{% else %}#fff{% endif %};">
+                                    {{ label.name }}
+                                </span>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="pr-meta">
+                <a href="https://github.com/{{ issue.repo_full_name }}" target="_blank" rel="noopener" class="pr-repo">{{ issue.repo_full_name }}</a>
+                <span class="pr-number">#{{ issue.number }}</span>
+                <span class="pr-author">
+                    <a href="https://github.com/{{ issue.author }}" target="_blank" rel="noopener">
+                        {% if issue.author_avatar %}<img src="{{ issue.author_avatar }}" alt="{{ issue.author }}" class="pr-author-avatar" loading="lazy">{% endif %}{{ issue.author }}
+                    </a>
+                </span>
+                {% if issue.closed_at %}
+                    <span class="pr-time pr-merged" data-timestamp="{{ issue.closed_at|date:'c' }}" data-time-prefix="closed">closed {{ issue.closed_at|time_ago }}</span>
+                {% else %}
+                    <span class="pr-time" data-timestamp="{{ issue.updated_at|date:'c' }}" data-time-prefix="updated">updated {{ issue.updated_at|time_ago }}</span>
+                {% endif %}
+                {% if issue.comment_count %}
+                    <span class="pr-comments">{{ issue.comment_count }} comments</span>
+                {% endif %}
+                {% if issue.milestone %}
+                    <span class="issue-milestone">{{ issue.milestone }}</span>
+                {% endif %}
+                {% if issue.assignees %}
+                    <span class="issue-assignees">Assigned to {{ issue.assignees|join:', ' }}</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</article>
