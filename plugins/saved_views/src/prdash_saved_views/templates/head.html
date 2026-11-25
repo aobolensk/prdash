@@ -1,9 +1,9 @@
 <style>
 .saved-search-category { position: relative; }
-.saved-search-category-delete { position: absolute; top: 50%; right: 2px; padding: 2px 4px; color: var(--color-text-muted); background: var(--color-bg); border: 0; border-radius: 4px; cursor: pointer; opacity: 0; pointer-events: none; transform: translateY(-50%); transition: opacity 0.15s; }
+.saved-search-category-delete { position: absolute; top: 50%; right: 2px; padding: 2px 4px; color: var(--color-text-muted); background: var(--color-bg-secondary); border: 0; border-radius: var(--radius-small, 8px); cursor: pointer; opacity: 0; pointer-events: none; transform: translateY(-50%); transition: opacity 0.15s; }
 .saved-search-category:hover .saved-search-category-delete,
 .saved-search-category:focus-within .saved-search-category-delete { opacity: 1; pointer-events: auto; }
-.saved-search-category-delete:hover { color: var(--color-error, #dc3545); background: var(--color-bg-tertiary); }
+.saved-search-category-delete:hover { color: var(--color-danger); background: var(--color-bg-tertiary); }
 .filter-toolbar .saved-search-category-apply { padding-right: 30px; }
 .saved-search-category.dragging { opacity: 0.45; }
 .saved-search-category-form { display: flex; gap: 8px; }

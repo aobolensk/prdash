@@ -177,6 +177,17 @@ context plus `plugin_id` and `plugin_config`. The optional `context_provider`
 callback runs in the worker and receives `(request: RequestInfo, config)`. Public
 slots are listed in `prdash.plugin_api` and the dashboard templates.
 
+### Shared appearance
+
+Plugin UI runs inside the host design system. Use shared classes such as `btn`,
+`btn-primary`, `btn-secondary`, `input`, and `filter-select` for controls. Use
+theme variables such as `--color-bg`, `--color-bg-secondary`, `--color-text`,
+`--color-text-secondary`, `--color-border`, `--color-primary`,
+`--color-success`, `--color-warning`, and `--color-danger` for plugin styles.
+Use the matching `--color-*-soft` variables for tinted status backgrounds so
+they adapt to light and dark themes. Avoid fixed page colors for plugin panels
+and controls.
+
 The core fuzzy search exposes a browser API after the
 `prdash:pullRequestSearchReady` event:
 

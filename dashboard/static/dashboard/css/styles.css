@@ -15,6 +15,13 @@
     --color-warning: #9a6700;
     --color-link: #0969da;
     --color-shadow: rgba(31, 35, 40, 0.12);
+    --color-primary-soft: color-mix(in srgb, var(--color-primary) 10%, var(--color-bg));
+    --color-success-soft: color-mix(in srgb, var(--color-success) 10%, var(--color-bg));
+    --color-danger-soft: color-mix(in srgb, var(--color-danger) 10%, var(--color-bg));
+    --color-warning-soft: color-mix(in srgb, var(--color-warning) 11%, var(--color-bg));
+    --radius-small: 8px;
+    --radius-medium: 12px;
+    --radius-large: 16px;
     --header-bg: var(--color-bg-secondary);
     --header-text: var(--color-text);
 }
@@ -35,6 +42,10 @@
     --color-warning: #d29922;
     --color-link: #58a6ff;
     --color-shadow: rgba(0, 0, 0, 0.3);
+    --color-primary-soft: color-mix(in srgb, var(--color-primary) 17%, var(--color-bg));
+    --color-success-soft: color-mix(in srgb, var(--color-success) 15%, var(--color-bg));
+    --color-danger-soft: color-mix(in srgb, var(--color-danger) 15%, var(--color-bg));
+    --color-warning-soft: color-mix(in srgb, var(--color-warning) 16%, var(--color-bg));
 }
 
 /* Reset and base styles */

@@ -202,7 +202,7 @@ function initializeCharts() {
                         colors.primary,
                         colors.success,
                         colors.danger,
-                        '#8250df',
+                        colors.textSecondary,
                         '#bf8700',
                         '#0550ae',
                         '#1a7f37',

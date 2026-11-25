@@ -1,10 +1,9 @@
 <style>
-.github-pr-preview-diff { --github-diff-addition-bg: #dafbe1; --github-diff-addition-fg: #1a7f37; --github-diff-removal-bg: #ffebe9; --github-diff-removal-fg: #cf222e; --github-diff-hunk-bg: #ddf4ff; --github-diff-hunk-fg: #0969da; border-collapse: collapse; font-family: monospace; font-size: 12px; table-layout: fixed; width: 100%; }
-[data-theme="dark"] .github-pr-preview-diff { --github-diff-addition-bg: #2ea04326; --github-diff-addition-fg: #3fb950; --github-diff-removal-bg: #f8514926; --github-diff-removal-fg: #ff7b72; --github-diff-hunk-bg: #1f6feb26; --github-diff-hunk-fg: #58a6ff; }
-.github-pr-preview-dialog { border: 0; border-radius: 8px; box-shadow: 0 20px 60px #0008; max-width: min(1200px, 96vw); padding: 0; width: 100%; }
+.github-pr-preview-diff { --github-diff-addition-bg: var(--color-success-soft, #dafbe1); --github-diff-addition-fg: var(--color-success, #1a7f37); --github-diff-removal-bg: var(--color-danger-soft, #ffebe9); --github-diff-removal-fg: var(--color-danger, #cf222e); --github-diff-hunk-bg: var(--color-primary-soft, #ddf4ff); --github-diff-hunk-fg: var(--color-primary, #0969da); border-collapse: collapse; font-family: monospace; font-size: 12px; table-layout: fixed; width: 100%; }
+.github-pr-preview-dialog { border: 0; border-radius: var(--radius-medium, 12px); box-shadow: 0 20px 60px #0008; max-width: min(1200px, 96vw); padding: 0; width: 100%; }
 .github-pr-preview-dialog::backdrop { background: #0008; }
 .github-pr-preview-page { margin: 20px auto; max-width: 1600px; padding: 0 20px; }
-.github-pr-preview-shell { background: var(--color-bg, #fff); color: var(--color-text, #24292f); max-height: 90vh; overflow: auto; padding: 20px; }
+.github-pr-preview-shell { background: var(--color-bg-secondary, #fff); color: var(--color-text, #24292f); max-height: 90vh; overflow: auto; padding: 20px; }
 .github-pr-preview-close { float: right; margin-left: 12px; }
 .github-pr-preview-close svg { height: 16px; width: 16px; }
 .github-pr-preview-header { align-items: start; display: flex; gap: 16px; justify-content: space-between; margin: 0 0 16px; }
